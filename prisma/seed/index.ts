@@ -22,16 +22,11 @@ async function seedEntitiesAndSites() {
     entityRecords[e.name] = rec.id;
   }
 
-  // NOTE: neither source document lists an actual site register — these
-  // are illustrative sites drawn from incidental worked examples in the
-  // methodology/data map (e.g. "Reading depot", "Thames Technology —
-  // Slough site"). Treat as demo data; replace via the admin UI with the
-  // Group's real site list before production use.
+  // Real site register, confirmed by the Group: one site per entity.
   const sites: { entity: string; name: string; address?: string }[] = [
-    { entity: "Paragon ID", name: "Reading Office & Depot", address: "Reading, UK" },
-    { entity: "Paragon ID", name: "London Office", address: "London, UK" },
-    { entity: "RFID Discovery", name: "RFID Discovery — Main Site", address: "UK" },
-    { entity: "Thames Technology", name: "Slough Site", address: "Slough, UK" },
+    { entity: "Paragon ID", name: "Hull Site", address: "Hull, UK" },
+    { entity: "RFID Discovery", name: "Milton Keynes Site", address: "Milton Keynes, UK" },
+    { entity: "Thames Technology", name: "Rayleigh Site", address: "Rayleigh, UK" },
   ];
 
   const siteRecords: Record<string, string> = {};
