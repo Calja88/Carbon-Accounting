@@ -48,6 +48,16 @@ npm run dev                 # http://localhost:3000
 
 Other commands: `npm test` (Vitest), `npm run build`, `npm run lint`.
 
+`postinstall` runs `prisma generate` automatically after `npm install` — required so `@prisma/client` has typed models. If a build ever complains that `@prisma/client` "has no exported member", that step didn't run; re-check `package.json#scripts.postinstall`.
+
+### Deploying (e.g. Vercel)
+
+1. Provision a reachable Postgres instance (Vercel Postgres, Neon, Supabase, RDS, etc.) — Vercel does not provide one by default.
+2. Set environment variables in the project settings: `DATABASE_URL`, `NEXTAUTH_SECRET` (a real random value, not the dev placeholder), `NEXTAUTH_URL` (your deployed URL).
+3. Apply the schema to that database once, from a machine that can reach it: `npx prisma migrate deploy`.
+4. Seed it: `npm run db:seed` (or copy the four demo users' pattern to create real accounts, then remove/rotate the demo ones).
+5. Deploy. `npm run build` already runs `prisma generate` via `postinstall`; it does not itself need `DATABASE_URL` at build time, only at runtime.
+
 ### Demo accounts
 
 Seeded with password `ChangeMe123!` (change before any real use):
