@@ -1,0 +1,179 @@
+"use client";
+
+import { useActionState, useMemo, useState } from "react";
+import Link from "next/link";
+import { submitEntryAction, EntryFormState } from "./actions";
+import { resolvePrompt } from "@/lib/prompts";
+import { periodInputKindForFrequency, resolvePeriod } from "@/lib/period";
+import { FACTOR_OPTION_LABELS } from "@/lib/form-labels";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
+
+interface FactorOption {
+  id: string;
+  label: string;
+}
+
+interface DataPointForForm {
+  code: string;
+  dataPointName: string;
+  promptTemplate: string;
+  helpText: string | null;
+  sourceSystemHint: string | null;
+  unitOptions: string[];
+  frequency: string;
+  factorOptions: FactorOption[];
+}
+
+const initialState: EntryFormState = { error: null, success: false, flagged: false, flagReason: null };
+
+export function EntryForm({
+  site,
+  dataPoint,
+  initialPeriodValue,
+}: {
+  site: { id: string; name: string };
+  dataPoint: DataPointForForm;
+  initialPeriodValue: string;
+}) {
+  const [state, formAction, pending] = useActionState(submitEntryAction, initialState);
+  const [periodInput, setPeriodInput] = useState(initialPeriodValue);
+  const [unit, setUnit] = useState(dataPoint.unitOptions[0] ?? "");
+  const [factorOptionId, setFactorOptionId] = useState(dataPoint.factorOptions[0]?.id ?? "");
+
+  const periodKind = periodInputKindForFrequency(dataPoint.frequency);
+  const selectedOptionLabel = dataPoint.factorOptions.find((o) => o.id === factorOptionId)?.label;
+
+  const resolvedPrompt = useMemo(() => {
+    const { periodStart } = resolvePeriod(dataPoint.frequency, periodInput || initialPeriodValue);
+    return resolvePrompt(dataPoint.promptTemplate, {
+      siteName: site.name,
+      periodStart,
+      frequency: dataPoint.frequency,
+      optionLabel: selectedOptionLabel,
+    });
+  }, [dataPoint.frequency, dataPoint.promptTemplate, periodInput, initialPeriodValue, site.name, selectedOptionLabel]);
+
+  if (state.success) {
+    return (
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-6">
+        <h1 className="text-lg font-semibold text-emerald-900">Thanks — that&apos;s saved.</h1>
+        {state.flagged ? (
+          <p className="mt-2 text-sm text-amber-800">
+            This entry looks unusual and has been flagged for review before it&apos;s included in a report:{" "}
+            {state.flagReason}
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-emerald-800">The emissions figure has been calculated automatically.</p>
+        )}
+        <div className="mt-4 flex gap-3">
+          <Link href={`/entry/${site.id}`} className="text-sm font-medium text-emerald-700 hover:underline">
+            ← Back to {site.name}
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form action={formAction} className="max-w-xl space-y-5">
+      <input type="hidden" name="siteId" value={site.id} />
+      <input type="hidden" name="code" value={dataPoint.code} />
+
+      <div>
+        <h1 className="text-xl font-semibold text-slate-900">{resolvedPrompt}</h1>
+        {dataPoint.helpText && (
+          <details className="mt-2 text-sm text-slate-500">
+            <summary className="cursor-pointer select-none text-slate-600">Why are we asking this?</summary>
+            <p className="mt-1">{dataPoint.helpText}</p>
+          </details>
+        )}
+      </div>
+
+      <div>
+        <Label htmlFor="periodInput">Period</Label>
+        <Input
+          id="periodInput"
+          name="periodInput"
+          type={periodKind}
+          value={periodInput}
+          onChange={(e) => setPeriodInput(e.target.value)}
+          required
+          className="mt-1 max-w-xs"
+        />
+      </div>
+
+      {dataPoint.factorOptions.length > 0 && (
+        <div>
+          <Label htmlFor="factorOptionId">{FACTOR_OPTION_LABELS[dataPoint.code] ?? "Type"}</Label>
+          <Select
+            id="factorOptionId"
+            name="factorOptionId"
+            value={factorOptionId}
+            onChange={(e) => setFactorOptionId(e.target.value)}
+            required
+            className="mt-1 max-w-xs"
+          >
+            {dataPoint.factorOptions.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
+
+      <div className="flex gap-3">
+        <div className="flex-1 max-w-[160px]">
+          <Label htmlFor="rawValue">Amount</Label>
+          <Input id="rawValue" name="rawValue" type="number" step="any" min="0" required className="mt-1" />
+        </div>
+        <div className="flex-1 max-w-[160px]">
+          <Label htmlFor="rawUnit">Unit</Label>
+          {dataPoint.unitOptions.length > 1 ? (
+            <Select
+              id="rawUnit"
+              name="rawUnit"
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+              className="mt-1"
+            >
+              {dataPoint.unitOptions.map((u) => (
+                <option key={u} value={u}>
+                  {u}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <>
+              <Input value={dataPoint.unitOptions[0] ?? ""} disabled className="mt-1" />
+              <input type="hidden" name="rawUnit" value={dataPoint.unitOptions[0] ?? ""} />
+            </>
+          )}
+        </div>
+      </div>
+
+      {dataPoint.sourceSystemHint && (
+        <p className="text-xs text-slate-400">Typically found on: {dataPoint.sourceSystemHint}</p>
+      )}
+
+      <div>
+        <Label htmlFor="notes">Notes (optional)</Label>
+        <textarea
+          id="notes"
+          name="notes"
+          rows={2}
+          className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+        />
+      </div>
+
+      {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+
+      <Button type="submit" disabled={pending}>
+        {pending ? "Saving…" : "Save"}
+      </Button>
+    </form>
+  );
+}

@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: paragon
+      POSTGRES_PASSWORD: paragon
+      POSTGRES_DB: paragon_carbon
+    ports:
+      - "5432:5432"
+    volumes:
+      - paragon_db_data:/var/lib/postgresql/data
+
+volumes:
+  paragon_db_data:

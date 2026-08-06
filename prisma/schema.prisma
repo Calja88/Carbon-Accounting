@@ -1,0 +1,311 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  DATA_OWNER
+  SUSTAINABILITY_LEAD
+  FINANCE
+  ADMIN
+}
+
+enum ConsolidationApproach {
+  OPERATIONAL_CONTROL
+}
+
+enum Scope {
+  SCOPE_1
+  SCOPE_2
+}
+
+enum FormType {
+  QUANTITY
+  CONTRACT_INFO
+}
+
+enum EntryStatus {
+  SUBMITTED
+  FLAGGED
+  APPROVED
+  REJECTED
+}
+
+enum FactorBasis {
+  STANDARD
+  LOCATION_BASED
+  MARKET_BASED
+  RESIDUAL_MIX
+}
+
+enum DataQualityTier {
+  TIER_1
+  TIER_2
+  TIER_3
+}
+
+enum TariffType {
+  STANDARD
+  GREEN
+}
+
+// ---------------------------------------------------------------------------
+// Organisational structure
+// ---------------------------------------------------------------------------
+
+/// Paragon ID, RFID Discovery, Thames Technology — the three operating units
+/// consolidated under operational control (methodology Section 3).
+model Entity {
+  id                    String                @id @default(cuid())
+  name                  String                @unique
+  consolidationApproach ConsolidationApproach @default(OPERATIONAL_CONTROL)
+  createdAt             DateTime              @default(now())
+  sites                 Site[]
+}
+
+model Site {
+  id        String   @id @default(cuid())
+  entityId  String
+  entity    Entity   @relation(fields: [entityId], references: [id])
+  name      String
+  address   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  activityEntries ActivityEntry[]
+  energyContracts SiteEnergyContract[]
+
+  @@unique([entityId, name])
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role
+  createdAt    DateTime @default(now())
+
+  enteredEntries   ActivityEntry[]      @relation("EnteredBy")
+  enteredContracts SiteEnergyContract[] @relation("ContractEnteredBy")
+  calculations     Calculation[]        @relation("CalculatedBy")
+  reportSnapshots  ReportSnapshot[]     @relation("GeneratedBy")
+}
+
+// ---------------------------------------------------------------------------
+// Catalog / configuration (seeded from the Data Requirements Map)
+// ---------------------------------------------------------------------------
+
+/// One row per data-map entry (S1-01..S1-05, S2-01..S2-04, and future Scope 3
+/// rows). Data-entry forms are rendered from this table, not hand-coded per
+/// field, so extending scope later is a data change, not a rebuild.
+model ActivityDataPoint {
+  id               String          @id @default(cuid())
+  code             String          @unique // e.g. "S1-01"
+  scope            Scope
+  category         String // e.g. "Stationary combustion"
+  dataPointName    String // e.g. "Natural gas — facilities"
+  promptTemplate   String // verbatim plain-English prompt, with [site]/[period] placeholders
+  helpText         String? // "Why are we asking this?" tooltip content (technical framing)
+  sourceSystemHint String?
+  unitOptions      String[] // e.g. ["kWh", "m3"]
+  frequency        String // e.g. "Monthly"
+  defaultTier      DataQualityTier
+  formType         FormType
+  buildPriority    String // as tagged in the data map, kept for traceability
+  notes            String?
+  sortOrder        Int             @default(0)
+  factorCategory   String // matches EmissionFactor.category for this data point
+
+  factorOptions FactorOption[]
+  entries       ActivityEntry[]
+}
+
+/// Selectable sub-type options for a data point that needs one (fuel type,
+/// vehicle type, refrigerant type). subtypeKey matches EmissionFactor.subtypeKey.
+model FactorOption {
+  id                  String            @id @default(cuid())
+  activityDataPointId String
+  activityDataPoint   ActivityDataPoint @relation(fields: [activityDataPointId], references: [id])
+  label               String // shown in the dropdown, e.g. "Diesel"
+  subtypeKey          String // e.g. "diesel", "petrol", "car_average_diesel", "r410a"
+  sortOrder           Int               @default(0)
+
+  entries ActivityEntry[]
+
+  @@unique([activityDataPointId, subtypeKey])
+}
+
+// ---------------------------------------------------------------------------
+// Emission factors (versioned, never edited in place — only superseded)
+// ---------------------------------------------------------------------------
+
+model EmissionFactorSet {
+  id            String    @id @default(cuid())
+  name          String // e.g. "UK Gov GHG Conversion Factors for Company Reporting 2024 (placeholder)"
+  publisher     String // e.g. "DEFRA/DESNZ"
+  vintageYear   Int // year of publication
+  publishedDate DateTime?
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  sourceUrl     String?
+  isPlaceholder Boolean   @default(true) // true until a real official file is imported
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  factors EmissionFactor[]
+}
+
+model EmissionFactor {
+  id          String            @id @default(cuid())
+  factorSetId String
+  factorSet   EmissionFactorSet @relation(fields: [factorSetId], references: [id])
+  scope       Scope
+  category    String // e.g. "natural_gas", "grid_electricity", "refrigerant"
+  subtypeKey  String? // matches FactorOption.subtypeKey where applicable
+  basis       FactorBasis       @default(STANDARD)
+  region      String            @default("UK")
+  unit        String // the unit the factor is expressed per, e.g. "kWh", "litre", "mile", "kg"
+  co2eFactor  Decimal           @db.Decimal(18, 8) // kgCO2e per unit
+  notes       String?
+
+  calculations Calculation[]
+
+  @@unique([factorSetId, category, subtypeKey, basis])
+}
+
+// ---------------------------------------------------------------------------
+// Transactional data
+// ---------------------------------------------------------------------------
+
+/// Supplier/tariff/REGO metadata for a site's electricity, needed for the
+/// Scope 2 market-based calculation (data map rows S2-02 / S2-03).
+model SiteEnergyContract {
+  id              String     @id @default(cuid())
+  siteId          String
+  site            Site       @relation(fields: [siteId], references: [id])
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  supplierName    String
+  tariffType      TariffType
+  regoBacked      Boolean    @default(false)
+  regoVolumeKwh   Decimal?   @db.Decimal(18, 3)
+  source          String?
+  enteredByUserId String
+  enteredBy       User       @relation("ContractEnteredBy", fields: [enteredByUserId], references: [id])
+  enteredAt       DateTime   @default(now())
+}
+
+model ActivityEntry {
+  id                  String            @id @default(cuid())
+  activityDataPointId String
+  activityDataPoint   ActivityDataPoint @relation(fields: [activityDataPointId], references: [id])
+  siteId              String
+  site                Site              @relation(fields: [siteId], references: [id])
+  periodStart         DateTime
+  periodEnd           DateTime
+
+  rawValue       Decimal @db.Decimal(18, 4)
+  rawUnit        String
+  canonicalValue Decimal @db.Decimal(18, 8)
+  canonicalUnit  String
+
+  factorOptionId String?
+  factorOption   FactorOption? @relation(fields: [factorOptionId], references: [id])
+
+  dataQualityTier     DataQualityTier
+  status              EntryStatus     @default(SUBMITTED)
+  plausibilityFlagged Boolean         @default(false)
+  plausibilityReason  String?
+  notes               String?
+
+  enteredByUserId String
+  enteredBy       User     @relation("EnteredBy", fields: [enteredByUserId], references: [id])
+  enteredAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  calculations Calculation[]
+
+  @@index([activityDataPointId, siteId, periodStart])
+}
+
+/// One row per emission figure. Scope 2 electricity entries produce two rows
+/// (LOCATION_BASED and MARKET_BASED) from a single entry. Key factor details
+/// are snapshotted onto the row itself (not just FK'd) so the audit trail is
+/// self-contained even if the EmissionFactor catalog changes later.
+model Calculation {
+  id              String        @id @default(cuid())
+  activityEntryId String
+  activityEntry   ActivityEntry @relation(fields: [activityEntryId], references: [id])
+
+  emissionFactorId String
+  emissionFactor   EmissionFactor @relation(fields: [emissionFactorId], references: [id])
+
+  scope Scope
+  basis FactorBasis
+
+  inputValue Decimal @db.Decimal(18, 8)
+  inputUnit  String
+
+  // Snapshot of the factor at calculation time (compliance audit trail)
+  factorValueSnapshot   Decimal @db.Decimal(18, 8)
+  factorUnitSnapshot    String
+  factorSourceSnapshot  String // publisher + set name
+  factorVintageSnapshot String // vintage year as string, e.g. "2024"
+  formulaApplied        String
+
+  resultKgCo2e    Decimal         @db.Decimal(18, 8)
+  dataQualityTier DataQualityTier
+
+  calculatedByUserId String?
+  calculatedBy       User?    @relation("CalculatedBy", fields: [calculatedByUserId], references: [id])
+  calculatedAt       DateTime @default(now())
+  engineVersion      String   @default("calc-engine-v1")
+  supersededById     String? // if a later recalculation replaced this row's relevance
+
+  reportLinks ReportSnapshotCalculation[]
+
+  @@index([activityEntryId])
+}
+
+// ---------------------------------------------------------------------------
+// Reporting (append-only, versioned snapshots — never overwritten)
+// ---------------------------------------------------------------------------
+
+model ReportSnapshot {
+  id                String   @id @default(cuid())
+  version           Int      @default(autoincrement())
+  periodStart       DateTime
+  periodEnd         DateTime
+  generatedByUserId String
+  generatedBy       User     @relation("GeneratedBy", fields: [generatedByUserId], references: [id])
+  generatedAt       DateTime @default(now())
+
+  payload Json // frozen computed report: totals, breakdowns, narrative, DQ summary
+
+  calculationLinks ReportSnapshotCalculation[]
+}
+
+model ReportSnapshotCalculation {
+  id               String         @id @default(cuid())
+  reportSnapshotId String
+  reportSnapshot   ReportSnapshot @relation(fields: [reportSnapshotId], references: [id])
+  calculationId    String
+  calculation      Calculation    @relation(fields: [calculationId], references: [id])
+
+  @@unique([reportSnapshotId, calculationId])
+}
