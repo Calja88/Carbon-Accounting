@@ -53,10 +53,10 @@ Other commands: `npm test` (Vitest), `npm run build`, `npm run lint`.
 ### Deploying (e.g. Vercel)
 
 1. Provision a reachable Postgres instance (Vercel Postgres, Neon, Supabase, RDS, etc.) — Vercel does not provide one by default.
-2. Set environment variables in the project settings: `DATABASE_URL`, `NEXTAUTH_SECRET` (a real random value, not the dev placeholder), `NEXTAUTH_URL` (your deployed URL).
-3. Apply the schema to that database once, from a machine that can reach it: `npx prisma migrate deploy`.
-4. Seed it: `npm run db:seed` (or copy the four demo users' pattern to create real accounts, then remove/rotate the demo ones).
-5. Deploy. `npm run build` already runs `prisma generate` via `postinstall`; it does not itself need `DATABASE_URL` at build time, only at runtime.
+2. Set environment variables in the project settings: `DATABASE_URL`, `NEXTAUTH_SECRET` (a real random value, not the dev placeholder), `NEXTAUTH_URL` (your deployed URL). These must be available at **build** time, not just runtime — see below.
+3. Make sure the Vercel project's **Production Branch** setting actually matches the branch you're deploying (Settings → Git). Vercel serves the production domain from whatever that setting names, defaulting to `main` — if your work is on a differently-named branch and `main` doesn't exist in the repo, the production domain will serve a stale/unrelated deployment instead of your app.
+4. Deploy. `npm run build` now runs `prisma migrate deploy` before `next build` (and `postinstall` already runs `prisma generate` after `npm install`), so every deploy applies any pending schema migrations automatically — `DATABASE_URL` must be reachable and set at build time for this to succeed.
+5. Seed it once: `npm run db:seed` (idempotent — safe to re-run) from a machine that can reach the database directly. This isn't run automatically on every deploy, since it isn't needed after the first time. Either use the seeded demo accounts below, or copy that pattern to create real accounts and remove/rotate the demo ones before real use.
 
 ### Demo accounts
 
