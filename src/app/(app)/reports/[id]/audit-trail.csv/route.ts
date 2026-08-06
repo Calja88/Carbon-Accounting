@@ -42,6 +42,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     "Site",
     "Data point code",
     "Data point",
+    "Scope 3 category",
+    "Supplier (if applicable)",
     "Period start",
     "Period end",
     "Raw value",
@@ -62,6 +64,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     "Entered at",
     "Calculated by",
     "Calculated at",
+    "Derived from Scope 1/2 calculation",
   ]);
 
   const lines = snapshot.calculationLinks.map((link) => {
@@ -72,6 +75,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       e.site.name,
       e.activityDataPoint.code,
       e.activityDataPoint.dataPointName,
+      c.scope3Category ?? "",
+      e.supplierName ?? "",
       e.periodStart.toISOString().slice(0, 10),
       e.periodEnd.toISOString().slice(0, 10),
       e.rawValue.toString(),
@@ -92,6 +97,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       e.enteredAt.toISOString(),
       c.calculatedBy?.name ?? "system",
       c.calculatedAt.toISOString(),
+      c.derivedFromCalculationId ?? "",
     ]);
   });
 

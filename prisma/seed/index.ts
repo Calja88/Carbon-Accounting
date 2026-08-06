@@ -130,6 +130,7 @@ async function seedActivityDataPoints() {
         notes: dp.notes,
         sortOrder: dp.sortOrder,
         factorCategory: dp.factorCategory,
+        scope3Category: dp.scope3Category ?? null,
       },
       create: {
         code: dp.code,
@@ -147,6 +148,7 @@ async function seedActivityDataPoints() {
         notes: dp.notes,
         sortOrder: dp.sortOrder,
         factorCategory: dp.factorCategory,
+        scope3Category: dp.scope3Category ?? null,
       },
     });
 
@@ -158,11 +160,12 @@ async function seedActivityDataPoints() {
             subtypeKey: opt.subtypeKey,
           },
         },
-        update: { label: opt.label },
+        update: { label: opt.label, unit: opt.unit ?? null },
         create: {
           activityDataPointId: record.id,
           label: opt.label,
           subtypeKey: opt.subtypeKey,
+          unit: opt.unit ?? null,
         },
       });
     }

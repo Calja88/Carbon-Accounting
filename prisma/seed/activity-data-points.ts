@@ -12,6 +12,8 @@ import { DataQualityTier, FormType, Scope } from "@prisma/client";
 export interface SeedFactorOption {
   label: string;
   subtypeKey: string;
+  /** Per-option unit override — see FactorOption.unit in schema.prisma. */
+  unit?: string;
 }
 
 export interface SeedActivityDataPoint {
@@ -32,6 +34,8 @@ export interface SeedActivityDataPoint {
   factorOptions?: SeedFactorOption[];
   /** category string used to look up the matching EmissionFactor row(s) */
   factorCategory: string;
+  /** GHG Protocol Scope 3 category label — set for Scope 3 data points only. */
+  scope3Category?: string;
 }
 
 export const ACTIVITY_DATA_POINTS: SeedActivityDataPoint[] = [
@@ -213,5 +217,96 @@ export const ACTIVITY_DATA_POINTS: SeedActivityDataPoint[] = [
     notes: "Only relevant if any site is on a district heating network",
     sortOrder: 90,
     factorCategory: "purchased_heat_steam",
+  },
+
+  // ---------------------------------------------------------------------
+  // Scope 3 — value chain. Only the categories tagged "Phase 1 build" in
+  // the data map (Cat 1, 6, 7) — the brief's own phased plan (v2/v3) puts
+  // the rest (Cat 2, 4, 5, 8, 9) in a later build. Cat 3 has no row here:
+  // per data map S3-03 it is calculated automatically from Scope 1/2
+  // entries, not a separate form (see src/lib/scope3-derived.ts).
+  // ---------------------------------------------------------------------
+  {
+    code: "S3-01",
+    scope: Scope.SCOPE_3,
+    category: "Cat 1 — Purchased goods & services",
+    dataPointName: "Supplier spend by category",
+    promptTemplate:
+      "How much did [site/function] spend with suppliers this period, broken down by category (components, packaging, services etc.)?",
+    helpText:
+      "Scope 3 Category 1 — purchased goods and services, calculated from spend using EEIO factors until supplier-specific data is available (methodology Sections 7 and 9).",
+    sourceSystemHint: "Finance / ERP system (nominal ledger)",
+    unitOptions: ["£"],
+    frequency: "Quarterly",
+    defaultTier: DataQualityTier.TIER_3,
+    formType: FormType.QUANTITY,
+    buildPriority: "Phase 1 build",
+    notes:
+      "Spend-based (EEIO factors) until supplier-specific data available. Spend categories below are illustrative, not confirmed against Paragon's chart of accounts — see README assumptions.",
+    sortOrder: 100,
+    factorCategory: "purchased_goods_services_spend",
+    scope3Category: "Cat 1 — Purchased goods & services",
+    factorOptions: [
+      { label: "Components & electronics (incl. RFID inlays)", subtypeKey: "components_electronics" },
+      { label: "Packaging", subtypeKey: "packaging" },
+      { label: "IT & software", subtypeKey: "it_software" },
+      { label: "Professional & other services", subtypeKey: "services_general" },
+      { label: "Other purchased goods & services", subtypeKey: "other_goods_services" },
+    ],
+  },
+  {
+    code: "S3-06",
+    scope: Scope.SCOPE_3,
+    category: "Cat 6 — Business travel",
+    dataPointName: "Travel bookings",
+    promptTemplate: "What business travel (rail, air, hotel) was booked/expensed this period?",
+    helpText: "Scope 3 Category 6 — business travel (methodology Section 9, activity-based method).",
+    sourceSystemHint: "Travel booking system / expenses",
+    unitOptions: [],
+    frequency: "Monthly",
+    defaultTier: DataQualityTier.TIER_2,
+    formType: FormType.QUANTITY,
+    buildPriority: "Phase 1 build",
+    notes:
+      "Example: 14 rail return journeys London-Reading, 2 domestic flights, expenses export Aug 2026. Recorded by distance (miles) or nights, not journey count — see README assumptions for why.",
+    sortOrder: 110,
+    factorCategory: "business_travel",
+    scope3Category: "Cat 6 — Business travel",
+    factorOptions: [
+      { label: "Rail", subtypeKey: "rail", unit: "miles" },
+      { label: "Domestic flight", subtypeKey: "flight_domestic", unit: "miles" },
+      { label: "Short-haul international flight", subtypeKey: "flight_short_haul", unit: "miles" },
+      { label: "Long-haul international flight", subtypeKey: "flight_long_haul", unit: "miles" },
+      { label: "Hotel stay", subtypeKey: "hotel", unit: "nights" },
+    ],
+  },
+  {
+    code: "S3-07",
+    scope: Scope.SCOPE_3,
+    category: "Cat 7 — Employee commuting",
+    dataPointName: "Commuting survey",
+    promptTemplate: "How do employees typically travel to work, and what distance?",
+    helpText:
+      "Scope 3 Category 7 — employee commuting, survey-based and extrapolated across headcount (methodology Section 9).",
+    sourceSystemHint: "Annual HR commuting survey",
+    unitOptions: [],
+    frequency: "Annually",
+    defaultTier: DataQualityTier.TIER_3,
+    formType: FormType.SURVEY,
+    buildPriority: "Phase 1 build",
+    notes: "Survey template built as part of the platform — see README assumptions for the extrapolation formula used.",
+    sortOrder: 120,
+    factorCategory: "employee_commuting",
+    scope3Category: "Cat 7 — Employee commuting",
+    factorOptions: [
+      { label: "Car — petrol (average)", subtypeKey: "commute_car_petrol_avg" },
+      { label: "Car — diesel (average)", subtypeKey: "commute_car_diesel_avg" },
+      { label: "Car — electric", subtypeKey: "commute_car_electric" },
+      { label: "Motorbike", subtypeKey: "commute_motorbike" },
+      { label: "Bus", subtypeKey: "commute_bus" },
+      { label: "Rail / underground", subtypeKey: "commute_rail" },
+      { label: "Cycling or walking", subtypeKey: "commute_active" },
+      { label: "Works from home (no commute)", subtypeKey: "commute_wfh" },
+    ],
   },
 ];

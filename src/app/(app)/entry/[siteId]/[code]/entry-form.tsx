@@ -5,7 +5,7 @@ import Link from "next/link";
 import { submitEntryAction, EntryFormState } from "./actions";
 import { resolvePrompt } from "@/lib/prompts";
 import { periodInputKindForFrequency, resolvePeriod } from "@/lib/period";
-import { FACTOR_OPTION_LABELS } from "@/lib/form-labels";
+import { FACTOR_OPTION_LABELS, SUPPLIER_OVERRIDE_CODES } from "@/lib/form-labels";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,7 @@ import { Select } from "@/components/ui/select";
 interface FactorOption {
   id: string;
   label: string;
+  unit: string | null;
 }
 
 interface DataPointForForm {
@@ -27,7 +28,7 @@ interface DataPointForForm {
   factorOptions: FactorOption[];
 }
 
-const initialState: EntryFormState = { error: null, success: false, flagged: false, flagReason: null };
+const initialState: EntryFormState = { error: null, success: false, flagged: false, flagReason: null, awaitingFactor: false };
 
 export function EntryForm({
   site,
@@ -44,7 +45,15 @@ export function EntryForm({
   const [factorOptionId, setFactorOptionId] = useState(dataPoint.factorOptions[0]?.id ?? "");
 
   const periodKind = periodInputKindForFrequency(dataPoint.frequency);
-  const selectedOptionLabel = dataPoint.factorOptions.find((o) => o.id === factorOptionId)?.label;
+  const selectedOption = dataPoint.factorOptions.find((o) => o.id === factorOptionId);
+
+  // Some data points (e.g. S3-06 business travel) give each type its own
+  // unit — rail/flights in miles, hotel stays in nights — rather than
+  // sharing one unit picker across every option.
+  const optionDrivenUnit = dataPoint.factorOptions.some((o) => o.unit);
+  const effectiveUnit = optionDrivenUnit ? selectedOption?.unit ?? "" : unit;
+
+  const showSupplierField = SUPPLIER_OVERRIDE_CODES.has(dataPoint.code);
 
   const resolvedPrompt = useMemo(() => {
     const { periodStart } = resolvePeriod(dataPoint.frequency, periodInput || initialPeriodValue);
@@ -52,9 +61,9 @@ export function EntryForm({
       siteName: site.name,
       periodStart,
       frequency: dataPoint.frequency,
-      optionLabel: selectedOptionLabel,
+      optionLabel: selectedOption?.label,
     });
-  }, [dataPoint.frequency, dataPoint.promptTemplate, periodInput, initialPeriodValue, site.name, selectedOptionLabel]);
+  }, [dataPoint.frequency, dataPoint.promptTemplate, periodInput, initialPeriodValue, site.name, selectedOption]);
 
   if (state.success) {
     return (
@@ -64,6 +73,11 @@ export function EntryForm({
           <p className="mt-2 text-sm text-amber-800">
             This entry looks unusual and has been flagged for review before it&apos;s included in a report:{" "}
             {state.flagReason}
+          </p>
+        ) : state.awaitingFactor ? (
+          <p className="mt-2 text-sm text-amber-800">
+            Your data is saved, but no emission factor has been imported for this category yet — the emissions
+            figure will appear automatically once one is.
           </p>
         ) : (
           <p className="mt-2 text-sm text-emerald-800">The emissions figure has been calculated automatically.</p>
@@ -132,7 +146,12 @@ export function EntryForm({
         </div>
         <div className="flex-1 max-w-[160px]">
           <Label htmlFor="rawUnit">Unit</Label>
-          {dataPoint.unitOptions.length > 1 ? (
+          {optionDrivenUnit ? (
+            <>
+              <Input value={effectiveUnit} disabled className="mt-1" />
+              <input type="hidden" name="rawUnit" value={effectiveUnit} />
+            </>
+          ) : dataPoint.unitOptions.length > 1 ? (
             <Select
               id="rawUnit"
               name="rawUnit"
@@ -154,6 +173,17 @@ export function EntryForm({
           )}
         </div>
       </div>
+
+      {showSupplierField && (
+        <div>
+          <Label htmlFor="supplierName">Supplier name (optional)</Label>
+          <Input id="supplierName" name="supplierName" className="mt-1 max-w-sm" placeholder="e.g. Acme Components Ltd" />
+          <p className="mt-1 text-xs text-slate-400">
+            If this supplier has given us their own carbon figure, naming them here uses it instead of the general
+            estimate.
+          </p>
+        </div>
+      )}
 
       {dataPoint.sourceSystemHint && (
         <p className="text-xs text-slate-400">Typically found on: {dataPoint.sourceSystemHint}</p>

@@ -31,6 +31,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               <Link href="/reports" className="hover:text-slate-900">
                 Reports
               </Link>
+              {session?.user?.role === "ADMIN" && (
+                <Link href="/admin/factors" className="hover:text-slate-900">
+                  Emission factors
+                </Link>
+              )}
             </nav>
           </div>
           <div className="flex items-center gap-3">

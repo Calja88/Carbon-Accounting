@@ -24,10 +24,19 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
   const snapshot = await prisma.reportSnapshot.findUnique({ where: { id }, include: { generatedBy: true } });
   if (!snapshot) notFound();
 
-  const payload = snapshot.payload as unknown as ReportPayload;
+  const rawPayload = snapshot.payload as unknown as ReportPayload;
+  // Older snapshots (generated before Scope 3 existed) won't have these
+  // keys — fall back rather than crash, so past reports stay viewable
+  // exactly as the versioned-snapshot design promises.
+  const payload: ReportPayload = {
+    ...rawPayload,
+    scope3: rawPayload.scope3 ?? { totalKgCo2e: 0, byCategory: [] },
+    awaitingFactorEntries: rawPayload.awaitingFactorEntries ?? [],
+  };
   const scope1Total = payload.scope1.totalKgCo2e;
   const scope2Location = payload.scope2.locationBasedTotalKgCo2e;
   const scope2Market = payload.scope2.marketBasedTotalKgCo2e;
+  const scope3Total = payload.scope3.totalKgCo2e;
 
   return (
     <div className="max-w-4xl">
@@ -72,7 +81,9 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
           </div>
           <div>
             <div className="text-slate-500">Scope</div>
-            <div className="font-medium text-slate-900">Scope 1 and Scope 2 only (MVP) — Scope 3 not yet built</div>
+            <div className="font-medium text-slate-900">
+              Scope 1, Scope 2 and Scope 3 (Categories 1, 3, 6, 7 — remaining categories not yet built)
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -107,10 +118,16 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
                   {kg(scope2Location)} ({tonnes(scope2Location)}CO2e)
                 </td>
               </tr>
-              <tr>
+              <tr className="border-b border-slate-100">
                 <td className="py-2 text-slate-600">Scope 2 — market-based</td>
                 <td className="py-2 text-right font-medium text-slate-900">
                   {kg(scope2Market)} ({tonnes(scope2Market)}CO2e)
+                </td>
+              </tr>
+              <tr>
+                <td className="py-2 text-slate-600">Scope 3 (Cat 1, 3, 6, 7)</td>
+                <td className="py-2 text-right font-medium text-slate-900">
+                  {kg(scope3Total)} ({tonnes(scope3Total)}CO2e)
                 </td>
               </tr>
             </tbody>
@@ -159,6 +176,31 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
                 {payload.scope2.byCategory.length === 0 && (
                   <tr>
                     <td className="py-1.5 text-slate-400">No Scope 2 activity in this period.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+        <Card className="sm:col-span-2">
+          <CardHeader>
+            <CardTitle>Scope 3 by category</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <table className="w-full text-sm">
+              <tbody>
+                {payload.scope3.byCategory.map((c) => (
+                  <tr key={c.category} className="border-b border-slate-100 last:border-0">
+                    <td className="py-1.5 text-slate-600">{c.category}</td>
+                    <td className="py-1.5 text-right text-slate-900">{kg(c.kgCo2e)}</td>
+                  </tr>
+                ))}
+                {payload.scope3.byCategory.length === 0 && (
+                  <tr>
+                    <td className="py-1.5 text-slate-400">
+                      No Scope 3 activity calculated in this period yet — either nothing was entered, or entries are
+                      awaiting an emission factor import (see below).
+                    </td>
                   </tr>
                 )}
               </tbody>
@@ -238,6 +280,31 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
                     {e.site} — {e.dataPoint} ({e.periodLabel})
                   </span>
                   <Badge tone="warning">{e.reason}</Badge>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
+      {payload.awaitingFactorEntries.length > 0 && (
+        <Card className="mt-3 border-amber-200 bg-amber-50/40">
+          <CardHeader>
+            <CardTitle>Awaiting emission factor</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-2 text-sm text-slate-600">
+              This activity data has been captured but isn&apos;t included in the totals above yet — no emission
+              factor has been imported for its category. Once one is (Admin → Emission factors), these will be
+              calculated automatically and included in the next report.
+            </p>
+            <ul className="space-y-1 text-sm">
+              {payload.awaitingFactorEntries.map((e, i) => (
+                <li key={i} className="flex items-center justify-between">
+                  <span>
+                    {e.site} — {e.dataPoint} ({e.periodLabel})
+                  </span>
+                  <Badge tone="warning">Awaiting factor</Badge>
                 </li>
               ))}
             </ul>

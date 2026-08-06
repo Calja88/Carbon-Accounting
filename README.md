@@ -1,15 +1,22 @@
-# Paragon ID UK — Carbon Reporting Platform (MVP)
+# Paragon ID UK — Carbon Reporting Platform
 
 A web platform for Paragon ID UK (Paragon ID, RFID Discovery, Thames Technology) to enter
-Scope 1 and Scope 2 activity data through plain-English guided forms, have emissions
-calculated automatically against the Group's carbon methodology, and generate a combined
-GHG report — without the user needing to know what a "scope" or "emission factor" is.
+Scope 1, Scope 2 and (as of v2) part of Scope 3 activity data through plain-English guided
+forms, have emissions calculated automatically against the Group's carbon methodology, and
+generate a combined GHG report — without the user needing to know what a "scope" or
+"emission factor" is.
 
 Built against `Paragon_ID_UK_Carbon_Methodology_v0.1.docx` (the rule set) and
 `Paragon_ID_UK_Data_Requirements_Map.xlsx` (the literal data-entry spec), per
-`CLAUDE_CODE_BRIEF.md`. This is the **MVP phase only**: Scope 1 + Scope 2 data entry,
-calculation, and a single combined report. Scope 3, base-year comparison, and multi-entity
-report splitting are deliberately not built yet (see "What's not built" below).
+`CLAUDE_CODE_BRIEF.md`.
+
+- **MVP**: Scope 1 + Scope 2 data entry, calculation, and a single combined report.
+- **v2** (this build): Scope 3 Categories 1 (purchased goods & services, spend-based), 3
+  (fuel/energy-related, auto-derived), 6 (business travel) and 7 (employee commuting,
+  survey-based) — the four categories the data map tags "Phase 1 build" — plus a real
+  emission-factor import mechanism (Part B, below) to replace the MVP's placeholder
+  factors. Scope 3 Categories 2/4/5/8/9 and base-year comparison and multi-entity report
+  splitting are deliberately not built yet (see "What's not built" below).
 
 ## Tech stack
 
@@ -21,19 +28,21 @@ report splitting are deliberately not built yet (see "What's not built" below).
 | Auth | NextAuth (Credentials provider), JWT sessions, roles modelled on methodology Section 15 |
 | Validation | Zod |
 | UI | Tailwind CSS, hand-rolled primitives in `src/components/ui` |
-| Tests | Vitest, covering the calculation engine, unit conversion and plausibility logic |
+| Spreadsheet parsing | ExcelJS (`.xlsx`/`.xlsm` factor imports), a small hand-rolled CSV parser |
+| Tests | Vitest, covering the calculation engine, unit conversion, plausibility, commuting-survey math, Cat 3 well-to-tank/T&D mapping and factor-import validation |
 
 ## Schema
 
 `entities → sites → activity data points (catalog) → activity entries → calculations → report snapshots`
 
 - **Entity / Site** — Paragon ID, RFID Discovery, Thames Technology, each with sites, consolidated under operational control.
-- **ActivityDataPoint** — one row per Data Requirements Map row (`S1-01`…`S1-05`, `S2-01`…`S2-04`). Forms are *rendered from this table*, including the verbatim "Plain-English Prompt" — adding Scope 3 later is a data change, not a rebuild.
-- **FactorOption** — the fuel/vehicle/refrigerant type choices for data points that need one.
-- **EmissionFactorSet / EmissionFactor** — versioned, never edited in place. A new year's DEFRA/DESNZ factors are a new set, not an overwrite, so historical reports stay reproducible.
+- **ActivityDataPoint** — one row per Data Requirements Map row (`S1-01`…`S1-05`, `S2-01`…`S2-04`, `S3-01`, `S3-06`, `S3-07`). Forms are *rendered from this table*, including the verbatim "Plain-English Prompt" — adding more Scope 3 categories later is a data change, not a rebuild. `scope3Category` labels which GHG Protocol category a row belongs to. `S3-03` (Cat 3) has no row here — it's a calculation, not a form (see below).
+- **FactorOption** — the fuel/vehicle/refrigerant/travel-mode/commuting-mode choices for data points that need one. `unit` optionally overrides the data point's unit per-option (business travel: miles for rail/flights, nights for hotel).
+- **EmissionFactorSet / EmissionFactor** — versioned, never edited in place. A new year's DEFRA/DESNZ factors are a new set, not an overwrite, so historical reports stay reproducible. `sourceType` (`OFFICIAL_DEFRA_DESNZ` / `EEIO_SPEND_BASED` / `SUPPLIER_SPECIFIC`) lets more than one live source exist per category — see "Emission factor import" below.
 - **SiteEnergyContract** — supplier/tariff/REGO info per site (Data Map rows `S2-02`/`S2-03`), feeding the Scope 2 market-based calculation.
-- **ActivityEntry** — one user submission: raw + canonical value/unit, data-quality tier, plausibility flag, `enteredBy`/`enteredAt`.
-- **Calculation** — one row per emission figure (Scope 2 electricity produces two: location-based and market-based). The factor value, unit, source and vintage are **snapshotted onto the row itself**, not just referenced by foreign key, so the audit trail is self-contained even if the factor catalog changes later.
+- **ActivityEntry** — one user submission: raw + canonical value/unit, data-quality tier, plausibility flag, `enteredBy`/`enteredAt`. `supplierName` (Cat 1 only) is matched against a `SUPPLIER_SPECIFIC` factor set.
+- **CommutingSurvey / CommutingSurveyResponse** — Cat 7's survey header (headcount, commuting days) and per-mode responses (% of headcount, average one-way distance). Each response becomes a normal `ActivityEntry` + `Calculation`, so it goes through the same pipeline as everything else.
+- **Calculation** — one row per emission figure (Scope 2 electricity produces two: location-based and market-based). The factor value, unit, source and vintage are **snapshotted onto the row itself**, not just referenced by foreign key, so the audit trail is self-contained even if the factor catalog changes later. `scope3Category` groups Scope 3 totals by category. `derivedFromCalculationId` links a Cat 3 (well-to-tank/T&D-losses) row back to the Scope 1/2 calculation it was derived from — unique, so re-running the derivation is idempotent.
 - **ReportSnapshot / ReportSnapshotCalculation** — append-only. Every "Generate report" click creates a new immutable snapshot with its own frozen payload and its own link to the exact calculations included.
 
 ## Getting started
@@ -42,9 +51,14 @@ report splitting are deliberately not built yet (see "What's not built" below).
 cp .env.example .env        # point DATABASE_URL at your Postgres instance
 npm install
 npx prisma migrate dev      # creates the schema
-npm run db:seed             # loads entities/sites/users/data-point catalog/placeholder factors
+npm run db:seed             # loads entities/sites/users/data-point catalog/Scope 1-2 placeholder factors
 npm run dev                 # http://localhost:3000
 ```
+
+`db:seed` seeds the full Scope 1/2/3 activity data point catalog, but **no Scope 3 emission
+factors** — Cat 1, 6 and 7 entries will save fine but show "awaiting emission factor" until
+a real factor set is imported (see "Emission factor import" below). This is deliberate, not
+a bug — see Assumption 20.
 
 Other commands: `npm test` (Vitest), `npm run build`, `npm run lint`.
 
@@ -67,13 +81,53 @@ Seeded with password `ChangeMe123!` (change before any real use):
 - `data.owner@paragon-id.example` — Data owner
 - `finance@paragon-id.example` — Finance
 
+## Emission factor import (v2, Part B)
+
+The MVP seeded placeholder Scope 1/2 factors from code (`prisma/seed/emission-factors.ts`,
+still labelled `isPlaceholder: true` and shown as "(PLACEHOLDER — not verified)" in every
+report). v2 does **not** extend that pattern to Scope 3 — no Scope 3 factor value is
+hardcoded or guessed anywhere in this codebase (see Assumption 20). Instead, an Admin-only
+UI at **Emission factors** (`/admin/factors`) lets a real published factor file be loaded
+in, following the same "never edit in place, new set per vintage" design as the rest of the
+schema.
+
+**How it works:**
+
+1. Download the CSV template from the admin page (or `/api/admin/factor-template.csv`) —
+   columns `scope, factor_category, subtype_key, basis, region, unit, co2e_factor, notes`.
+2. Fill it in with real figures from an accredited source (or `.xlsx` in the same column
+   layout) — see Assumption 22 for why this is a template *we* define rather than a direct
+   parser for the DESNZ workbook's own layout.
+3. Upload it along with set metadata (name, publisher, source type, vintage year, effective
+   dates). Every row is validated before anything is committed — a single bad row blocks
+   the whole import, so nothing partial or malformed ever reaches a report.
+4. On success, a new `EmissionFactorSet` + its `EmissionFactor` rows are created in one
+   transaction, and any activity entries stuck at "awaiting emission factor" are
+   automatically recalculated.
+
+**Multi-source resolution** (methodology Section 7), tried in order, per category:
+
+1. `SUPPLIER_SPECIFIC` — if the entry names a supplier (Cat 1 only) and a factor set exists
+   for that exact supplier name, it's used, at Tier 1 (highest quality).
+2. `OFFICIAL_DEFRA_DESNZ` — the primary source, used for everything by default.
+3. `EEIO_SPEND_BASED` — fallback for Cat 1/2 spend-based entries when no official DEFRA
+   figure exists for that category (DEFRA's own workbook doesn't publish spend-based EEIO
+   factors).
+
+If none of the three has a matching factor, the entry is saved (never lost) with status
+`AWAITING_FACTOR` and is disclosed in reports as "awaiting emission factor" rather than
+silently excluded or estimated.
+
 ## What's not built (by design, per the brief's phased plan)
 
-- Scope 3 (any category, including the auto-derived Category 3) — v2.
+- Scope 3 Categories 2, 4, 5, 8, 9 (v3) and 10/13/14/15 (screened "not material") — only the
+  four "Phase 1 build" categories (1, 3, 6, 7) are built in v2.
 - Base year setting, recalculation policy, and year-on-year comparison — a base year can't be set until a first complete inventory exists.
-- Multi-entity report splitting — every entry is already tagged by entity and site, but the MVP only produces one combined Group report.
+- Multi-entity report splitting — every entry is already tagged by entity and site, but the platform only produces one combined Group report.
 - ISO 14064-1 assurance-readiness mapping — methodology Section 12 is itself a placeholder pending Paragon's internal checklist.
-- Bulk/CSV import — guided per-entry forms are the only entry path for now, per the brief's "not a spreadsheet upload as the primary path."
+- Bulk/CSV import of *activity data* — guided per-entry forms are the only entry path for now, per the brief's "not a spreadsheet upload as the primary path." (Bulk import of *emission factors* is what Part B above adds — a different thing.)
+- Automatic parsing of the real DESNZ workbook's native tab/column layout — the import mechanism uses our own canonical template instead; see Assumption 22.
+- Supplier product-carbon-footprint data collection (data map row S3-01b, per-unit rather than per-£) — tagged "Later" in the data map.
 
 ## Assumptions and open items — flagged, not silently resolved
 
@@ -92,3 +146,15 @@ Seeded with password `ChangeMe123!` (change before any real use):
 13. **Flagged (plausibility-failed) entries are excluded from report totals** until someone resolves them, and listed separately as "excluded pending review" — an interpretation of "flagged for review before it's accepted into a report" (brief 3.1), since neither document says explicitly whether flagged data should be included with a caveat or excluded outright.
 14. **No carbon jargon in on-screen section headers**, not just the prompts themselves — e.g. the site page groups forms under "Facilities, vehicles & refrigerants" / "Electricity & purchased energy" rather than "Scope 1" / "Scope 2". The technical framing is still available via each item's "Why are we asking this?" tooltip.
 15. **Operational control boundary, Scope 3 materiality screening, and base year** are all explicitly unconfirmed per the methodology's own amber-box flags (Sections 3, 6, 11) — the report page labels the boundary approach "recommended, not yet formally confirmed" rather than presenting it as settled.
+
+### v2 additions
+
+16. **Cat 1 spend categories are illustrative** (components & electronics, packaging, IT & software, professional services, other) — not confirmed against Paragon's actual chart of accounts. Same caveat as the illustrative site register (8).
+17. **S3-06 business travel is recorded by distance (miles) or nights, not by "journeys"**, despite the data map's Format/Unit column literally saying "Journeys/nights by mode." DEFRA's published business-travel factors are per passenger-mile/km (or per-night for hotels) — a "journey" alone has no fixed emissions figure without a distance. This is a deliberate deviation from the sheet's literal unit label to keep the calculation defensible, not a silent reinterpretation.
+18. **S3-07 commuting extrapolation formula** — `headcount × (% of headcount using a mode) × average one-way distance × 2 (round trip) × commuting days in the period` — is our interpretation of "survey-based, extrapolated across headcount" (methodology Section 9). Neither source document specifies an extrapolation formula or a default commuting-frequency figure, so `commutingDaysInPeriod` is always entered by whoever runs the survey, never assumed by the platform.
+19. **No plausibility check runs on commuting-survey-derived entries** — they're computed, extrapolated figures rather than directly metered/invoiced ones, so a period-on-period jump doesn't carry the same "something's wrong with this bill" signal the check is designed to catch. Unlike (6), this isn't a tunable threshold question — plausibility checking simply doesn't apply to this data type.
+20. **No Scope 3 emission factor values are seeded as placeholders**, unlike Scope 1/2 in the MVP (1). The instruction for this build was explicit: don't hardcode or generate factor values from our own knowledge — a wrong figure silently corrupts every report built on it, and that risk is if anything higher for Scope 3's inherently more approximate methods (spend-based, survey-based) than for Scope 1/2's metered ones. Every Scope 3 category — including the auto-derived Cat 3 well-to-tank/T&D-losses figures — shows nothing until a real factor set is imported (see "Emission factor import" above); activity data collected before then is never lost, just held as `AWAITING_FACTOR` and disclosed in reports rather than silently dropped or estimated.
+21. **Supplier-specific factor overrides (Cat 1) are £-per-spend intensity figures scoped to a named supplier**, loaded through the same admin import mechanism as any other factor set (`sourceType: SUPPLIER_SPECIFIC`) rather than a bespoke per-supplier UI. An optional "Supplier name" field on the Cat 1 entry form is matched against these at calculation time. Full supplier product-carbon-footprint data collection (data map row S3-01b, priced per-unit rather than per-£) is out of scope for this build — it's tagged "Later" in the data map itself.
+22. **The emission factor import mechanism uses a canonical CSV/XLSX template we define**, not a parser for the real DESNZ "GHG Conversion Factors for Company Reporting" workbook's own tab/column layout — that file's precise current-year structure wasn't supplied to build and verify a parser against, and guessing at it risked silently misreading a column, which is exactly the failure mode Part B exists to prevent. Both `.csv` and `.xlsx` are accepted as containers for our template; mapping the real DESNZ file's rows into that template is currently a manual step for whoever uploads it. Auto-detecting the DESNZ file's native layout is a reasonable v3 follow-up once a real copy of the file is available to test against.
+23. **Cat 3 (fuel/energy-related activities) only derives a well-to-tank/T&D-losses companion for categories with one** — stationary/mobile combustion fuel and grid electricity (location-based only, so the Scope 2 market-based duplicate doesn't also generate one). Refrigerant top-ups and purchased heat/steam have no WTT/T&D companion in this build, since neither source document describes an upstream-emissions mechanism for either.
+24. **Materiality screening (methodology Section 6) still applies** — this build only implements the four categories explicitly tagged "Phase 1 build" (1, 3, 6, 7); Categories 2, 4, 5, 8, 9 remain unbuilt pending v3, and 10/13/14/15 remain excluded as "not material" per the brief, unchanged from the MVP.

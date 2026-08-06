@@ -16,12 +16,14 @@ export default async function DashboardPage() {
       const statuses = await getSiteQuantityStatus(site.id);
       const missing = statuses.filter((s) => s.status === "missing");
       const flagged = statuses.filter((s) => s.status === "flagged");
-      return { site, missing, flagged };
+      const awaitingFactor = statuses.filter((s) => s.status === "awaiting_factor");
+      return { site, missing, flagged, awaitingFactor };
     }),
   );
 
   const totalMissing = siteSummaries.reduce((sum, s) => sum + s.missing.length, 0);
   const totalFlagged = siteSummaries.reduce((sum, s) => sum + s.flagged.length, 0);
+  const totalAwaitingFactor = siteSummaries.reduce((sum, s) => sum + s.awaitingFactor.length, 0);
 
   return (
     <div>
@@ -32,7 +34,7 @@ export default async function DashboardPage() {
         </Link>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card>
           <CardContent>
             <div className="text-2xl font-semibold text-slate-900">{totalMissing}</div>
@@ -45,10 +47,16 @@ export default async function DashboardPage() {
             <div className="text-sm text-slate-500">entries flagged for review</div>
           </CardContent>
         </Card>
+        <Card>
+          <CardContent>
+            <div className="text-2xl font-semibold text-amber-700">{totalAwaitingFactor}</div>
+            <div className="text-sm text-slate-500">entries saved, awaiting an emission factor</div>
+          </CardContent>
+        </Card>
       </div>
 
       <div className="mt-6 space-y-3">
-        {siteSummaries.map(({ site, missing, flagged }) => (
+        {siteSummaries.map(({ site, missing, flagged, awaitingFactor }) => (
           <Card key={site.id}>
             <CardHeader className="flex flex-row items-center justify-between py-3">
               <div>
@@ -59,7 +67,7 @@ export default async function DashboardPage() {
                 Open →
               </Link>
             </CardHeader>
-            {(missing.length > 0 || flagged.length > 0) && (
+            {(missing.length > 0 || flagged.length > 0 || awaitingFactor.length > 0) && (
               <CardContent className="space-y-2 pt-3">
                 {missing.map((m) => (
                   <div key={m.dataPoint.id} className="flex items-center justify-between text-sm">
@@ -75,6 +83,14 @@ export default async function DashboardPage() {
                       {site.name} — {f.periodLabel} {f.dataPoint.dataPointName.toLowerCase()} needs review
                     </span>
                     <Badge tone="warning">Flagged</Badge>
+                  </div>
+                ))}
+                {awaitingFactor.map((a) => (
+                  <div key={a.dataPoint.id} className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600">
+                      {site.name} — {a.periodLabel} {a.dataPoint.dataPointName.toLowerCase()} awaiting emission factor
+                    </span>
+                    <Badge tone="warning">Awaiting factor</Badge>
                   </div>
                 ))}
               </CardContent>

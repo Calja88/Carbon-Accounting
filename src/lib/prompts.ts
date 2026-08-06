@@ -31,6 +31,10 @@ export function resolvePrompt(promptTemplate: string, values: PromptTokenValues)
 
   return promptTemplate
     .replace(/\[Reading fleet\]/g, `${values.siteName} fleet`)
+    // "[site/function]" (S3-01) — the platform only has site-level entry,
+    // no separate "function" concept, so this resolves the same as [site]
+    // (same judgment call as the grey-fleet/Reading-fleet tokens above).
+    .replace(/\[site\/function\]/g, values.siteName)
     .replace(/\[site\]/g, values.siteName)
     .replace(/\[month\/quarter\]/g, periodLabel)
     .replace(/\[month\]/g, periodLabel)

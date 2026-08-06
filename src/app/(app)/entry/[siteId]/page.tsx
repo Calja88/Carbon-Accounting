@@ -10,6 +10,7 @@ const STATUS_BADGE: Record<string, { label: string; tone: "success" | "warning" 
   flagged: { label: "Flagged for review", tone: "warning" },
   missing: { label: "Not yet submitted", tone: "neutral" },
   log: { label: "Log as needed", tone: "neutral" },
+  awaiting_factor: { label: "Saved — awaiting emission factor", tone: "warning" },
 };
 
 // Plain-language section groupings — no "Scope 1 / Scope 2" jargon on the
@@ -18,6 +19,7 @@ const STATUS_BADGE: Record<string, { label: string; tone: "success" | "warning" 
 const SECTION_LABELS: Record<string, string> = {
   SCOPE_1: "Facilities, vehicles & refrigerants",
   SCOPE_2: "Electricity & purchased energy",
+  SCOPE_3: "Purchased goods, travel & commuting",
 };
 
 export default async function SiteEntryPage({ params }: { params: Promise<{ siteId: string }> }) {

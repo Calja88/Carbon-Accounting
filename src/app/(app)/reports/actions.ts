@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { buildReportPayload } from "@/lib/report-service";
+import { deriveCategory3Calculations } from "@/lib/entries-service";
 
 const schema = z.object({
   periodStartMonth: z.string().min(1),
@@ -34,6 +35,11 @@ export async function generateReportAction(
   if (periodEnd < periodStart) {
     return { error: "The end period must be after the start period." };
   }
+
+  // Cat 3 (fuel/energy-related activities) is auto-calculated from Scope
+  // 1/2 activity data — derive any newly-calculable rows for this period
+  // before building the report (idempotent, see deriveCategory3Calculations).
+  await deriveCategory3Calculations(periodStart, periodEnd);
 
   const payload = await buildReportPayload(periodStart, periodEnd);
 

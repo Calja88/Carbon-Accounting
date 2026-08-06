@@ -1,8 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { defaultPeriodInputValue, periodInputKindForFrequency, resolvePeriod } from "@/lib/period";
+import { formatPeriodLabel } from "@/lib/prompts";
 import { ActivityDataPoint } from "@prisma/client";
 
-export type QuantityEntryStatus = "submitted" | "flagged" | "missing" | "log";
+export type QuantityEntryStatus = "submitted" | "flagged" | "missing" | "log" | "awaiting_factor";
 
 export interface SiteDataPointStatus {
   dataPoint: ActivityDataPoint;
@@ -12,7 +13,7 @@ export interface SiteDataPointStatus {
 
 export async function getSiteQuantityStatus(siteId: string): Promise<SiteDataPointStatus[]> {
   const dataPoints = await prisma.activityDataPoint.findMany({
-    where: { formType: "QUANTITY" },
+    where: { formType: { in: ["QUANTITY", "SURVEY"] } },
     orderBy: { sortOrder: "asc" },
   });
 
@@ -28,18 +29,25 @@ export async function getSiteQuantityStatus(siteId: string): Promise<SiteDataPoi
     const inputValue = defaultPeriodInputValue(dp.frequency);
     const { periodStart } = resolvePeriod(dp.frequency, inputValue);
 
-    const entry = await prisma.activityEntry.findFirst({
-      where: { activityDataPointId: dp.id, siteId, periodStart },
-      orderBy: { enteredAt: "desc" },
-    });
-
     let status: QuantityEntryStatus = "missing";
-    if (entry) status = entry.status === "FLAGGED" ? "flagged" : "submitted";
+
+    if (dp.formType === "SURVEY") {
+      const survey = await prisma.commutingSurvey.findFirst({ where: { siteId, periodStart } });
+      if (survey) status = "submitted";
+    } else {
+      const entry = await prisma.activityEntry.findFirst({
+        where: { activityDataPointId: dp.id, siteId, periodStart },
+        orderBy: { enteredAt: "desc" },
+      });
+      if (entry) {
+        status = entry.status === "FLAGGED" ? "flagged" : entry.status === "AWAITING_FACTOR" ? "awaiting_factor" : "submitted";
+      }
+    }
 
     results.push({
       dataPoint: dp,
       status,
-      periodLabel: periodStart.toLocaleDateString("en-GB", { month: "long", year: "numeric" }),
+      periodLabel: formatPeriodLabel(periodStart, dp.frequency),
     });
   }
 

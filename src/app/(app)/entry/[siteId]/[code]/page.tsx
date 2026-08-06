@@ -3,6 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { defaultPeriodInputValue } from "@/lib/period";
 import { EntryForm } from "./entry-form";
+import { SurveyForm } from "./survey-form";
 
 export default async function EntryFormPage({ params }: { params: Promise<{ siteId: string; code: string }> }) {
   const { siteId, code } = await params;
@@ -15,7 +16,7 @@ export default async function EntryFormPage({ params }: { params: Promise<{ site
     }),
   ]);
 
-  if (!site || !dataPoint || dataPoint.formType !== "QUANTITY") notFound();
+  if (!site || !dataPoint || (dataPoint.formType !== "QUANTITY" && dataPoint.formType !== "SURVEY")) notFound();
 
   return (
     <div>
@@ -23,20 +24,34 @@ export default async function EntryFormPage({ params }: { params: Promise<{ site
         ← {site.name}
       </Link>
       <div className="mt-4">
-        <EntryForm
-          site={{ id: site.id, name: site.name }}
-          dataPoint={{
-            code: dataPoint.code,
-            dataPointName: dataPoint.dataPointName,
-            promptTemplate: dataPoint.promptTemplate,
-            helpText: dataPoint.helpText,
-            sourceSystemHint: dataPoint.sourceSystemHint,
-            unitOptions: dataPoint.unitOptions,
-            frequency: dataPoint.frequency,
-            factorOptions: dataPoint.factorOptions.map((o) => ({ id: o.id, label: o.label })),
-          }}
-          initialPeriodValue={defaultPeriodInputValue(dataPoint.frequency)}
-        />
+        {dataPoint.formType === "SURVEY" ? (
+          <SurveyForm
+            site={{ id: site.id, name: site.name }}
+            dataPoint={{
+              code: dataPoint.code,
+              promptTemplate: dataPoint.promptTemplate,
+              helpText: dataPoint.helpText,
+              frequency: dataPoint.frequency,
+              factorOptions: dataPoint.factorOptions.map((o) => ({ id: o.id, label: o.label })),
+            }}
+            initialPeriodValue={defaultPeriodInputValue(dataPoint.frequency)}
+          />
+        ) : (
+          <EntryForm
+            site={{ id: site.id, name: site.name }}
+            dataPoint={{
+              code: dataPoint.code,
+              dataPointName: dataPoint.dataPointName,
+              promptTemplate: dataPoint.promptTemplate,
+              helpText: dataPoint.helpText,
+              sourceSystemHint: dataPoint.sourceSystemHint,
+              unitOptions: dataPoint.unitOptions,
+              frequency: dataPoint.frequency,
+              factorOptions: dataPoint.factorOptions.map((o) => ({ id: o.id, label: o.label, unit: o.unit })),
+            }}
+            initialPeriodValue={defaultPeriodInputValue(dataPoint.frequency)}
+          />
+        )}
       </div>
     </div>
   );

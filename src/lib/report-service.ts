@@ -42,13 +42,22 @@ export interface ReportPayload {
     marketBasedTotalKgCo2e: number;
     byCategory: { category: string; locationKgCo2e: number; marketKgCo2e: number }[];
   };
+  scope3: {
+    totalKgCo2e: number;
+    byCategory: CategoryBreakdown[];
+  };
   dataQuality: {
     tierBreakdown: TierBreakdown[];
-    /** Basis note: weighted against Scope 1 + Scope 2 location-based, so a
-     *  Scope 2 entry isn't counted twice via its market-based duplicate. */
+    /** Basis note: weighted against Scope 1 + Scope 2 location-based + all
+     *  Scope 3, so a Scope 2 entry isn't counted twice via its market-based
+     *  duplicate. */
   };
   factorSources: FactorSourceUsed[];
   excludedFlaggedEntries: ExcludedEntry[];
+  /** Real activity data captured but not yet counted in any total above —
+   *  no matching emission factor has been imported yet (EntryStatus.
+   *  AWAITING_FACTOR). Disclosed, never silently dropped. */
+  awaitingFactorEntries: ExcludedEntry[];
   executiveSummary: string;
   generatedAt: string;
   calculationIds: string[];
@@ -59,7 +68,7 @@ function toNum(d: Prisma.Decimal | number): number {
 }
 
 export async function buildReportPayload(periodStart: Date, periodEnd: Date): Promise<ReportPayload> {
-  const [entities, includedCalculations, flaggedEntries] = await Promise.all([
+  const [entities, includedCalculations, flaggedEntries, awaitingFactorEntriesRaw] = await Promise.all([
     prisma.entity.findMany({ orderBy: { name: "asc" } }),
     prisma.calculation.findMany({
       where: {
@@ -74,16 +83,22 @@ export async function buildReportPayload(periodStart: Date, periodEnd: Date): Pr
       where: { periodStart: { gte: periodStart, lte: periodEnd }, status: "FLAGGED" },
       include: { activityDataPoint: true, site: true },
     }),
+    prisma.activityEntry.findMany({
+      where: { periodStart: { gte: periodStart, lte: periodEnd }, status: "AWAITING_FACTOR" },
+      include: { activityDataPoint: true, site: true },
+    }),
   ]);
 
   const scope1Calcs = includedCalculations.filter((c) => c.scope === "SCOPE_1");
   const scope2Calcs = includedCalculations.filter((c) => c.scope === "SCOPE_2");
   const scope2Location = scope2Calcs.filter((c) => c.basis === "LOCATION_BASED");
   const scope2Market = scope2Calcs.filter((c) => c.basis === "MARKET_BASED" || c.basis === "RESIDUAL_MIX");
+  const scope3Calcs = includedCalculations.filter((c) => c.scope === "SCOPE_3");
 
   const scope1Total = scope1Calcs.reduce((sum, c) => sum + toNum(c.resultKgCo2e), 0);
   const scope2LocationTotal = scope2Location.reduce((sum, c) => sum + toNum(c.resultKgCo2e), 0);
   const scope2MarketTotal = scope2Market.reduce((sum, c) => sum + toNum(c.resultKgCo2e), 0);
+  const scope3Total = scope3Calcs.reduce((sum, c) => sum + toNum(c.resultKgCo2e), 0);
 
   const scope1ByCategory = groupSum(scope1Calcs, (c) => c.activityEntry.activityDataPoint.category);
 
@@ -94,9 +109,15 @@ export async function buildReportPayload(periodStart: Date, periodEnd: Date): Pr
     marketKgCo2e: sumWhere(scope2Market, (c) => c.activityEntry.activityDataPoint.category === category),
   }));
 
-  // Data-quality tier weighting uses Scope 1 + Scope 2 location-based only,
-  // so a Scope 2 entry's market-based duplicate figure isn't double-counted.
-  const dqBasisCalcs = [...scope1Calcs, ...scope2Location];
+  // scope3Category is set on every Scope 3 Calculation directly (not read
+  // through the source ActivityDataPoint) since Cat 3 rows are derived and
+  // have no data point of their own — see Calculation.scope3Category.
+  const scope3ByCategory = groupSum(scope3Calcs, (c) => c.scope3Category ?? "Uncategorised");
+
+  // Data-quality tier weighting uses Scope 1 + Scope 2 location-based +
+  // all Scope 3, so a Scope 2 entry's market-based duplicate figure isn't
+  // double-counted (v2: extended to include Scope 3, per brief item 4).
+  const dqBasisCalcs = [...scope1Calcs, ...scope2Location, ...scope3Calcs];
   const dqTotal = dqBasisCalcs.reduce((sum, c) => sum + toNum(c.resultKgCo2e), 0);
   const tierBreakdown: TierBreakdown[] = (["TIER_1", "TIER_2", "TIER_3"] as const).map((tier) => {
     const kgCo2e = sumWhere(dqBasisCalcs, (c) => c.dataQualityTier === tier);
@@ -118,14 +139,23 @@ export async function buildReportPayload(periodStart: Date, periodEnd: Date): Pr
     reason: e.plausibilityReason,
   }));
 
+  const awaitingFactorEntries: ExcludedEntry[] = awaitingFactorEntriesRaw.map((e) => ({
+    site: e.site.name,
+    dataPoint: e.activityDataPoint.dataPointName,
+    periodLabel: e.periodStart.toLocaleDateString("en-GB", { month: "long", year: "numeric" }),
+    reason: "No emission factor imported yet for this category.",
+  }));
+
   const executiveSummary = buildExecutiveSummary({
     periodStart,
     periodEnd,
     scope1Total,
     scope2LocationTotal,
     scope2MarketTotal,
+    scope3Total,
     tierBreakdown,
     excludedCount: excludedFlaggedEntries.length,
+    awaitingFactorCount: awaitingFactorEntries.length,
   });
 
   return {
@@ -142,9 +172,11 @@ export async function buildReportPayload(periodStart: Date, periodEnd: Date): Pr
       marketBasedTotalKgCo2e: scope2MarketTotal,
       byCategory: scope2ByCategory,
     },
+    scope3: { totalKgCo2e: scope3Total, byCategory: scope3ByCategory },
     dataQuality: { tierBreakdown },
     factorSources: Array.from(factorSourceMap.values()),
     excludedFlaggedEntries,
+    awaitingFactorEntries,
     executiveSummary,
     generatedAt: new Date().toISOString(),
     calculationIds: includedCalculations.map((c) => c.id),
@@ -170,23 +202,33 @@ function buildExecutiveSummary(args: {
   scope1Total: number;
   scope2LocationTotal: number;
   scope2MarketTotal: number;
+  scope3Total: number;
   tierBreakdown: TierBreakdown[];
   excludedCount: number;
+  awaitingFactorCount: number;
 }): string {
   const periodLabel = `${args.periodStart.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} to ${args.periodEnd.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`;
   const totalLocationTonnes = (args.scope1Total + args.scope2LocationTotal) / 1000;
+  const scope3Tonnes = args.scope3Total / 1000;
   const tier1Pct = args.tierBreakdown.find((t) => t.tier === "TIER_1")?.percent ?? 0;
 
   const parts = [
     `Between ${periodLabel}, Paragon ID UK's day-to-day operations (Paragon ID, RFID Discovery and Thames Technology) produced an estimated ${totalLocationTonnes.toFixed(1)} tonnes of CO2-equivalent, covering fuel and refrigerants used on site and in company vehicles, and electricity bought in.`,
     `Of that, ${(args.scope1Total / 1000).toFixed(1)} tonnes came directly from burning fuel or topping up refrigerant equipment.`,
     `The rest — purchased electricity — comes to ${(args.scope2LocationTotal / 1000).toFixed(1)} tonnes based on the average UK grid mix, or ${(args.scope2MarketTotal / 1000).toFixed(1)} tonnes once the Group's actual electricity contracts and any renewable certificates are taken into account. Both figures are reported side by side, as required.`,
+    `Beyond the Group's own operations, purchased goods and services, business travel and employee commuting add a further estimated ${scope3Tonnes.toFixed(1)} tonnes this period.`,
     `${tier1Pct.toFixed(0)}% of this figure is built from directly metered or invoiced data — the most reliable kind — with the remainder calculated or estimated from the next-best available records.`,
   ];
 
   if (args.excludedCount > 0) {
     parts.push(
       `${args.excludedCount} submission${args.excludedCount === 1 ? "" : "s"} for this period looked unusual and ${args.excludedCount === 1 ? "has" : "have"} been held back for review rather than included here — see the data quality section.`,
+    );
+  }
+
+  if (args.awaitingFactorCount > 0) {
+    parts.push(
+      `${args.awaitingFactorCount} submission${args.awaitingFactorCount === 1 ? "" : "s"} ${args.awaitingFactorCount === 1 ? "has" : "have"} been recorded but ${args.awaitingFactorCount === 1 ? "isn't" : "aren't"} yet reflected in the totals above, pending an emission factor import.`,
     );
   }
 

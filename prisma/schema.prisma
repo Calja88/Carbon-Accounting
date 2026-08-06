@@ -31,11 +31,15 @@ enum ConsolidationApproach {
 enum Scope {
   SCOPE_1
   SCOPE_2
+  SCOPE_3
 }
 
 enum FormType {
   QUANTITY
   CONTRACT_INFO
+  /// Cat 7 employee commuting — a periodic headcount/modal-split survey,
+  /// not a single quantity entry (data map row S3-07).
+  SURVEY
 }
 
 enum EntryStatus {
@@ -43,6 +47,12 @@ enum EntryStatus {
   FLAGGED
   APPROVED
   REJECTED
+  /// Saved, real activity data with no matching EmissionFactor yet (v2:
+  /// Scope 3 factors are not seeded as placeholders — see README — so an
+  /// entry can be genuinely complete and still be waiting on a real,
+  /// imported factor before it produces a figure). Never silently dropped;
+  /// surfaced in reports as "awaiting emission factor".
+  AWAITING_FACTOR
 }
 
 enum FactorBasis {
@@ -50,6 +60,16 @@ enum FactorBasis {
   LOCATION_BASED
   MARKET_BASED
   RESIDUAL_MIX
+}
+
+/// Which of the methodology Section 7 sources a factor set came from —
+/// lets the platform hold more than one live source per category and
+/// resolve between them (OFFICIAL primary, EEIO fallback for Cat 1/2,
+/// SUPPLIER_SPECIFIC override where a named supplier has provided one).
+enum FactorSourceType {
+  OFFICIAL_DEFRA_DESNZ
+  EEIO_SPEND_BASED
+  SUPPLIER_SPECIFIC
 }
 
 enum DataQualityTier {
@@ -86,8 +106,9 @@ model Site {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
 
-  activityEntries ActivityEntry[]
-  energyContracts SiteEnergyContract[]
+  activityEntries  ActivityEntry[]
+  energyContracts  SiteEnergyContract[]
+  commutingSurveys CommutingSurvey[]
 
   @@unique([entityId, name])
 }
@@ -100,10 +121,12 @@ model User {
   role         Role
   createdAt    DateTime @default(now())
 
-  enteredEntries   ActivityEntry[]      @relation("EnteredBy")
-  enteredContracts SiteEnergyContract[] @relation("ContractEnteredBy")
-  calculations     Calculation[]        @relation("CalculatedBy")
-  reportSnapshots  ReportSnapshot[]     @relation("GeneratedBy")
+  enteredEntries     ActivityEntry[]      @relation("EnteredBy")
+  enteredContracts   SiteEnergyContract[] @relation("ContractEnteredBy")
+  calculations       Calculation[]        @relation("CalculatedBy")
+  reportSnapshots    ReportSnapshot[]     @relation("GeneratedBy")
+  enteredSurveys     CommutingSurvey[]    @relation("SurveyEnteredBy")
+  importedFactorSets EmissionFactorSet[]  @relation("FactorSetImportedBy")
 }
 
 // ---------------------------------------------------------------------------
@@ -130,22 +153,35 @@ model ActivityDataPoint {
   notes            String?
   sortOrder        Int             @default(0)
   factorCategory   String // matches EmissionFactor.category for this data point
+  /// GHG Protocol Scope 3 category label (e.g. "Cat 1 — Purchased goods &
+  /// services"), null for Scope 1/2. Copied onto every Calculation this
+  /// data point produces so reports can group Scope 3 totals by category
+  /// without going through this table (needed for Cat 3, which has no
+  /// data point of its own — see Calculation.scope3Category).
+  scope3Category   String?
 
   factorOptions FactorOption[]
   entries       ActivityEntry[]
 }
 
 /// Selectable sub-type options for a data point that needs one (fuel type,
-/// vehicle type, refrigerant type). subtypeKey matches EmissionFactor.subtypeKey.
+/// vehicle type, refrigerant type, business-travel mode, commuting mode).
+/// subtypeKey matches EmissionFactor.subtypeKey.
 model FactorOption {
   id                  String            @id @default(cuid())
   activityDataPointId String
   activityDataPoint   ActivityDataPoint @relation(fields: [activityDataPointId], references: [id])
   label               String // shown in the dropdown, e.g. "Diesel"
   subtypeKey          String // e.g. "diesel", "petrol", "car_average_diesel", "r410a"
+  /// Per-option unit override (e.g. "miles" for a rail/flight option,
+  /// "nights" for a hotel option) — only set where a data point's options
+  /// don't share one common unit (unitOptions). When set, the entry form
+  /// uses this instead of showing a unit picker.
+  unit                String?
   sortOrder           Int               @default(0)
 
-  entries ActivityEntry[]
+  entries                  ActivityEntry[]
+  commutingSurveyResponses CommutingSurveyResponse[]
 
   @@unique([activityDataPointId, subtypeKey])
 }
@@ -155,17 +191,29 @@ model FactorOption {
 // ---------------------------------------------------------------------------
 
 model EmissionFactorSet {
-  id            String    @id @default(cuid())
-  name          String // e.g. "UK Gov GHG Conversion Factors for Company Reporting 2024 (placeholder)"
-  publisher     String // e.g. "DEFRA/DESNZ"
-  vintageYear   Int // year of publication
-  publishedDate DateTime?
-  effectiveFrom DateTime
-  effectiveTo   DateTime?
-  sourceUrl     String?
-  isPlaceholder Boolean   @default(true) // true until a real official file is imported
-  notes         String?
-  createdAt     DateTime  @default(now())
+  id               String           @id @default(cuid())
+  name             String // e.g. "UK Gov GHG Conversion Factors for Company Reporting 2024 (placeholder)"
+  publisher        String // e.g. "DEFRA/DESNZ"
+  sourceType       FactorSourceType @default(OFFICIAL_DEFRA_DESNZ)
+  /// Only set for sourceType SUPPLIER_SPECIFIC — the named supplier this
+  /// set's factors apply to. Matched against ActivityEntry.supplierName
+  /// (methodology Section 7: supplier-specific data overrides EEIO/DEFRA
+  /// defaults where the Group has entered it).
+  supplierName     String?
+  vintageYear      Int // year of publication
+  publishedDate    DateTime?
+  effectiveFrom    DateTime
+  effectiveTo      DateTime?
+  sourceUrl        String?
+  isPlaceholder    Boolean          @default(true) // true until a real official file is imported
+  notes            String?
+  /// Set when this EmissionFactorSet was created via the admin factor
+  /// import (Part B) rather than seeded — traceability for who loaded
+  /// which file, and when.
+  sourceFileName   String?
+  importedByUserId String?
+  importedBy       User?            @relation("FactorSetImportedBy", fields: [importedByUserId], references: [id])
+  createdAt        DateTime         @default(now())
 
   factors EmissionFactor[]
 }
@@ -227,6 +275,12 @@ model ActivityEntry {
   factorOptionId String?
   factorOption   FactorOption? @relation(fields: [factorOptionId], references: [id])
 
+  /// Cat 1 (purchased goods & services) only — matched against
+  /// EmissionFactorSet.supplierName to look up a supplier-specific factor
+  /// override before falling back to EEIO/DEFRA (methodology Section 7).
+  /// Null/unused for every other data point.
+  supplierName String?
+
   dataQualityTier     DataQualityTier
   status              EntryStatus     @default(SUBMITTED)
   plausibilityFlagged Boolean         @default(false)
@@ -238,9 +292,53 @@ model ActivityEntry {
   enteredAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  calculations Calculation[]
+  calculations            Calculation[]
+  commutingSurveyResponse CommutingSurveyResponse?
 
   @@index([activityDataPointId, siteId, periodStart])
+}
+
+/// Cat 7 employee commuting (data map row S3-07) — "survey-based initially
+/// ... extrapolated across headcount" (methodology Section 9). One header
+/// row per site/period capturing the survey-level inputs (headcount,
+/// commuting days), so the raw inputs stay in the audit trail; the
+/// per-mode responses each become a normal ActivityEntry/Calculation once
+/// resolved, reusing the existing calculation + audit-trail pipeline
+/// rather than a bespoke one.
+model CommutingSurvey {
+  id                    String   @id @default(cuid())
+  siteId                String
+  site                  Site     @relation(fields: [siteId], references: [id])
+  periodStart           DateTime
+  periodEnd             DateTime
+  headcount             Int
+  /// User-entered, not assumed — neither source document gives a default
+  /// commuting-frequency figure (see README assumptions).
+  commutingDaysInPeriod Int
+  enteredByUserId       String
+  enteredBy             User     @relation("SurveyEnteredBy", fields: [enteredByUserId], references: [id])
+  enteredAt             DateTime @default(now())
+
+  responses CommutingSurveyResponse[]
+
+  @@index([siteId, periodStart])
+}
+
+model CommutingSurveyResponse {
+  id                     String          @id @default(cuid())
+  surveyId               String
+  survey                 CommutingSurvey @relation(fields: [surveyId], references: [id])
+  factorOptionId         String
+  factorOption           FactorOption    @relation(fields: [factorOptionId], references: [id])
+  percentOfHeadcount     Decimal         @db.Decimal(5, 2)
+  avgOneWayDistanceMiles Decimal         @db.Decimal(10, 3)
+
+  /// The derived ActivityEntry once a distance figure has been calculated
+  /// and run through the normal calculation pipeline.
+  activityEntryId String?        @unique
+  activityEntry   ActivityEntry? @relation(fields: [activityEntryId], references: [id])
+
+  @@unique([surveyId, factorOptionId])
 }
 
 /// One row per emission figure. Scope 2 electricity entries produce two rows
@@ -255,8 +353,14 @@ model Calculation {
   emissionFactorId String
   emissionFactor   EmissionFactor @relation(fields: [emissionFactorId], references: [id])
 
-  scope Scope
-  basis FactorBasis
+  scope          Scope
+  basis          FactorBasis
+  /// GHG Protocol Scope 3 category label, copied from
+  /// ActivityDataPoint.scope3Category for Cat 1/6/7 entries, or set
+  /// directly by the Cat 3 (fuel/energy-related) auto-derivation job,
+  /// which has no ActivityDataPoint of its own to read it from. Null for
+  /// Scope 1/2.
+  scope3Category String?
 
   inputValue Decimal @db.Decimal(18, 8)
   inputUnit  String
@@ -276,6 +380,15 @@ model Calculation {
   calculatedAt       DateTime @default(now())
   engineVersion      String   @default("calc-engine-v1")
   supersededById     String? // if a later recalculation replaced this row's relevance
+
+  /// Set only on Cat 3 (fuel/energy-related) rows auto-derived from a
+  /// Scope 1/2 calculation (well-to-tank / T&D losses) — points back at
+  /// the Scope 1/2 Calculation it was derived from. The unique constraint
+  /// makes re-running the derivation job idempotent: at most one Cat 3
+  /// companion row per source calculation, ever.
+  derivedFromCalculationId String?      @unique
+  derivedFromCalculation   Calculation? @relation("Cat3DerivedFrom", fields: [derivedFromCalculationId], references: [id])
+  derivedCategory3Row      Calculation? @relation("Cat3DerivedFrom")
 
   reportLinks ReportSnapshotCalculation[]
 
