@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { ArrowLeft, Download } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { ReportPayload } from "@/lib/report-service";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,13 +42,15 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
   return (
     <div className="max-w-4xl">
       <div className="no-print flex items-center justify-between">
-        <Link href="/reports" className="text-sm text-emerald-700 hover:underline">
-          ← All reports
+        <Link href="/reports" className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
+          <ArrowLeft className="h-3.5 w-3.5" />
+          All reports
         </Link>
         <div className="flex gap-2">
           <a href={`/reports/${id}/audit-trail.csv`}>
-            <button className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50">
-              Download audit trail (CSV)
+            <button className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50">
+              <Download className="h-3.5 w-3.5" />
+              Audit trail (CSV)
             </button>
           </a>
           <PrintButton />
@@ -55,7 +58,7 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
       </div>
 
       <div className="mt-4">
-        <h1 className="text-2xl font-semibold text-slate-900">GHG Inventory Report</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">GHG Inventory Report</h1>
         <p className="text-sm text-slate-500">
           Version {snapshot.version} · generated {snapshot.generatedAt.toLocaleString("en-GB")} by {snapshot.generatedBy.name}
         </p>

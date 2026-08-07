@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getSiteContractStatus } from "@/lib/entry-status";
 import { resolvePrompt } from "@/lib/prompts";
@@ -21,8 +22,9 @@ export default async function ElectricityContractPage({ params }: { params: Prom
 
   return (
     <div>
-      <Link href={`/entry/${siteId}`} className="text-sm text-emerald-700 hover:underline">
-        ← {site.name}
+      <Link href={`/entry/${siteId}`} className="flex w-fit items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
+        <ArrowLeft className="h-3.5 w-3.5" />
+        {site.name}
       </Link>
       <div className="mt-4">
         <ContractForm

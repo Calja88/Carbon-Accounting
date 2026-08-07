@@ -31,7 +31,7 @@ export function ContractForm({
         <p className="mt-2 text-sm text-emerald-800">
           This will be used for the market-based electricity calculation for {site.name}.
         </p>
-        <Link href={`/entry/${site.id}`} className="mt-4 inline-block text-sm font-medium text-emerald-700 hover:underline">
+        <Link href={`/entry/${site.id}`} className="mt-4 inline-block text-sm font-medium text-blue-700 hover:text-blue-800">
           ← Back to {site.name}
         </Link>
       </div>

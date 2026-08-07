@@ -13,8 +13,11 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-sm">
-        <div className="mb-6 text-center">
-          <h1 className="text-xl font-semibold text-slate-900">Paragon ID UK</h1>
+        <div className="mb-8 flex flex-col items-center text-center">
+          <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-base font-bold tracking-tight text-white">
+            PI
+          </span>
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Paragon ID UK</h1>
           <p className="text-sm text-slate-500">Carbon reporting platform</p>
         </div>
         <Card>

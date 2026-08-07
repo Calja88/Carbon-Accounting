@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 import { requireAdminSession } from "@/lib/admin";
 import { getFactorSetDetail } from "@/lib/factor-sets-service";
 import { factorCategoryLabel } from "@/lib/factor-categories";
@@ -16,12 +17,13 @@ export default async function AdminFactorSetDetailPage({ params }: { params: Pro
 
   return (
     <div className="max-w-3xl">
-      <Link href="/admin/factors" className="text-sm text-emerald-700 hover:underline">
-        ← All factor sets
+      <Link href="/admin/factors" className="flex w-fit items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
+        <ArrowLeft className="h-3.5 w-3.5" />
+        All factor sets
       </Link>
 
       <div className="mt-3 flex items-center gap-2">
-        <h1 className="text-lg font-semibold text-slate-900">{set.name}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{set.name}</h1>
         {set.isPlaceholder && <Badge tone="warning">Placeholder — not verified</Badge>}
       </div>
 

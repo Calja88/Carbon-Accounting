@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FileText, ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GenerateReportForm } from "./generate-report-form";
@@ -14,14 +15,16 @@ export default async function ReportsPage() {
   const startOfYear = new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).toISOString().slice(0, 7);
 
   return (
-    <div>
-      <h1 className="text-lg font-semibold text-slate-900">Reports</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        Every report is a permanent, versioned snapshot — generating a new one never overwrites an old one, so past
-        reports stay reproducible even if data or factors change later.
-      </p>
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Reports</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Every report is a permanent, versioned snapshot — generating a new one never overwrites an old one, so past
+          reports stay reproducible even if data or factors change later.
+        </p>
+      </div>
 
-      <Card className="mt-4">
+      <Card>
         <CardHeader>
           <CardTitle>Generate a new report</CardTitle>
         </CardHeader>
@@ -30,26 +33,39 @@ export default async function ReportsPage() {
         </CardContent>
       </Card>
 
-      <div className="mt-6 space-y-2">
-        {reports.length === 0 && <p className="text-sm text-slate-500">No reports generated yet.</p>}
-        {reports.map((r) => (
-          <Link key={r.id} href={`/reports/${r.id}`}>
-            <Card className="transition-shadow hover:shadow-md">
-              <CardContent className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium text-slate-900">
-                    Version {r.version} — {new Date(r.periodStart).toLocaleDateString("en-GB", { month: "short", year: "numeric" })} to{" "}
-                    {new Date(r.periodEnd).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}
+      <div className="space-y-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Past reports</h2>
+        {reports.length === 0 && (
+          <p className="text-sm text-slate-500">No reports generated yet.</p>
+        )}
+        <div className="space-y-2">
+          {reports.map((r) => (
+            <Link key={r.id} href={`/reports/${r.id}`}>
+              <Card className="transition-all hover:-translate-y-0.5 hover:shadow-md">
+                <CardContent className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                      <FileText className="h-4 w-4" />
+                    </span>
+                    <div>
+                      <div className="font-medium text-slate-900">
+                        Version {r.version} — {new Date(r.periodStart).toLocaleDateString("en-GB", { month: "short", year: "numeric" })} to{" "}
+                        {new Date(r.periodEnd).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}
+                      </div>
+                      <div className="text-sm text-slate-500">
+                        Generated {r.generatedAt.toLocaleString("en-GB")} by {r.generatedBy.name}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-sm text-slate-500">
-                    Generated {r.generatedAt.toLocaleString("en-GB")} by {r.generatedBy.name}
-                  </div>
-                </div>
-                <span className="text-sm font-medium text-emerald-700">View →</span>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
+                  <span className="flex items-center gap-1 text-sm font-medium text-blue-700">
+                    View
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </span>
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
+        </div>
       </div>
     </div>
   );
