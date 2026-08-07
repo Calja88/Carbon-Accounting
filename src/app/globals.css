@@ -39,4 +39,26 @@ body {
   body {
     background: #ffffff !important;
   }
+
+  /* Report sections shouldn't be split across a page break mid-table or
+     mid-chart — each card is a self-contained block. */
+  .break-inside-avoid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Chart SVG fills are meaningful data, not decoration — keep them when
+     the browser would otherwise drop backgrounds to save ink. */
+  svg {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Charts are laid out for screen width; let them shrink to the page. */
+  .overflow-x-auto {
+    overflow: visible !important;
+  }
+  svg {
+    max-width: 100% !important;
+  }
 }

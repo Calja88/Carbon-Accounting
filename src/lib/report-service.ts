@@ -1,9 +1,47 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { buildAnalyticsSnapshot } from "@/lib/analytics-service";
 
 export interface CategoryBreakdown {
   category: string;
   kgCo2e: number;
+}
+
+/** Per-site totals, added post-v2. Optional on the payload so snapshots
+ *  generated before this existed still render (see the report page's
+ *  fallbacks). */
+export interface SiteBreakdown {
+  siteId: string;
+  siteName: string;
+  entityName: string;
+  scope1: number;
+  scope2Location: number;
+  scope2Market: number;
+  scope3: number;
+  total: number;
+}
+
+export interface PeriodTotals {
+  scope1: number;
+  scope2Location: number;
+  scope2Market: number;
+  scope3: number;
+  total: number;
+}
+
+/** Same calendar window shifted back one year — "the same dates last year". */
+export interface PeriodComparison {
+  previousPeriodStart: string;
+  previousPeriodEnd: string;
+  current: PeriodTotals;
+  previous: PeriodTotals;
+  bySite: { siteId: string; currentTotal: number; previousTotal: number }[];
+}
+
+export interface MonthlyPoint {
+  month: string;
+  label: string;
+  total: number;
 }
 
 export interface TierBreakdown {
@@ -61,6 +99,10 @@ export interface ReportPayload {
   executiveSummary: string;
   generatedAt: string;
   calculationIds: string[];
+  /** All optional — snapshots predating these fields still render. */
+  bySite?: SiteBreakdown[];
+  comparison?: PeriodComparison;
+  monthly?: MonthlyPoint[];
 }
 
 function toNum(d: Prisma.Decimal | number): number {
@@ -68,6 +110,11 @@ function toNum(d: Prisma.Decimal | number): number {
 }
 
 export async function buildReportPayload(periodStart: Date, periodEnd: Date): Promise<ReportPayload> {
+  // Per-site, prior-year and monthly figures come from the same aggregation
+  // the dashboard uses, so a report and the dashboard can never disagree
+  // about the same period.
+  const analytics = await buildAnalyticsSnapshot(periodStart, periodEnd);
+
   const [entities, includedCalculations, flaggedEntries, awaitingFactorEntriesRaw] = await Promise.all([
     prisma.entity.findMany({ orderBy: { name: "asc" } }),
     prisma.calculation.findMany({
@@ -156,6 +203,8 @@ export async function buildReportPayload(periodStart: Date, periodEnd: Date): Pr
     tierBreakdown,
     excludedCount: excludedFlaggedEntries.length,
     awaitingFactorCount: awaitingFactorEntries.length,
+    previousTotal: analytics.previousGroup.total,
+    currentTotal: analytics.group.total,
   });
 
   return {
@@ -180,6 +229,40 @@ export async function buildReportPayload(periodStart: Date, periodEnd: Date): Pr
     executiveSummary,
     generatedAt: new Date().toISOString(),
     calculationIds: includedCalculations.map((c) => c.id),
+    bySite: analytics.sites.map((s) => ({
+      siteId: s.siteId,
+      siteName: s.siteName,
+      entityName: s.entityName,
+      scope1: s.totals.scope1,
+      scope2Location: s.totals.scope2Location,
+      scope2Market: s.totals.scope2Market,
+      scope3: s.totals.scope3,
+      total: s.totals.total,
+    })),
+    comparison: {
+      previousPeriodStart: analytics.previousPeriodStart.toISOString(),
+      previousPeriodEnd: analytics.previousPeriodEnd.toISOString(),
+      current: {
+        scope1: analytics.group.scope1,
+        scope2Location: analytics.group.scope2Location,
+        scope2Market: analytics.group.scope2Market,
+        scope3: analytics.group.scope3,
+        total: analytics.group.total,
+      },
+      previous: {
+        scope1: analytics.previousGroup.scope1,
+        scope2Location: analytics.previousGroup.scope2Location,
+        scope2Market: analytics.previousGroup.scope2Market,
+        scope3: analytics.previousGroup.scope3,
+        total: analytics.previousGroup.total,
+      },
+      bySite: analytics.sites.map((s) => ({
+        siteId: s.siteId,
+        currentTotal: s.totals.total,
+        previousTotal: analytics.previousSitesById[s.siteId]?.total ?? 0,
+      })),
+    },
+    monthly: analytics.monthly.map((m) => ({ month: m.month, label: m.label, total: m.total })),
   };
 }
 
@@ -206,6 +289,8 @@ function buildExecutiveSummary(args: {
   tierBreakdown: TierBreakdown[];
   excludedCount: number;
   awaitingFactorCount: number;
+  previousTotal: number;
+  currentTotal: number;
 }): string {
   const periodLabel = `${args.periodStart.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} to ${args.periodEnd.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}`;
   const totalLocationTonnes = (args.scope1Total + args.scope2LocationTotal) / 1000;
@@ -219,6 +304,23 @@ function buildExecutiveSummary(args: {
     `Beyond the Group's own operations, purchased goods and services, business travel and employee commuting add a further estimated ${scope3Tonnes.toFixed(1)} tonnes this period.`,
     `${tier1Pct.toFixed(0)}% of this figure is built from directly metered or invoiced data — the most reliable kind — with the remainder calculated or estimated from the next-best available records.`,
   ];
+
+  // Only make a year-on-year claim when there's a real prior-year figure to
+  // compare against — otherwise the "change" would just be the absence of data.
+  if (args.previousTotal > 0) {
+    const changePct = ((args.currentTotal - args.previousTotal) / args.previousTotal) * 100;
+    const direction = Math.abs(changePct) < 0.05 ? "level with" : changePct > 0 ? "above" : "below";
+    const magnitude = Math.abs(changePct).toFixed(Math.abs(changePct) < 10 ? 1 : 0);
+    parts.push(
+      direction === "level with"
+        ? `That is level with the same period last year (${(args.previousTotal / 1000).toFixed(1)} tonnes).`
+        : `That is ${magnitude}% ${direction} the same period last year, when the equivalent figure was ${(args.previousTotal / 1000).toFixed(1)} tonnes.`,
+    );
+  } else {
+    parts.push(
+      "There is no comparable figure for the same period last year, so no year-on-year change is stated here.",
+    );
+  }
 
   if (args.excludedCount > 0) {
     parts.push(

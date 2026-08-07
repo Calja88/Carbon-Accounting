@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Factory, Zap, ShoppingBag } from "lucide-react";
+import { ArrowLeft, Factory, Upload, Zap, ShoppingBag } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getSiteContractStatus, getSiteQuantityStatus } from "@/lib/entry-status";
 import { Card, CardContent } from "@/components/ui/card";
@@ -58,13 +58,24 @@ export default async function SiteEntryPage({ params }: { params: Promise<{ site
             <div className="space-y-2">
               {items.map(({ dataPoint, status, periodLabel }) => (
                 <Card key={dataPoint.id}>
-                  <CardContent className="flex items-center justify-between">
+                  <CardContent className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <div className="font-medium text-slate-900">{dataPoint.dataPointName}</div>
                       <div className="text-sm text-slate-500">{periodLabel}</div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-3">
                       <Badge tone={STATUS_BADGE[status].tone}>{STATUS_BADGE[status].label}</Badge>
+                      {/* Cat 6 business travel is bulk-loaded from ExpenseIn — see
+                          src/lib/expensein-import.ts — so offer that alongside manual entry. */}
+                      {dataPoint.code === "S3-06" && (
+                        <Link
+                          href={`/entry/${siteId}/business-travel-import`}
+                          className="flex items-center gap-1 text-sm font-medium text-blue-700 hover:text-blue-800"
+                        >
+                          <Upload className="h-3.5 w-3.5" />
+                          Import from ExpenseIn
+                        </Link>
+                      )}
                       <Link
                         href={`/entry/${siteId}/${dataPoint.code}`}
                         className="text-sm font-medium text-blue-700 hover:text-blue-800"
