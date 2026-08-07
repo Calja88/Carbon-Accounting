@@ -12,6 +12,44 @@ import { defineConfig } from "prisma/config";
 // generate never needs a live DB connection at all. Commands that actually
 // need to connect (migrate deploy, etc.) run later, once DATABASE_URL is
 // genuinely available, and will fail with a clear error then if it's not.
+const pooledUrl = process.env.DATABASE_URL ?? "";
+
+/**
+ * Migrations must NOT run through a connection pooler.
+ *
+ * `prisma migrate deploy` takes a Postgres *session-level* advisory lock
+ * (`SELECT pg_advisory_lock(...)`) to stop two deploys migrating at once.
+ * Neon's pooled endpoint is PgBouncer in transaction mode, which hands each
+ * statement to whatever backend is free rather than pinning a session — so
+ * the lock can never be held, and `migrate deploy` fails every time with
+ * "P1002 ... Timed out trying to acquire a postgres advisory lock". This is
+ * deterministic, not a flaky-network timeout.
+ *
+ * Neon exposes the same database on a direct (non-pooled) endpoint at the
+ * same hostname minus the `-pooler` suffix, so the direct URL is derived
+ * from DATABASE_URL rather than requiring a second secret to be kept in
+ * sync. `DIRECT_DATABASE_URL` overrides it if a different host is ever
+ * needed.
+ *
+ * Only the schema engine uses this. The application keeps using the pooled
+ * URL at runtime, which is what a serverless deployment wants.
+ */
+function deriveDirectUrl(url: string): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.includes("-pooler")) return url;
+    parsed.hostname = parsed.hostname.replace("-pooler", "");
+    return parsed.toString();
+  } catch {
+    // Not a parseable URL — hand it back untouched and let the engine
+    // report the real problem rather than masking it here.
+    return url;
+  }
+}
+
+const directUrl = process.env.DIRECT_DATABASE_URL || deriveDirectUrl(pooledUrl);
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
@@ -20,6 +58,7 @@ export default defineConfig({
   },
   engine: "classic",
   datasource: {
-    url: process.env.DATABASE_URL ?? "",
+    url: pooledUrl,
+    directUrl,
   },
 });
