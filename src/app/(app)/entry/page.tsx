@@ -2,6 +2,7 @@ import Link from "next/link";
 import { MapPin } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent } from "@/components/ui/card";
+import { ENTITY_LOGOS } from "@/lib/entity-logos";
 
 export default async function EntrySiteListPage() {
   const entities = await prisma.entity.findMany({
@@ -19,7 +20,13 @@ export default async function EntrySiteListPage() {
       <div className="space-y-6">
         {entities.map((entity) => (
           <div key={entity.id}>
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{entity.name}</h2>
+            <div className="mb-2 flex items-center gap-2">
+              {ENTITY_LOGOS[entity.name] ? (
+                // eslint-disable-next-line @next/next/no-img-element -- small static brand asset, next/image adds no value here
+                <img src={ENTITY_LOGOS[entity.name]} alt={entity.name} className="h-4 w-auto" />
+              ) : null}
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{entity.name}</h2>
+            </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {entity.sites.map((site) => (
                 <Link key={site.id} href={`/entry/${site.id}`}>

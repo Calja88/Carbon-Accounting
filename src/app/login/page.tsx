@@ -14,11 +14,10 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center text-center">
-          <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-base font-bold tracking-tight text-white">
-            PI
-          </span>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Paragon ID UK</h1>
-          <p className="text-sm text-slate-500">Carbon reporting platform</p>
+          {/* eslint-disable-next-line @next/next/no-img-element -- small static brand asset, next/image adds no value here */}
+          <img src="/logos/paragon-id.png" alt="Paragon ID" className="mb-3 h-9 w-auto" />
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">UK Carbon Reporting</h1>
+          <p className="text-sm text-slate-500">Paragon ID · RFID Discovery · Thames Technology</p>
         </div>
         <Card>
           <CardHeader>

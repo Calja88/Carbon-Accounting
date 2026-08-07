@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSiteQuantityStatus } from "@/lib/entry-status";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ENTITY_LOGOS } from "@/lib/entity-logos";
 
 export default async function DashboardPage() {
   const sites = await prisma.site.findMany({
@@ -77,7 +78,13 @@ export default async function DashboardPage() {
                   )}
                   <div>
                     <CardTitle>{site.name}</CardTitle>
-                    <p className="text-xs text-slate-500">{site.entity.name}</p>
+                    <p className="flex items-center gap-1.5 text-xs text-slate-500">
+                      {ENTITY_LOGOS[site.entity.name] ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- small static brand asset, next/image adds no value here
+                        <img src={ENTITY_LOGOS[site.entity.name]} alt="" className="h-3 w-auto" />
+                      ) : null}
+                      {site.entity.name}
+                    </p>
                   </div>
                 </div>
                 <Link href={`/entry/${site.id}`} className="flex items-center gap-1 text-sm font-medium text-blue-700 hover:text-blue-800">

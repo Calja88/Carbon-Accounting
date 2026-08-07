@@ -30,13 +30,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-6 px-4 py-3">
           <div className="flex items-center gap-8">
-            <Link href="/" className="flex items-center gap-2.5">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-xs font-bold tracking-tight text-white">
-                PI
-              </span>
-              <span className="hidden flex-col leading-tight sm:flex">
-                <span className="text-sm font-semibold text-slate-900">Paragon ID UK</span>
-                <span className="text-xs text-slate-500">Carbon Reporting</span>
+            <Link href="/" className="flex items-center gap-3">
+              {/* eslint-disable-next-line @next/next/no-img-element -- small static brand asset, next/image adds no value here */}
+              <img src="/logos/paragon-id.png" alt="Paragon ID" className="h-6 w-auto" />
+              <span className="hidden h-5 w-px bg-slate-200 sm:block" aria-hidden="true" />
+              <span className="hidden text-xs font-medium text-slate-500 sm:block">
+                UK
+                <br />
+                Carbon Reporting
               </span>
             </Link>
             <NavLinks isAdmin={isAdmin} />
