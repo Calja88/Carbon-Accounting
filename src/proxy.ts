@@ -1,9 +1,27 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 
+/**
+ * Paths served to signed-out visitors. The login page renders the Paragon
+ * ID mark from /public/logos, so those requests must not themselves be
+ * redirected to /login — that returns an HTML redirect where an image is
+ * expected, and the logo renders broken.
+ *
+ * Checked here in the function body as well as excluded by `config.matcher`
+ * below: the matcher is compiled into a build artifact that a platform
+ * build cache can serve a stale copy of, whereas this runs on every
+ * request that reaches the middleware at all.
+ */
+function isPublicAsset(pathname: string): boolean {
+  return pathname.startsWith("/logos/");
+}
+
 export default auth((req) => {
+  const { pathname } = req.nextUrl;
+  if (isPublicAsset(pathname)) return;
+
   const isLoggedIn = !!req.auth;
-  const isLoginPage = req.nextUrl.pathname.startsWith("/login");
+  const isLoginPage = pathname.startsWith("/login");
 
   if (!isLoggedIn && !isLoginPage) {
     return NextResponse.redirect(new URL("/login", req.nextUrl));
