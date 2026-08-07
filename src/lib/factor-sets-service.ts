@@ -92,6 +92,28 @@ export async function listFactorSets() {
 export async function getFactorSetDetail(id: string) {
   return prisma.emissionFactorSet.findUnique({
     where: { id },
-    include: { importedBy: true, factors: { orderBy: [{ category: "asc" }, { subtypeKey: "asc" }] } },
+    include: { importedBy: true, _count: { select: { factors: true } } },
+  });
+}
+
+/** Category breakdown for a set — used to show a manageable summary instead
+ * of dumping every row when a set holds thousands of factors (e.g. the full
+ * DEFRA/DESNZ reference library import, see README). */
+export async function getFactorSetCategoryCounts(factorSetId: string) {
+  const grouped = await prisma.emissionFactor.groupBy({
+    by: ["category"],
+    where: { factorSetId },
+    _count: { _all: true },
+    orderBy: { category: "asc" },
+  });
+  return grouped.map((g) => ({ category: g.category, count: g._count._all }));
+}
+
+/** Factor rows for one category within a set — the drill-down view so the
+ * admin UI never has to render thousands of rows at once. */
+export async function getFactorSetCategoryRows(factorSetId: string, category: string) {
+  return prisma.emissionFactor.findMany({
+    where: { factorSetId, category },
+    orderBy: [{ subtypeKey: "asc" }, { basis: "asc" }],
   });
 }
