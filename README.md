@@ -81,6 +81,12 @@ Other commands: `npm test` (Vitest), `npm run build`, `npm run lint`.
 4. Deploy. `npm run build` now runs `prisma migrate deploy` before `next build` (and `postinstall` already runs `prisma generate` after `npm install`), so every deploy applies any pending schema migrations automatically — `DATABASE_URL` must be reachable and set at build time for this to succeed.
 5. Seed it once: `npm run db:seed` (idempotent — safe to re-run) from a machine that can reach the database directly. This isn't run automatically on every deploy, since it isn't needed after the first time. Either use the seeded demo accounts below, or copy that pattern to create real accounts and remove/rotate the demo ones before real use.
 
+`db:seed` also inserts the illustrative placeholder life-cycle factors described under "Product LCA / PCF" below. If you want the product LCA module to work on a database where real assessments will be built — i.e. the methodology profile the engine reads, but no unsourced numbers — run `npm run db:seed:lca-methodology` instead. It is idempotent and inserts no factor values.
+
+```bash
+DATABASE_URL="postgres://…" npm run db:seed:lca-methodology
+```
+
 ### Demo accounts
 
 Seeded with password `ChangeMe123!` (change before any real use):
@@ -223,6 +229,10 @@ offset handling, cut-off threshold, factor hierarchy and data-quality requiremen
 engine reads these fields directly, so the rules are applied consistently and a reviewer can
 see exactly which ones produced a figure. Naming a standard here describes the approach
 followed — it is not a claim of conformity, and the platform never issues one.
+
+A starter profile is created by `npm run db:seed` and by `npm run db:seed:lca-methodology`.
+It is a starting point, not a decision: every field on it is read by the calculation engine,
+so review the whole profile before an assessment built on it is issued.
 
 ### Validation and verification readiness
 
