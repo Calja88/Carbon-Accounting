@@ -8,32 +8,57 @@
  * `migrate resolve --rolled-back` is Prisma's own production-safe recovery for
  * exactly that state: it touches no application table and drops no data.
  *
- * Runs before `migrate deploy` and is a no-op once there is nothing failed to
- * clear, so it is safe on every deploy and can be removed once the affected
- * environments have moved on.
+ * Runs before `migrate deploy`, and is a no-op once there is nothing failed to
+ * clear, so it is safe on every deploy and can be dropped from the build once
+ * every environment has moved past it.
  */
 import { execFileSync } from "node:child_process";
 
-const run = (args) =>
-  execFileSync("npx", ["prisma", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-
-let status = "";
-try {
-  status = run(["migrate", "status"]);
-} catch (error) {
-  // `migrate status` exits non-zero whenever anything is pending or failed —
-  // which is precisely the case we are here to inspect.
-  status = `${error.stdout ?? ""}${error.stderr ?? ""}`;
+function prisma(args) {
+  try {
+    return {
+      ok: true,
+      output: execFileSync("npx", ["prisma", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+    };
+  } catch (error) {
+    // `migrate status` exits non-zero whenever anything is pending or failed —
+    // which is precisely the state we are here to inspect, so the output
+    // matters more than the exit code.
+    return { ok: false, output: `${error.stdout ?? ""}${error.stderr ?? ""}` };
+  }
 }
 
-const failed = [...status.matchAll(/The `([^`]+)` migration started at [^\n]* failed/g)].map((m) => m[1]);
+/**
+ * Migrations known to have been recorded as failed in a deployed database by
+ * a superseded version of this repository. Named explicitly because the
+ * migration directory itself no longer exists locally — it was replaced by a
+ * corrected one — so nothing else can discover it.
+ */
+const KNOWN_FAILED = ["20260808090000_ai_layer_documents_and_lca"];
 
-if (failed.length === 0) {
-  console.log("No failed migrations recorded — nothing to resolve.");
-  process.exit(0);
+const { output } = prisma(["migrate", "status"]);
+
+const discovered = [
+  ...output.matchAll(/The `([^`]+)` migration started at [^\n]*failed/g),
+  ...output.matchAll(/^\s*[-•]?\s*(\d{14}_[A-Za-z0-9_]+)\s*$/gm),
+].map((match) => match[1]);
+
+const candidates = [...new Set([...discovered, ...KNOWN_FAILED])];
+let resolved = 0;
+
+for (const name of candidates) {
+  const attempt = prisma(["migrate", "resolve", "--rolled-back", name]);
+  if (attempt.ok) {
+    console.log(`Marked failed migration "${name}" as rolled back so the corrected version can apply.`);
+    resolved++;
+  }
+  // A failure here is the normal case for a migration that is fine — Prisma
+  // refuses to roll back one that never failed. Nothing to do, and nothing
+  // that should stop the build.
 }
 
-for (const name of failed) {
-  console.log(`Marking failed migration "${name}" as rolled back so the corrected version can apply.`);
-  run(["migrate", "resolve", "--rolled-back", name]);
-}
+console.log(
+  resolved === 0
+    ? "No failed migrations needed resolving."
+    : `Resolved ${resolved} failed migration${resolved === 1 ? "" : "s"}.`,
+);
