@@ -27,35 +27,45 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <Providers>
+      {/*
+        Two rows, not one. Brand + navigation + user block together want roughly
+        1400px of content; the max-w-6xl container offers 1120. On a single row
+        flex had to shrink them past their content width, which wrapped labels
+        mid-item and pushed the brand text over the first nav link. Giving the
+        navigation its own full-width row removes the competition entirely, so
+        nothing has to be dropped from the header to make it fit.
+      */}
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-6 px-4 py-3">
-          <div className="flex items-center gap-8">
-            <Link href="/" className="flex items-center gap-3">
-              {/* eslint-disable-next-line @next/next/no-img-element -- small static brand asset, next/image adds no value here */}
-              <img src="/logos/paragon-id.png" alt="Paragon ID" className="h-6 w-auto" />
-              <span className="hidden h-5 w-px bg-slate-200 sm:block" aria-hidden="true" />
-              <span className="hidden text-xs font-medium text-slate-500 sm:block">
-                UK
-                <br />
-                Carbon Reporting
-              </span>
-            </Link>
-            <NavLinks isAdmin={isAdmin} />
-          </div>
-          <div className="flex items-center gap-3">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 pt-3 pb-2">
+          <Link href="/" className="flex shrink-0 items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element -- small static brand asset, next/image adds no value here */}
+            <img src="/logos/paragon-id.png" alt="Paragon ID" className="h-6 w-auto" />
+            <span className="hidden h-5 w-px bg-slate-200 sm:block" aria-hidden="true" />
+            <span className="hidden whitespace-nowrap text-xs font-medium leading-tight text-slate-500 sm:block">
+              UK
+              <br />
+              Carbon Reporting
+            </span>
+          </Link>
+          <div className="flex shrink-0 items-center gap-3">
             {session?.user && (
               <div className="flex items-center gap-2.5">
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-50 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-100">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-100">
                   {initials(session.user.name ?? "?")}
                 </span>
                 <div className="hidden leading-tight sm:block">
-                  <div className="text-sm font-medium text-slate-800">{session.user.name}</div>
-                  <div className="text-xs text-slate-500">{ROLE_LABELS[session.user.role] ?? session.user.role}</div>
+                  <div className="whitespace-nowrap text-sm font-medium text-slate-800">{session.user.name}</div>
+                  <div className="whitespace-nowrap text-xs text-slate-500">
+                    {ROLE_LABELS[session.user.role] ?? session.user.role}
+                  </div>
                 </div>
               </div>
             )}
             <SignOutButton />
           </div>
+        </div>
+        <div className="mx-auto max-w-6xl px-4 pb-2">
+          <NavLinks isAdmin={isAdmin} />
         </div>
       </header>
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">{children}</main>

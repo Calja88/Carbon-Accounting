@@ -55,7 +55,10 @@ export function NavLinks({ isAdmin }: { isAdmin: boolean }) {
   const moreActive = MORE_ITEMS.some((item) => isActive(pathname, item.href));
 
   return (
-    <nav className="flex items-center gap-1 text-sm">
+    // flex-wrap rather than a horizontally scrolling row: the "More" menu is
+    // absolutely positioned, and an overflow-x container would clip it. Wrapping
+    // happens between whole items, never inside a label.
+    <nav className="flex flex-wrap items-center gap-1 text-sm">
       {items.map(({ href, label, icon: Icon }) => {
         const active = isActive(pathname, href);
         return (
@@ -63,24 +66,24 @@ export function NavLinks({ isAdmin }: { isAdmin: boolean }) {
             key={href}
             href={href}
             className={cn(
-              "flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium transition-colors",
+              "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 font-medium transition-colors",
               active ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
             )}
           >
-            <Icon className="h-4 w-4" />
+            <Icon className="h-4 w-4 shrink-0" />
             {label}
           </Link>
         );
       })}
 
-      <div className="relative">
+      <div className="relative shrink-0">
         <button
           type="button"
           onClick={() => setMoreOpen((open) => !open)}
           onBlur={() => setTimeout(() => setMoreOpen(false), 150)}
           aria-expanded={moreOpen}
           className={cn(
-            "flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium transition-colors",
+            "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 font-medium transition-colors",
             moreActive ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
           )}
         >
