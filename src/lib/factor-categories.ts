@@ -12,6 +12,7 @@
  */
 
 import { Scope } from "@prisma/client";
+import { LCA_FACTOR_CATEGORY_KEYS, lcaFactorCategoryLabel } from "@/lib/lca/factor-categories";
 
 export interface FactorCategoryDef {
   key: string;
@@ -103,10 +104,19 @@ export const FACTOR_CATEGORIES: FactorCategoryDef[] = [
 
 export const FACTOR_CATEGORY_KEYS = new Set(FACTOR_CATEGORIES.map((c) => c.key));
 
+/**
+ * True for corporate categories *and* product-LCA categories: both are loaded
+ * through the same admin factor importer into the same versioned library, so
+ * the importer's "is this a category the platform knows?" check has to see
+ * both lists or every life-cycle factor row would import with a warning.
+ */
 export function isKnownFactorCategory(key: string): boolean {
-  return FACTOR_CATEGORY_KEYS.has(key);
+  return FACTOR_CATEGORY_KEYS.has(key) || LCA_FACTOR_CATEGORY_KEYS.has(key);
 }
 
 export function factorCategoryLabel(key: string): string {
-  return FACTOR_CATEGORIES.find((c) => c.key === key)?.label ?? key;
+  const corporate = FACTOR_CATEGORIES.find((c) => c.key === key);
+  if (corporate) return corporate.label;
+  if (LCA_FACTOR_CATEGORY_KEYS.has(key)) return lcaFactorCategoryLabel(key);
+  return key;
 }

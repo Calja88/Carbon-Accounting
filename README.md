@@ -11,12 +11,20 @@ Built against `Paragon_ID_UK_Carbon_Methodology_v0.1.docx` (the rule set) and
 `CLAUDE_CODE_BRIEF.md`.
 
 - **MVP**: Scope 1 + Scope 2 data entry, calculation, and a single combined report.
-- **v2** (this build): Scope 3 Categories 1 (purchased goods & services, spend-based), 3
+- **v2**: Scope 3 Categories 1 (purchased goods & services, spend-based), 3
   (fuel/energy-related, auto-derived), 6 (business travel) and 7 (employee commuting,
   survey-based) — the four categories the data map tags "Phase 1 build" — plus a real
   emission-factor import mechanism (Part B, below) to replace the MVP's placeholder
-  factors. Scope 3 Categories 2/4/5/8/9 and base-year comparison and multi-entity report
-  splitting are deliberately not built yet (see "What's not built" below).
+  factors.
+- **v3** (this build): a **product life cycle assessment / product carbon footprint**
+  capability — product-level assessments with their own lifecycle model, inventory,
+  calculation engine, data quality, scenarios, review workflow, reporting and exchange
+  exports. It sits *alongside* the corporate inventory above, never inside it: the two
+  answer different questions and their totals are never combined. See "Product LCA / PCF"
+  below.
+
+Scope 3 Categories 2/4/5/8/9, base-year comparison and multi-entity report splitting are
+deliberately not built yet (see "What's not built" below).
 
 ## Tech stack
 
@@ -29,7 +37,8 @@ Built against `Paragon_ID_UK_Carbon_Methodology_v0.1.docx` (the rule set) and
 | Validation | Zod |
 | UI | Tailwind CSS, hand-rolled primitives in `src/components/ui` |
 | Spreadsheet parsing | ExcelJS (`.xlsx`/`.xlsm` factor imports), a small hand-rolled CSV parser |
-| Tests | Vitest, covering the calculation engine, unit conversion, plausibility, commuting-survey math, Cat 3 well-to-tank/T&D mapping and factor-import validation |
+| Arithmetic | `Prisma.Decimal` (decimal.js) throughout the product LCA engine — exact for `+ - ×`, 20 significant digits on division, and the same type the Decimal columns already use, so no lossy float hop between database and engine |
+| Tests | Vitest — the corporate calculation engine, unit conversion, plausibility, commuting-survey math, Cat 3 well-to-tank/T&D mapping, factor-import validation, and the whole product LCA engine, unit system, validation engine, analysis layer, inventory importer and PACT adapter (251 tests) |
 
 ## Schema
 
@@ -118,6 +127,202 @@ If none of the three has a matching factor, the entry is saved (never lost) with
 `AWAITING_FACTOR` and is disclosed in reports as "awaiting emission factor" rather than
 silently excluded or estimated.
 
+## Product LCA / PCF (v3)
+
+A product carbon footprint answers a different question from the corporate inventory above.
+The corporate inventory is an **absolute** figure for an organisation over a period; a
+product footprint is an **intensity** figure for one product against a functional unit. The
+platform therefore keeps them apart: no page, export or total adds one to the other, and
+where a product assessment draws on a corporate record that reuse is recorded as an
+explicit citation rather than a transfer (see "Corporate data citations" below).
+
+### Where to find it
+
+| Route | What it does |
+|---|---|
+| `/products` | Products, versions and manufacturing locations. An assessment attaches to a *version*, so a design change gets its own footprint instead of overwriting the last one. |
+| `/assessments` | Every assessment with its status and latest calculated footprint. |
+| `/assessments/[id]/goal-scope` | Goal, intended application and audience, scope, boundary, period, methodology profile, and the functional / declared unit, reference flow and modelled output. |
+| `…/model` | Processes per lifecycle stage, nested to any depth, with multi-output allocation. |
+| `…/inventory` | Every activity-data line, with a bill-of-materials view over the material and packaging lines. |
+| `…/inventory/[itemId]` | One line in full: factor assignment, transport legs, end-of-life routes, data quality, uncertainty, corporate citations and its calculated results. |
+| `…/import` | CSV/Excel bill-of-materials import: template, preview, per-row validation, duplicate handling, explicit confirmation. |
+| `…/results` | Total PCF, per functional unit, contributions by stage / process / material / supplier, hotspots, carbon classes and the primary-versus-secondary data split. |
+| `…/results/[resultId]` | "How was this calculated?" — the whole trail behind one figure. |
+| `…/data-quality` | Footprint-weighted pedigree scoring, coverage, uncertainty and one-at-a-time sensitivity. |
+| `…/scenarios` | Independent copies for testing a change, with absolute and percentage reduction and a change-driver breakdown. |
+| `…/registers` | Assumptions and exclusions registers, with approval separated from authorship. |
+| `…/evidence` | Source documents, linked to the record each supports, with SHA-256 checksums. |
+| `…/review` | Validation, verification readiness area by area, the status workflow, version issuing and the verification record. |
+| `…/versions` | Issued versions — frozen copies that never change — and revisions. |
+| `…/audit` | Append-only trail of every material change. |
+| `…/report` | The full assessment report, laid out for print (use Print → Save as PDF). |
+| `/suppliers` | Suppliers and their own product footprints, including PACT-aligned document import. |
+| `/methodologies` | The methodology register. |
+| `/help/lca` | Plain-language guidance and glossary. |
+
+### The calculation engine
+
+`src/lib/lca/engine/engine.ts` is a **pure function**: a fully-loaded snapshot of an
+assessment in, result rows and totals out. No database, no clock, no randomness — which is
+what makes a figure reproducible from an issued version months later, and lets every rule
+be tested directly against a known answer.
+
+`src/lib/lca/calculation-service.ts` is the only thing that touches the database: it loads
+the assessment, builds the snapshot, runs the engine and writes an
+`LcaCalculationRun` with its result rows. Runs are never overwritten — each recalculation
+is a new run, so the history of what an assessment said, and when, stays intact.
+
+Each result row carries its own arithmetic:
+
+```
+activity data → unit conversion → factor (value, source, version, boundary,
+geography, year, GWP basis) → methodology → adjustment → allocation → calculation → result
+```
+
+…stored as an ordered provenance trail on the row, rendered by the "How was this
+calculated?" page and exported in the calculation register.
+
+What the engine handles: materials (with manufacturing-loss gross-up and an optional
+recycled-content split), energy, fuel, manufacturing processes, packaging, water,
+multi-leg freight, waste, use phase, end-of-life routes and supplier PCFs; mass, physical,
+economic and manual allocation, cascading through nested processes; and normalisation to
+the functional unit.
+
+### Rules that are enforced rather than trusted
+
+- **Units are dimensional.** A factor per kWh cannot be applied to a quantity in kg; the
+  converter raises rather than falling back to a factor of 1. Currencies are never
+  converted into one another, because the platform holds no authoritative exchange rate.
+- **Manufacturing loss grosses the input up**, not the output: 9 kg out at a 10% loss
+  needed 10 kg in.
+- **Recycled content is disclosed, not discounted.** It only changes a figure when a
+  sourced recycled-route factor is also assigned, in which case the quantity is split into
+  two visible lines.
+- **End-of-life routes must total exactly 100%.** An unstated remainder is a silent
+  exclusion, so the validation engine treats it as an error rather than normalising it away.
+- **No universal recycling methodology is hard-coded.** An avoided-burden credit only exists
+  where the assessment's methodology profile selects one, and is then carried as its own
+  carbon class rather than quietly shrinking gross emissions.
+- **Offsets never reduce a product footprint.** They are disclosed on their own line.
+  Biogenic emissions, biogenic removals, technological removals and carbon stored in the
+  product are likewise tracked as separate classes; whether biogenic terms reach the
+  headline is a stated methodology choice.
+- **Placeholder factors cannot reach a reported figure.** They flow through to the register
+  and the report marked as placeholders, and the validation engine raises a hard error that
+  blocks the assessment from ever being marked ready for verification.
+- **An issued version is frozen.** It holds the whole assessment — model, inventory, factor
+  snapshots, results, registers, validation and readiness — and does not move when the live
+  assessment is edited. A correction is a new revision.
+
+### Methodology register
+
+`/methodologies` holds methodology as *structured configuration*, not prose: boundary, GWP
+basis, allocation basis, recycling treatment, electricity approach, biogenic accounting,
+offset handling, cut-off threshold, factor hierarchy and data-quality requirements. The
+engine reads these fields directly, so the rules are applied consistently and a reviewer can
+see exactly which ones produced a figure. Naming a standard here describes the approach
+followed — it is not a claim of conformity, and the platform never issues one.
+
+### Validation and verification readiness
+
+The validation engine (`src/lib/lca/validation-service.ts`) checks the whole assessment on
+demand and classifies findings as **Error**, **Warning** or **Advisory**. Errors block the
+move to "ready for verification". It covers, among others: missing goal, functional unit,
+boundary definition or period; inventory with no factor; unsourced or placeholder factors;
+incompatible units; missing or underived allocation; end-of-life routes that do not total
+100%; undefined supplier-PCF boundaries; undocumented exclusions; unexplained proxies;
+factors materially out of period; geography mismatches; stale results; and missing evidence
+where the methodology requires it.
+
+The review centre reports readiness — **Not ready**, **Significant gaps**, **Internal review
+recommended** or **Ready for independent review** — across goal and scope, lifecycle
+completeness, inventory completeness, factors, data quality, methodology, assumptions,
+exclusions, evidence, validation and auditability, with the reasoning shown for each. It is
+deliberately not a score and deliberately not called a conformity rating: it says whether
+the work can be reviewed, not whether it conforms to anything.
+
+Verified status requires a recorded verification (organisation, verifier, date, assurance
+type, scope, statement reference) *and* an issued version. The platform stores what an
+external reviewer concluded, attributed to them; it never verifies anything itself.
+
+### Data quality and uncertainty
+
+Five pedigree dimensions per line — temporal, geographical, technological, completeness,
+reliability — scored 1 (best) to 5 (worst). The assessment-level figure is **weighted by
+each line's share of the footprint**, so a poor score on a trivial line does not drag the
+assessment down and a poor score on the dominant line is not averaged away. Coverage is
+reported by data type (primary, supplier-specific, secondary, proxy, modelled) plus the
+share of the footprint sitting on lines with no scores at all.
+
+Line uncertainties are combined in quadrature into an **indicative** range. That assumes the
+lines are independent, which they are not where they share a dataset, so the caveat and the
+coverage figure travel with the range everywhere it appears. Sensitivity is one-at-a-time
+and deterministic. **Monte Carlo simulation is not implemented** — the per-line distribution
+inputs and the pure engine are the pieces one would need, and nothing in the product claims
+otherwise.
+
+### Corporate data citations
+
+An inventory line can cite a corporate `ActivityEntry` or `Site` as its source, with an
+attribution share and the basis for it. This is a **citation, not a transfer**: the
+corporate inventory keeps its full absolute figure, the product footprint keeps its own, and
+neither total changes because a link exists. Recording it is what stops the same meter
+reading being described two different ways in two reports with no way to tell.
+
+### Exports and exchange
+
+- **Calculation register (CSV)** — every result line at full stored precision: stage,
+  process, input, activity and unit, conversion factor, normalised activity and unit,
+  factor with its value, unit, source, version, boundary, geography, year and GWP basis,
+  data type, allocation, the formula as applied, gross and allocated kgCO2e, per functional
+  unit, data-quality score and uncertainty.
+- **Structured export (JSON)** — the whole assessment: goal and scope, model, inventory,
+  results with provenance, registers, evidence metadata, validation and readiness.
+- **PACT-aligned exchange document (JSON)** — for sharing a footprint with a customer's
+  system. Honest scope statement, which also ships inside every document produced: the
+  structure follows the published PACT product footprint data model as this implementation
+  understands it, but **no conformance testing has been performed against an authoritative
+  schema**, and none of the PACT network API is implemented. The adapter boundary
+  (`src/lib/lca/pact/`) is a pure function each way and is unit-tested in both directions,
+  so a future revision of the external specification is a change to one adapter rather than
+  a database migration. On import, anything the adapter does not recognise is kept verbatim
+  on the record instead of being dropped, and anything required but missing is reported
+  rather than guessed.
+- **Report** — a full assessment report laid out for print; produce a PDF with Print → Save
+  as PDF. No PDF-rendering dependency is added for this, following the pattern the corporate
+  report already uses.
+
+### Inventory / BOM import
+
+CSV or Excel, in a downloadable template. Two steps: the file is parsed and checked and
+**every** row is shown back with a status — ready, duplicate, or error with the reason —
+before anything is written; then the importer confirms, choosing whether duplicates are
+skipped, updated or added alongside. No row is ever dropped silently. A factor is assigned
+only when exactly one library factor matches the category, subtype, region and a compatible
+unit; where several match, none is chosen and the row imports awaiting one. A manually
+entered factor always requires a source.
+
+### Emission factors for product work
+
+There is **one** factor library. Life-cycle inventory factors (materials, freight, waste
+routes, electricity) load through the same admin importer, into the same versioned,
+append-only `EmissionFactorSet` / `EmissionFactor` tables, as corporate factors — the
+template simply gained optional columns for the metadata product work needs: `boundary`,
+`gwp_basis`, `reference_year`, `lca_data_source` and `uncertainty_percent`. Where no
+licensed dataset is available, a sourced factor can be entered by hand on an inventory line;
+the source is mandatory and an unsourced one is a validation error.
+
+### Evidence storage
+
+No object-storage credentials are configured for this deployment, so evidence uploads are
+held by a built-in database provider with a SHA-256 checksum recorded, alongside support for
+external links. The storage layer sits behind an interface
+(`EvidenceStorageProvider` in `src/lib/lca/evidence-service.ts`) selected by the
+`LCA_EVIDENCE_STORAGE` environment variable, so pointing it at S3, Azure Blob or Vercel Blob
+later is one provider implementation rather than a schema change or a migration of evidence
+already held.
+
 ## What's not built (by design, per the brief's phased plan)
 
 - Scope 3 Categories 2, 4, 5, 8, 9 (v3) and 10/13/14/15 (screened "not material") — only the
@@ -125,9 +330,15 @@ silently excluded or estimated.
 - Base year setting, recalculation policy, and year-on-year comparison — a base year can't be set until a first complete inventory exists.
 - Multi-entity report splitting — every entry is already tagged by entity and site, but the platform only produces one combined Group report.
 - ISO 14064-1 assurance-readiness mapping — methodology Section 12 is itself a placeholder pending Paragon's internal checklist.
-- Bulk/CSV import of *activity data* — guided per-entry forms are the only entry path for now, per the brief's "not a spreadsheet upload as the primary path." (Bulk import of *emission factors* is what Part B above adds — a different thing.)
+- Bulk/CSV import of *corporate* activity data — guided per-entry forms remain the only entry path there, per the brief's "not a spreadsheet upload as the primary path." (Bulk import of *emission factors* is what Part B above adds, and *product* bills of materials import through the product LCA module — different things.)
 - Automatic parsing of the real DESNZ workbook's native tab/column layout — the import mechanism uses our own canonical template instead; see Assumption 22.
-- Supplier product-carbon-footprint data collection (data map row S3-01b, per-unit rather than per-£) — tagged "Later" in the data map.
+- Monte Carlo uncertainty simulation for product assessments — the per-line distribution
+  inputs and a pure, repeatable engine are in place, but the simulation itself is not built
+  and nothing in the product implies that it is.
+- Live PACT network interoperability — the exchange-document adapter is built and tested in
+  both directions, but the network API (authentication, `/footprints`, event notification)
+  is not implemented, and no conformance testing against an authoritative schema has been
+  performed.
 
 ## Assumptions and open items — flagged, not silently resolved
 
