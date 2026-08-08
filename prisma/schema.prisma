@@ -109,6 +109,7 @@ model Site {
   activityEntries  ActivityEntry[]
   energyContracts  SiteEnergyContract[]
   commutingSurveys CommutingSurvey[]
+  sourceDocuments  SourceDocument[]
 
   @@unique([entityId, name])
 }
@@ -127,6 +128,21 @@ model User {
   reportSnapshots    ReportSnapshot[]     @relation("GeneratedBy")
   enteredSurveys     CommutingSurvey[]    @relation("SurveyEnteredBy")
   importedFactorSets EmissionFactorSet[]  @relation("FactorSetImportedBy")
+
+  // --- AI layer / documents / LCA back-relations ---
+  aiSettingsUpdates    AiSettings[]         @relation("AiSettingsUpdatedBy")
+  aiInteractions       AiInteraction[]      @relation("AiInteractionUser")
+  aiSuggestionsRaised  AiSuggestion[]       @relation("AiSuggestionRaisedBy")
+  aiSuggestionsDecided AiSuggestion[]       @relation("AiSuggestionDecidedBy")
+  uploadedDocuments    SourceDocument[]     @relation("DocumentUploadedBy")
+  createdExtractions   DocumentExtraction[] @relation("ExtractionCreatedBy")
+  reviewedExtractions  DocumentExtraction[] @relation("ExtractionReviewedBy")
+  lcaProjects          LcaProject[]         @relation("LcaProjectCreatedBy")
+  confirmedGoalScopes  LcaGoalScope[]       @relation("LcaGoalScopeConfirmedBy")
+  lcaAssumptions       LcaAssumption[]      @relation("LcaAssumptionCreatedBy")
+  lcaScenarios         LcaScenario[]        @relation("LcaScenarioCreatedBy")
+  lcaResults           LcaResult[]          @relation("LcaResultCalculatedBy")
+  lcaReviewFindings    LcaReviewFinding[]   @relation("LcaFindingRaisedBy")
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +247,13 @@ model EmissionFactor {
   co2eFactor  Decimal           @db.Decimal(18, 8) // kgCO2e per unit
   notes       String?
 
-  calculations Calculation[]
+  calculations         Calculation[]
+  /// Life-cycle inventory flows mapped to this factor. An LCA flow's
+  /// emissions are calculated by the deterministic LCA engine from this
+  /// factor's value — an AI suggestion can only ever propose *which*
+  /// factor to map, never what its value is.
+  lcaFlows             LcaFlow[]             @relation("LcaFlowFactor")
+  lcaScenarioOverrides LcaScenarioOverride[] @relation("LcaScenarioOverrideFactor")
 
   @@unique([factorSetId, category, subtypeKey, basis])
 }
@@ -287,6 +309,22 @@ model ActivityEntry {
   plausibilityReason  String?
   notes               String?
 
+  /// How this row's activity data reached the platform. AI never writes an
+  /// entry on its own: AI_EXTRACTED means a human reviewed and accepted an
+  /// AI extraction, and `enteredBy`/`enteredAt` record who accepted it and
+  /// when. Defaults to USER_ENTERED so every pre-existing row keeps its
+  /// original meaning.
+  dataOrigin DataOrigin @default(USER_ENTERED)
+
+  /// The uploaded evidence document this entry was created from, kept
+  /// linked for audit (methodology Section 8 evidence trail).
+  sourceDocumentId String?
+  sourceDocument   SourceDocument? @relation(fields: [sourceDocumentId], references: [id])
+
+  /// The AI extraction a human accepted to create this entry, if any.
+  acceptedFromExtractionId String?
+  acceptedFromExtraction   DocumentExtraction? @relation("ExtractionAcceptedEntries", fields: [acceptedFromExtractionId], references: [id])
+
   enteredByUserId String
   enteredBy       User     @relation("EnteredBy", fields: [enteredByUserId], references: [id])
   enteredAt       DateTime @default(now())
@@ -296,6 +334,7 @@ model ActivityEntry {
   commutingSurveyResponse CommutingSurveyResponse?
 
   @@index([activityDataPointId, siteId, periodStart])
+  @@index([sourceDocumentId])
 }
 
 /// Cat 7 employee commuting (data map row S3-07) — "survey-based initially
@@ -421,4 +460,682 @@ model ReportSnapshotCalculation {
   calculation      Calculation    @relation(fields: [calculationId], references: [id])
 
   @@unique([reportSnapshotId, calculationId])
+}
+
+// ---------------------------------------------------------------------------
+// AI layer
+//
+// Design rule enforced by this schema: AI never owns an accounting number.
+// Everything AI produces lands in AiSuggestion / DocumentExtraction, which a
+// human must accept before it becomes an ActivityEntry or an LcaFlow. The
+// deterministic calculation engine then does the arithmetic against approved
+// EmissionFactor rows, exactly as it already did before AI existed.
+// ---------------------------------------------------------------------------
+
+/// The task types the model router knows about. A model is chosen per task
+/// (AiTaskModel), never hard-coded at a call site.
+enum AiTaskType {
+  GENERAL_CHAT
+  CARBON_REASONING
+  EMISSION_CLASSIFICATION
+  DOCUMENT_EXTRACTION
+  DOCUMENT_VISION
+  LCA_ASSISTANT
+  DATA_QUALITY_REVIEW
+  REPORT_ASSISTANT
+}
+
+enum AiCallStatus {
+  SUCCESS
+  VALIDATION_FAILED
+  PROVIDER_ERROR
+  RATE_LIMITED
+  TIMEOUT
+  DISABLED
+  NO_MODEL_AVAILABLE
+  NOT_CONFIGURED
+  FORBIDDEN
+}
+
+enum AiSuggestionStatus {
+  PENDING
+  ACCEPTED
+  EDITED
+  REJECTED
+  SUPERSEDED
+}
+
+/// How much of an AI call is retained. Full prompts are never stored at any
+/// level — see src/lib/ai/audit.ts for what each level keeps and why.
+enum AiLoggingLevel {
+  MINIMAL
+  STANDARD
+  VERBOSE
+}
+
+/// Provenance of a stored value, so a reader can always tell user-entered
+/// data apart from imported, AI-extracted and derived data.
+enum DataOrigin {
+  USER_ENTERED
+  IMPORTED
+  AI_EXTRACTED
+  DERIVED
+}
+
+/// Single-row application configuration for the AI layer (`id` is always
+/// "singleton"). Environment variables provide the safe defaults; this table
+/// lets an administrator change model routing and safety settings without a
+/// code change or redeploy. No API key is ever stored here — the key is read
+/// from OPENROUTER_API_KEY server-side only.
+model AiSettings {
+  id                   String         @id @default("singleton")
+  aiEnabled            Boolean        @default(true)
+  openRouterEnabled    Boolean        @default(true)
+  /// When true the router will only ever call a model whose OpenRouter
+  /// pricing metadata confirms it is free. If no free model is available for
+  /// a task, the call fails closed with NO_MODEL_AVAILABLE — it never
+  /// silently falls through to a paid model.
+  freeOnly             Boolean        @default(true)
+  /// Whether OpenRouter's own free-model router (openrouter/free) may be used.
+  allowFreeRouter      Boolean        @default(true)
+  /// Deliberately defaults to OFF: an extraction always goes to a human
+  /// review screen before it becomes accounting data.
+  autoAcceptExtraction Boolean        @default(false)
+  /// Suggestions below this confidence are always marked requiresReview.
+  minConfidence        Decimal        @default(0.7) @db.Decimal(4, 3)
+  loggingLevel         AiLoggingLevel @default(STANDARD)
+  requestsPerMinute    Int            @default(12)
+  requestsPerDay       Int            @default(300)
+
+  /// Cached copy of OpenRouter's live model catalogue (GET /api/v1/models),
+  /// so free/paid classification and capability checks use the provider's own
+  /// current metadata rather than a hand-maintained list in source.
+  catalogJson        Json?
+  catalogRefreshedAt DateTime?
+
+  updatedByUserId String?
+  updatedBy       User?    @relation("AiSettingsUpdatedBy", fields: [updatedByUserId], references: [id])
+  updatedAt       DateTime @updatedAt
+
+  taskModels AiTaskModel[]
+}
+
+/// Per-task model assignment, editable by an administrator in the UI.
+model AiTaskModel {
+  id              String     @id @default(cuid())
+  settingsId      String
+  settings        AiSettings @relation(fields: [settingsId], references: [id], onDelete: Cascade)
+  task            AiTaskType
+  modelId         String
+  fallbackModelId String?
+  updatedAt       DateTime   @updatedAt
+
+  @@unique([settingsId, task])
+}
+
+/// One row per AI call attempt — the audit trail for AI activity. Full
+/// prompts and raw document text are deliberately not stored (see
+/// AiLoggingLevel); API keys never are, at any level.
+model AiInteraction {
+  id             String       @id @default(cuid())
+  task           AiTaskType
+  /// Which AIProvider implementation handled the call, e.g. "openrouter".
+  provider       String
+  feature        String
+  modelRequested String
+  modelUsed      String?
+  status         AiCallStatus
+  usedFallback   Boolean      @default(false)
+  attempts       Int          @default(1)
+
+  userId String?
+  user   User?   @relation("AiInteractionUser", fields: [userId], references: [id])
+
+  entityId    String?
+  siteId      String?
+  relatedType String?
+  relatedId   String?
+
+  sourceDocumentId String?
+  sourceDocument   SourceDocument? @relation(fields: [sourceDocumentId], references: [id])
+
+  confidence       Decimal? @db.Decimal(4, 3)
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  /// Only populated when OpenRouter itself reports a cost — never estimated.
+  costUsd          Decimal? @db.Decimal(14, 8)
+  latencyMs        Int?
+
+  errorCode     String?
+  errorMessage  String?
+  outputSummary Json?
+
+  createdAt DateTime @default(now())
+
+  suggestions AiSuggestion[]
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([task, createdAt])
+  @@index([status, createdAt])
+}
+
+/// An AI-produced proposal awaiting a human decision. Nothing here is
+/// authoritative: accepting one is what writes real data, and that write is
+/// attributed to the accepting user.
+model AiSuggestion {
+  id         String             @id @default(cuid())
+  task       AiTaskType
+  feature    String
+  /// What the suggestion is about, e.g. "ACTIVITY_ENTRY", "EMISSION_FACTOR",
+  /// "LCA_FLOW", "DOCUMENT".
+  targetType String
+  targetId   String?
+  status     AiSuggestionStatus @default(PENDING)
+
+  confidence       Decimal? @db.Decimal(4, 3)
+  requiresReview   Boolean  @default(true)
+  /// Short auditable justification ("Classified as Scope 2 because ...").
+  /// Never a chain-of-thought transcript.
+  reasoningSummary String?
+  payload          Json
+  /// What the human actually accepted, when they edited before accepting.
+  finalPayload     Json?
+  modelUsed        String?
+
+  interactionId String?
+  interaction   AiInteraction? @relation(fields: [interactionId], references: [id])
+
+  raisedByUserId String
+  raisedBy       User     @relation("AiSuggestionRaisedBy", fields: [raisedByUserId], references: [id])
+  createdAt      DateTime @default(now())
+
+  decidedByUserId String?
+  decidedBy       User?     @relation("AiSuggestionDecidedBy", fields: [decidedByUserId], references: [id])
+  decidedAt       DateTime?
+
+  @@index([targetType, targetId])
+  @@index([status, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Evidence documents (invoices, Waste Transfer Notes, meter statements ...)
+// ---------------------------------------------------------------------------
+
+enum SourceDocumentKind {
+  ELECTRICITY_INVOICE
+  GAS_INVOICE
+  WATER_INVOICE
+  FUEL_INVOICE
+  WASTE_TRANSFER_NOTE
+  WASTE_INVOICE
+  TRANSPORT_RECORD
+  SUPPLIER_DOCUMENT
+  METER_STATEMENT
+  OTHER
+  UNKNOWN
+}
+
+enum DocumentStatus {
+  UPLOADED
+  EXTRACTED
+  EXTRACTION_FAILED
+  PARTIALLY_ACCEPTED
+  ACCEPTED
+  REJECTED
+}
+
+/// Uploaded evidence. Bytes live in Postgres so the platform stays a single
+/// deployable with no object-store dependency — size-capped in application
+/// code (AI_MAX_DOCUMENT_BYTES). Document text is always treated as
+/// untrusted content when it reaches a model.
+model SourceDocument {
+  id       String @id @default(cuid())
+  filename String
+  mimeType String
+  byteSize Int
+  /// Content hash — lets a re-upload of the same file be recognised rather
+  /// than silently duplicated, and pins the exact bytes an extraction ran on.
+  sha256   String
+  content  Bytes
+
+  kind   SourceDocumentKind @default(UNKNOWN)
+  status DocumentStatus     @default(UPLOADED)
+
+  siteId String?
+  site   Site?   @relation(fields: [siteId], references: [id])
+
+  uploadedByUserId String
+  uploadedBy       User     @relation("DocumentUploadedBy", fields: [uploadedByUserId], references: [id])
+  uploadedAt       DateTime @default(now())
+  notes            String?
+
+  extractions     DocumentExtraction[]
+  activityEntries ActivityEntry[]
+  aiInteractions  AiInteraction[]
+  lcaEvidence     LcaEvidence[]
+
+  @@index([siteId, uploadedAt])
+  @@index([sha256])
+}
+
+/// One AI extraction attempt against a document. `payload` is a validated
+/// DocumentExtractionResult (see src/lib/ai/schemas.ts) — never raw model
+/// output.
+model DocumentExtraction {
+  id         String         @id @default(cuid())
+  documentId String
+  document   SourceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  modelUsed     String?
+  status        AiCallStatus
+  payload       Json?
+  confidence    Decimal?     @db.Decimal(4, 3)
+  warnings      String[]
+  missingFields String[]
+  errorMessage  String?
+  interactionId String?
+
+  createdByUserId String
+  createdBy       User     @relation("ExtractionCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+
+  reviewedByUserId String?
+  reviewedBy       User?     @relation("ExtractionReviewedBy", fields: [reviewedByUserId], references: [id])
+  reviewedAt       DateTime?
+
+  acceptedEntries ActivityEntry[] @relation("ExtractionAcceptedEntries")
+
+  @@index([documentId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Life Cycle Assessment
+//
+// An LCA is a persistent, structured project — not a chat transcript. The AI
+// copilot reads this data and can propose additions, but every methodological
+// choice below is stored because a human confirmed it.
+// ---------------------------------------------------------------------------
+
+enum LcaProjectStatus {
+  DRAFT
+  IN_PROGRESS
+  UNDER_REVIEW
+  COMPLETE
+  ARCHIVED
+}
+
+enum LcaBoundaryType {
+  CRADLE_TO_GATE
+  CRADLE_TO_GRAVE
+  GATE_TO_GATE
+  CRADLE_TO_CRADLE
+  OTHER
+}
+
+enum LcaAllocationMethod {
+  NOT_APPLICABLE
+  NONE_SUBDIVISION
+  MASS
+  ECONOMIC
+  ENERGY
+  PHYSICAL_CAUSALITY
+  SYSTEM_EXPANSION
+  OTHER
+}
+
+enum LcaStageKey {
+  RAW_MATERIALS
+  INBOUND_TRANSPORT
+  MANUFACTURING
+  PACKAGING
+  DISTRIBUTION
+  USE
+  END_OF_LIFE
+  OTHER
+}
+
+enum LcaFlowDirection {
+  INPUT
+  OUTPUT
+}
+
+enum LcaFlowType {
+  MATERIAL
+  ENERGY
+  FUEL
+  ELECTRICITY
+  WATER
+  TRANSPORT
+  WASTE
+  EMISSION
+  PRODUCT
+  CO_PRODUCT
+}
+
+enum LcaDataType {
+  PRIMARY
+  SECONDARY
+}
+
+enum LcaReviewStatus {
+  NOT_REVIEWED
+  INTERNAL_REVIEW
+  EXTERNAL_REVIEW
+  PANEL_REVIEW
+}
+
+enum LcaFindingSource {
+  HUMAN
+  AI
+}
+
+enum LcaFindingSeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum LcaFindingStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  DISMISSED
+}
+
+model LcaProject {
+  id          String           @id @default(cuid())
+  name        String
+  productName String
+  description String?
+  status      LcaProjectStatus @default(DRAFT)
+
+  /// Which operating unit/site the study belongs to. Used by the AI
+  /// authorization boundary as well as for reporting.
+  entityId String?
+  siteId   String?
+
+  /// The application methodology version the study was built against, so a
+  /// later methodology change is visible rather than silently applied.
+  methodologyVersion String @default("paragon-lca-v1")
+
+  createdByUserId String
+  createdBy       User     @relation("LcaProjectCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  goalScope      LcaGoalScope?
+  stages         LcaStage[]
+  assumptions    LcaAssumption[]
+  scenarios      LcaScenario[]
+  results        LcaResult[]
+  evidence       LcaEvidence[]
+  reviewFindings LcaReviewFinding[]
+
+  @@index([entityId])
+  @@index([status, updatedAt])
+}
+
+/// ISO 14040/14044-shaped goal & scope definition. Every field here is a
+/// methodological choice: the wizard can explain each one and the AI can
+/// help word it, but `confirmedBy`/`confirmedAt` record that a human
+/// actually made the decision.
+model LcaGoalScope {
+  id        String     @id @default(cuid())
+  projectId String     @unique
+  project   LcaProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  purpose              String?
+  intendedApplication  String?
+  intendedAudience     String?
+  /// Whether results are intended to support a comparative assertion
+  /// disclosed to the public — which, under ISO 14044, brings additional
+  /// requirements including critical review by an interested-party panel.
+  comparativeAssertion Boolean @default(false)
+
+  functionalUnitDescription String?
+  functionalUnitQuantity    Decimal? @db.Decimal(18, 6)
+  functionalUnitUnit        String?
+  referenceFlowDescription  String?
+  referenceFlowQuantity     Decimal? @db.Decimal(18, 6)
+  referenceFlowUnit         String?
+
+  systemBoundaryType    LcaBoundaryType?
+  systemBoundaryNotes   String?
+  geography             String?
+  timePeriodStart       DateTime?
+  timePeriodEnd         DateTime?
+  technologyDescription String?
+
+  cutOffCriteria          String?
+  exclusions              String?
+  allocationMethod        LcaAllocationMethod @default(NOT_APPLICABLE)
+  allocationRationale     String?
+  impactCategories        String[]
+  dataQualityRequirements String?
+  limitations             String?
+
+  criticalReviewStatus LcaReviewStatus @default(NOT_REVIEWED)
+  criticalReviewNotes  String?
+
+  confirmedByUserId String?
+  confirmedBy       User?     @relation("LcaGoalScopeConfirmedBy", fields: [confirmedByUserId], references: [id])
+  confirmedAt       DateTime?
+  updatedAt         DateTime  @updatedAt
+}
+
+model LcaStage {
+  id        String     @id @default(cuid())
+  projectId String
+  project   LcaProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  key             LcaStageKey
+  name            String
+  description     String?
+  included        Boolean     @default(true)
+  /// Required when `included` is false — an exclusion has to be justified,
+  /// not silent.
+  exclusionReason String?
+  sortOrder       Int         @default(0)
+
+  processes LcaProcess[]
+
+  @@index([projectId, sortOrder])
+}
+
+model LcaProcess {
+  id      String   @id @default(cuid())
+  stageId String
+  stage   LcaStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+
+  name           String
+  description    String?
+  geography      String?
+  referenceYear  Int?
+  technologyNote String?
+  sortOrder      Int     @default(0)
+
+  flows LcaFlow[]
+
+  @@index([stageId, sortOrder])
+}
+
+/// One life cycle inventory record. Quantities are per functional unit
+/// unless `perFunctionalUnit` is false, in which case the engine scales by
+/// the reference flow. `emissionFactorId` points at a row in the platform's
+/// own approved factor catalogue — an AI suggestion can propose which row,
+/// but the value always comes from the catalogue.
+model LcaFlow {
+  id        String     @id @default(cuid())
+  processId String
+  process   LcaProcess @relation(fields: [processId], references: [id], onDelete: Cascade)
+
+  direction         LcaFlowDirection
+  flowType          LcaFlowType
+  name              String
+  quantity          Decimal          @db.Decimal(18, 8)
+  unit              String
+  perFunctionalUnit Boolean          @default(true)
+
+  /// Transport flows: the engine computes tonne-km deterministically from
+  /// these two figures rather than trusting a pre-multiplied number.
+  transportMassTonnes Decimal? @db.Decimal(18, 8)
+  transportDistanceKm Decimal? @db.Decimal(18, 6)
+
+  emissionFactorId String?
+  emissionFactor   EmissionFactor? @relation("LcaFlowFactor", fields: [emissionFactorId], references: [id])
+
+  /// Share of this flow allocated to the product under study (ISO 14044
+  /// allocation). Defaults to 100%.
+  allocationPercent Decimal @default(100) @db.Decimal(6, 3)
+
+  dataSource    String?
+  dataType      LcaDataType?
+  geography     String?
+  referenceYear Int?
+  supplierName  String?
+  notes         String?
+
+  /// Transparent data-quality indicators, 1 (best) to 5 (worst). Null means
+  /// "not assessed" and is reported as UNKNOWN — never quietly treated as good.
+  dqReliability   Int?
+  dqCompleteness  Int?
+  dqTemporal      Int?
+  dqGeographical  Int?
+  dqTechnological Int?
+
+  dataOrigin DataOrigin @default(USER_ENTERED)
+  /// True when the row started life as an AI suggestion a human accepted.
+  aiAssisted Boolean    @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  scenarioOverrides LcaScenarioOverride[]
+  evidence          LcaEvidence[]
+
+  @@index([processId])
+}
+
+model LcaAssumption {
+  id        String     @id @default(cuid())
+  projectId String
+  project   LcaProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  topic      String
+  statement  String
+  rationale  String?
+  /// Recorded when the assumption text originated from an AI suggestion a
+  /// human accepted, so the report can disclose it.
+  aiAssisted Boolean @default(false)
+
+  createdByUserId String
+  createdBy       User     @relation("LcaAssumptionCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+}
+
+/// A what-if variant of the baseline inventory. Scenario results are
+/// produced by the same deterministic engine as the baseline — the AI only
+/// ever interprets numbers the engine produced.
+model LcaScenario {
+  id        String     @id @default(cuid())
+  projectId String
+  project   LcaProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  isBaseline  Boolean @default(false)
+
+  createdByUserId String
+  createdBy       User     @relation("LcaScenarioCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+
+  overrides LcaScenarioOverride[]
+  results   LcaResult[]
+
+  @@index([projectId])
+}
+
+model LcaScenarioOverride {
+  id         String      @id @default(cuid())
+  scenarioId String
+  scenario   LcaScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  flowId String
+  flow   LcaFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  overrideQuantity            Decimal?        @db.Decimal(18, 8)
+  overrideTransportDistanceKm Decimal?        @db.Decimal(18, 6)
+  overrideEmissionFactorId    String?
+  overrideEmissionFactor      EmissionFactor? @relation("LcaScenarioOverrideFactor", fields: [overrideEmissionFactorId], references: [id])
+  excluded                    Boolean         @default(false)
+  note                        String?
+
+  @@unique([scenarioId, flowId])
+}
+
+/// A frozen deterministic calculation run. `payload` holds the full
+/// drill-down (stage -> process -> flow -> activity data -> factor ->
+/// equation), so a result stays explainable even if the inventory changes later.
+model LcaResult {
+  id         String       @id @default(cuid())
+  projectId  String
+  project    LcaProject   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  scenarioId String?
+  scenario   LcaScenario? @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  totalKgCo2e         Decimal @db.Decimal(18, 8)
+  functionalUnitLabel String?
+  payload             Json
+  engineVersion       String  @default("lca-engine-v1")
+  /// Flows that could not be calculated because no factor is mapped —
+  /// surfaced, never silently treated as zero.
+  unmappedFlowCount   Int     @default(0)
+
+  calculatedByUserId String?
+  calculatedBy       User?    @relation("LcaResultCalculatedBy", fields: [calculatedByUserId], references: [id])
+  calculatedAt       DateTime @default(now())
+
+  @@index([projectId, calculatedAt])
+}
+
+model LcaEvidence {
+  id        String     @id @default(cuid())
+  projectId String
+  project   LcaProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  flowId String?
+  flow   LcaFlow? @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  documentId String
+  document   SourceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@unique([projectId, flowId, documentId])
+}
+
+/// Findings raised against a study — by a person, or by the AI data-quality
+/// review. AI-raised findings are labelled as such and are advisory only.
+model LcaReviewFinding {
+  id        String     @id @default(cuid())
+  projectId String
+  project   LcaProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  source     LcaFindingSource   @default(HUMAN)
+  severity   LcaFindingSeverity @default(INFO)
+  status     LcaFindingStatus   @default(OPEN)
+  category   String
+  finding    String
+  suggestion String?
+
+  raisedByUserId String?
+  raisedBy       User?     @relation("LcaFindingRaisedBy", fields: [raisedByUserId], references: [id])
+  createdAt      DateTime  @default(now())
+  resolvedAt     DateTime?
+
+  @@index([projectId, status])
 }

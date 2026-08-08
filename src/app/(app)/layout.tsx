@@ -1,5 +1,8 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { auth } from "@/auth";
+import { getAiAvailability } from "@/lib/ai";
+import { AssistantPanel } from "@/components/ai/assistant-panel";
 import { Providers } from "./providers";
 import { SignOutButton } from "./sign-out-button";
 import { NavLinks } from "./nav-links";
@@ -24,6 +27,10 @@ function initials(name: string) {
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   const isAdmin = session?.user?.role === "ADMIN";
+
+  // Resolved on the server so the assistant opens already knowing whether it
+  // can answer — the platform never offers an AI affordance that will fail.
+  const aiAvailability = await getAiAvailability();
 
   return (
     <Providers>
@@ -59,6 +66,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
       </header>
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">{children}</main>
+      {session?.user && (
+        // useSearchParams (the assistant reads the reporting period from the
+        // URL) needs a Suspense boundary in the App Router.
+        <Suspense fallback={null}>
+          <AssistantPanel available={aiAvailability.available} unavailableMessage={aiAvailability.message} />
+        </Suspense>
+      )}
     </Providers>
   );
 }

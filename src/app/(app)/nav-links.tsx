@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ClipboardList, FileBarChart, Database } from "lucide-react";
+import { LayoutDashboard, ClipboardList, FileBarChart, Database, FileScan, Boxes, Bot } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 interface NavItem {
@@ -14,10 +14,15 @@ interface NavItem {
 const BASE_ITEMS: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/entry", label: "Data entry", icon: ClipboardList },
+  { href: "/documents", label: "Documents", icon: FileScan },
+  { href: "/lca", label: "LCA", icon: Boxes },
   { href: "/reports", label: "Reports", icon: FileBarChart },
 ];
 
-const ADMIN_ITEM: NavItem = { href: "/admin/factors", label: "Emission factors", icon: Database };
+const ADMIN_ITEMS: NavItem[] = [
+  { href: "/admin/factors", label: "Emission factors", icon: Database },
+  { href: "/admin/ai", label: "AI settings", icon: Bot },
+];
 
 function isActive(pathname: string, href: string) {
   if (href === "/") return pathname === "/";
@@ -26,10 +31,10 @@ function isActive(pathname: string, href: string) {
 
 export function NavLinks({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname();
-  const items = isAdmin ? [...BASE_ITEMS, ADMIN_ITEM] : BASE_ITEMS;
+  const items = isAdmin ? [...BASE_ITEMS, ...ADMIN_ITEMS] : BASE_ITEMS;
 
   return (
-    <nav className="flex items-center gap-1 text-sm">
+    <nav className="flex flex-wrap items-center gap-1 text-sm">
       {items.map(({ href, label, icon: Icon }) => {
         const active = isActive(pathname, href);
         return (
