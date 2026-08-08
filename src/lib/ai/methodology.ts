@@ -165,15 +165,15 @@ export const METHODOLOGY_NOTES: MethodologyNote[] = [
     id: "lca-authority",
     topic: "lca",
     title: "How LCA works in this platform",
-    body: "An LCA is a structured project: goal and scope, stages, processes and inventory flows. Every flow is mapped to a factor in the platform's own approved catalogue, and the deterministic LCA engine multiplies quantity by that factor, applies any allocation percentage, and aggregates by stage and process. The AI never produces an LCA number; it helps the user build and interpret the study.",
-    implementedIn: "src/lib/lca/calc.ts",
+    body: "A product LCA is a structured assessment: goal and scope, a methodology profile, processes and inventory items. Every item resolves to a factor from the platform's approved catalogue, a supplier PCF or a recorded manual factor, and the deterministic LCA engine calculates from that, applies allocation, and aggregates by stage and process. Product assessment totals are never added to the corporate inventory — they answer different questions. The AI never produces an LCA number; it helps the user build and interpret the assessment.",
+    implementedIn: "src/lib/lca/engine, src/lib/lca/calculation-service.ts",
     keywords: ["lca", "life cycle", "inventory", "lci", "functional unit", "system boundary", "allocation"],
   },
   {
     id: "lca-claims",
     topic: "lca",
     title: "What an LCA here may be called",
-    body: "The platform structures a study to support alignment with recognised LCA principles including ISO 14040 and 14044 and product GHG accounting practice. It does not perform critical review, verification or certification, and a study must never be described as ISO compliant, verified or certified unless a real review has taken place and been recorded against the project.",
+    body: "The platform structures an assessment to support alignment with recognised LCA principles including ISO 14040 and 14044 and product GHG accounting practice. It does not perform critical review, verification or certification, and an assessment must never be described as ISO compliant, verified or certified unless a real review has taken place and been recorded against it (LcaVerification).",
     keywords: ["iso 14040", "iso 14044", "critical review", "verification", "certification", "compliance", "epd"],
   },
   {

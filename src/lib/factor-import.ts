@@ -20,8 +20,9 @@
  */
 
 import ExcelJS from "exceljs";
-import { FactorBasis, Scope } from "@prisma/client";
+import { FactorBasis, LcaFactorBoundary, Scope } from "@prisma/client";
 import { isKnownFactorCategory } from "@/lib/factor-categories";
+import { parseCsv } from "@/lib/csv";
 
 export const FACTOR_TEMPLATE_COLUMNS = [
   "scope",
@@ -32,6 +33,15 @@ export const FACTOR_TEMPLATE_COLUMNS = [
   "unit",
   "co2e_factor",
   "notes",
+  // Life-cycle metadata. Optional, and only meaningful for factors used in
+  // product LCA work — a corporate Scope 1/2 factor has no LCA boundary to
+  // declare. Kept in this one template rather than a second importer so
+  // there is a single audited path into the factor library.
+  "boundary",
+  "gwp_basis",
+  "reference_year",
+  "lca_data_source",
+  "uncertainty_percent",
 ] as const;
 
 const HEADER_ALIASES: Record<string, (typeof FACTOR_TEMPLATE_COLUMNS)[number]> = {
@@ -50,6 +60,20 @@ const HEADER_ALIASES: Record<string, (typeof FACTOR_TEMPLATE_COLUMNS)[number]> =
   ghg_conversion_factor: "co2e_factor",
   notes: "notes",
   note: "notes",
+  boundary: "boundary",
+  lifecycle_boundary: "boundary",
+  factor_boundary: "boundary",
+  gwp_basis: "gwp_basis",
+  gwp: "gwp_basis",
+  characterization_factors: "gwp_basis",
+  reference_year: "reference_year",
+  data_year: "reference_year",
+  year: "reference_year",
+  lca_data_source: "lca_data_source",
+  dataset: "lca_data_source",
+  data_source: "lca_data_source",
+  uncertainty_percent: "uncertainty_percent",
+  uncertainty: "uncertainty_percent",
 };
 
 function normalizeHeader(raw: string): string {
@@ -60,50 +84,6 @@ export interface RawFactorRow {
   [column: string]: string;
 }
 
-/** Small, correct CSV parser (handles quoted fields, embedded commas/newlines/escaped quotes) — avoids a naive split(",") mis-parsing notes fields. */
-function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        field += ch;
-      }
-      continue;
-    }
-
-    if (ch === '"') {
-      inQuotes = true;
-    } else if (ch === ",") {
-      row.push(field);
-      field = "";
-    } else if (ch === "\n" || ch === "\r") {
-      if (ch === "\r" && text[i + 1] === "\n") i++;
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = "";
-    } else {
-      field += ch;
-    }
-  }
-  if (field.length > 0 || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
-  return rows.filter((r) => r.some((cell) => cell.trim() !== ""));
-}
 
 function rowsToObjects(rows: string[][]): RawFactorRow[] {
   if (rows.length === 0) return [];
@@ -155,6 +135,11 @@ export interface ValidatedFactorRow {
   unit: string;
   co2eFactor: number;
   notes: string | null;
+  boundary: LcaFactorBoundary | null;
+  gwpBasis: string | null;
+  referenceYear: number | null;
+  lcaDataSource: string | null;
+  uncertaintyPercent: number | null;
 }
 
 export interface RowIssue {
@@ -181,6 +166,7 @@ const SCOPE_ALIASES: Record<string, Scope> = {
 };
 
 const BASIS_VALUES = new Set<string>(Object.values(FactorBasis));
+const BOUNDARY_VALUES = new Set<string>(Object.values(LcaFactorBoundary));
 
 function parseScope(raw: string): Scope | null {
   const key = raw.trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -191,6 +177,13 @@ function parseBasis(raw: string): FactorBasis | null {
   if (!raw.trim()) return FactorBasis.STANDARD;
   const key = raw.trim().toUpperCase().replace(/[\s-]+/g, "_");
   return BASIS_VALUES.has(key) ? (key as FactorBasis) : null;
+}
+
+/** Returns undefined for an unrecognised value so the caller can warn on it. */
+function parseBoundary(raw: string): LcaFactorBoundary | null | undefined {
+  if (!raw.trim()) return null;
+  const key = raw.trim().toUpperCase().replace(/[\s-]+/g, "_");
+  return BOUNDARY_VALUES.has(key) ? (key as LcaFactorBoundary) : undefined;
 }
 
 /** Validates parsed rows against the canonical template — blocks import on
@@ -242,6 +235,28 @@ export function validateFactorRows(rows: RawFactorRow[]): ValidationResult {
       });
     }
 
+    const boundary = parseBoundary(row.boundary ?? "");
+    if (boundary === undefined) {
+      warnings.push({
+        rowNumber,
+        message: `"${row.boundary}" isn't a lifecycle boundary this platform recognises, so the row will import without one. Product assessments flag factors with no stated boundary, because what a factor covers decides whether a model double-counts or leaves a gap.`,
+      });
+    }
+
+    const referenceYearRaw = (row.reference_year ?? "").trim();
+    const referenceYear = referenceYearRaw ? Number(referenceYearRaw) : null;
+    if (referenceYearRaw && (!Number.isInteger(referenceYear) || (referenceYear as number) < 1900 || (referenceYear as number) > 2200)) {
+      errors.push({ rowNumber, message: `Invalid "reference_year" ("${referenceYearRaw}") — must be a four-digit year.` });
+      return;
+    }
+
+    const uncertaintyRaw = (row.uncertainty_percent ?? "").trim();
+    const uncertaintyPercent = uncertaintyRaw ? Number(uncertaintyRaw) : null;
+    if (uncertaintyRaw && (!Number.isFinite(uncertaintyPercent) || (uncertaintyPercent as number) < 0)) {
+      errors.push({ rowNumber, message: `Invalid "uncertainty_percent" ("${uncertaintyRaw}") — must be a number >= 0.` });
+      return;
+    }
+
     valid.push({
       scope,
       category,
@@ -251,6 +266,11 @@ export function validateFactorRows(rows: RawFactorRow[]): ValidationResult {
       unit,
       co2eFactor,
       notes: row.notes?.trim() || null,
+      boundary: boundary ?? null,
+      gwpBasis: row.gwp_basis?.trim() || null,
+      referenceYear: referenceYear,
+      lcaDataSource: row.lca_data_source?.trim() || null,
+      uncertaintyPercent: uncertaintyPercent,
     });
   });
 
@@ -260,6 +280,9 @@ export function validateFactorRows(rows: RawFactorRow[]): ValidationResult {
 /** For the "Download CSV template" link in the admin UI. */
 export function buildTemplateCsv(): string {
   const header = FACTOR_TEMPLATE_COLUMNS.join(",");
-  const example = "SCOPE_1,stationary_combustion_natural_gas,,STANDARD,UK,kWh,0.18293,Example row - replace with real published figures";
-  return `${header}\n${example}\n`;
+  const corporateExample =
+    "SCOPE_1,stationary_combustion_natural_gas,,STANDARD,UK,kWh,0.18293,Example row - replace with real published figures,,,,,";
+  const lcaExample =
+    "SCOPE_3,lca_material_plastic,abs,STANDARD,EU,kg,0,Example product-LCA row - replace the factor with a real sourced value,CRADLE_TO_GATE,IPCC AR6 GWP100,2024,Dataset name within the publisher library,15";
+  return `${header}\n${corporateExample}\n${lcaExample}\n`;
 }

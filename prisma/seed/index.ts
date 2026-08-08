@@ -2,6 +2,7 @@ import { PrismaClient, Role } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { FACTOR_SET, FACTORS } from "./emission-factors";
 import { ACTIVITY_DATA_POINTS } from "./activity-data-points";
+import { seedLca } from "./lca";
 
 const prisma = new PrismaClient();
 
@@ -179,6 +180,9 @@ async function main() {
 
   console.log("Seeding activity data point catalog...");
   await seedActivityDataPoints();
+
+  console.log("Seeding product LCA methodology profile and placeholder life-cycle factors...");
+  await seedLca(prisma);
 
   console.log("Seed complete.");
 }

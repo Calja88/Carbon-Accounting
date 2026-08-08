@@ -10,7 +10,7 @@ import { resolveMonthRange } from "@/lib/report-period";
  * LCA copilot (which one runs is decided by whether a projectId is supplied).
  *
  * Authorization happens here, before any context is assembled: an
- * unauthenticated request never reaches a model, and a projectId or siteId
+ * unauthenticated request never reaches a model, and an assessment id or site id
  * the caller can't see is rejected by the scope check rather than filtered
  * out later.
  *

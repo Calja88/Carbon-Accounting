@@ -68,17 +68,17 @@ export async function resolveAiActor(): Promise<AiActor | null> {
 }
 
 /**
- * Checks an LCA project belongs to the actor's scope before its contents are
- * put in front of a model.
+ * Checks a product LCA assessment belongs to the actor's scope before its
+ * contents are put in front of a model.
  */
-export async function assertLcaProjectInScope(actor: AiActor, projectId: string): Promise<void> {
-  const project = await prisma.lcaProject.findUnique({
-    where: { id: projectId },
+export async function assertLcaAssessmentInScope(actor: AiActor, assessmentId: string): Promise<void> {
+  const assessment = await prisma.lcaAssessment.findUnique({
+    where: { id: assessmentId },
     select: { id: true, entityId: true },
   });
-  if (!project) throw new AiAuthorizationError("That LCA project doesn't exist.");
-  if (!isEntityInScope(actor, project.entityId)) {
-    throw new AiAuthorizationError("That LCA project isn't available to you.");
+  if (!assessment) throw new AiAuthorizationError("That LCA assessment doesn't exist.");
+  if (!isEntityInScope(actor, assessment.entityId)) {
+    throw new AiAuthorizationError("That LCA assessment isn't available to you.");
   }
 }
 

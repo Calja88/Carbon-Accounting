@@ -71,6 +71,11 @@ export async function commitFactorImport(input: CommitFactorImportInput) {
         unit: r.unit,
         co2eFactor: r.co2eFactor,
         notes: r.notes,
+        boundary: r.boundary,
+        gwpBasis: r.gwpBasis,
+        referenceYear: r.referenceYear,
+        lcaDataSource: r.lcaDataSource,
+        uncertaintyPercent: r.uncertaintyPercent,
       })),
     });
 

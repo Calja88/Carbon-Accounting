@@ -25,6 +25,7 @@
  */
 
 import ExcelJS from "exceljs";
+import { parseCsv } from "@/lib/csv";
 
 /** S3-06 subtype keys, from prisma/seed/activity-data-points.ts. */
 export type TravelSubtype = "rail" | "flight_domestic" | "flight_short_haul" | "flight_long_haul" | "hotel";
@@ -98,46 +99,6 @@ export interface RawSheet {
   rows: string[][];
 }
 
-/** Small, correct CSV parser — quoted fields, embedded commas/newlines, escaped quotes. */
-function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        field += ch;
-      }
-      continue;
-    }
-    if (ch === '"') inQuotes = true;
-    else if (ch === ",") {
-      row.push(field);
-      field = "";
-    } else if (ch === "\n" || ch === "\r") {
-      if (ch === "\r" && text[i + 1] === "\n") i++;
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = "";
-    } else field += ch;
-  }
-  if (field.length > 0 || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
-  return rows.filter((r) => r.some((cell) => cell.trim() !== ""));
-}
 
 export async function parseExpenseInFile(buffer: ArrayBuffer, filename: string): Promise<RawSheet> {
   const lower = filename.toLowerCase();

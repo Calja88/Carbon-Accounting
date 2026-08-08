@@ -36,15 +36,15 @@ const GROUP_SUGGESTIONS = [
 ];
 
 const LCA_SUGGESTIONS = [
-  "What information am I missing in this study?",
+  "What information am I missing in this assessment?",
   "Is my functional unit clear and measurable?",
   "Where are the hotspots, and why?",
   "Which stages have the weakest data?",
 ];
 
-/** `/lca/<id>` and its sub-routes put the copilot into that project's context. */
+/** `/assessments/<id>` and its sub-routes put the copilot into that assessment's context. */
 function lcaProjectIdFrom(pathname: string): string | null {
-  const match = pathname.match(/^\/lca\/([^/]+)/);
+  const match = pathname.match(/^\/assessments\/([^/]+)/);
   const id = match?.[1];
   return id && id !== "new" ? id : null;
 }

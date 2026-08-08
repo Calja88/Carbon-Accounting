@@ -70,6 +70,10 @@ enum FactorSourceType {
   OFFICIAL_DEFRA_DESNZ
   EEIO_SPEND_BASED
   SUPPLIER_SPECIFIC
+  /// Life-cycle inventory factors (materials, freight, waste routes) used by
+  /// the product LCA engine. Held in the same versioned, append-only library
+  /// as every other factor set so one import/audit path covers both.
+  LCA_SECONDARY
 }
 
 enum DataQualityTier {
@@ -95,6 +99,13 @@ model Entity {
   consolidationApproach ConsolidationApproach @default(OPERATIONAL_CONTROL)
   createdAt             DateTime              @default(now())
   sites                 Site[]
+
+  // Product LCA / PCF
+  products            Product[]
+  suppliers           Supplier[]
+  methodologyProfiles LcaMethodologyProfile[]
+  lcaAssessments      LcaAssessment[]
+  supplierPcfs        LcaSupplierPcf[]
 }
 
 model Site {
@@ -109,7 +120,13 @@ model Site {
   activityEntries  ActivityEntry[]
   energyContracts  SiteEnergyContract[]
   commutingSurveys CommutingSurvey[]
-  sourceDocuments  SourceDocument[]
+
+  // Product LCA / PCF
+  productManufacturingLocations ProductManufacturingLocation[]
+  lcaCorporateDataLinks         LcaCorporateDataLink[]
+
+  // AI layer / evidence documents
+  sourceDocuments SourceDocument[]
 
   @@unique([entityId, name])
 }
@@ -129,7 +146,20 @@ model User {
   enteredSurveys     CommutingSurvey[]    @relation("SurveyEnteredBy")
   importedFactorSets EmissionFactorSet[]  @relation("FactorSetImportedBy")
 
-  // --- AI layer / documents / LCA back-relations ---
+  // Product LCA / PCF
+  ownedLcaAssessments      LcaAssessment[]        @relation("LcaAssessmentOwner")
+  issuedLcaAssessments     LcaAssessment[]        @relation("LcaAssessmentIssuer")
+  lcaCalculationRuns       LcaCalculationRun[]    @relation("LcaRunBy")
+  issuedLcaVersions        LcaAssessmentVersion[] @relation("LcaVersionIssuer")
+  uploadedLcaEvidence      LcaEvidence[]          @relation("LcaEvidenceUploader")
+  ownedLcaAssumptions      LcaAssumption[]        @relation("LcaAssumptionOwner")
+  approvedLcaAssumptions   LcaAssumption[]        @relation("LcaAssumptionApprover")
+  ownedLcaExclusions       LcaExclusion[]         @relation("LcaExclusionOwner")
+  approvedLcaExclusions    LcaExclusion[]         @relation("LcaExclusionApprover")
+  recordedLcaVerifications LcaVerification[]      @relation("LcaVerificationRecorder")
+  lcaAuditEvents           LcaAuditEvent[]        @relation("LcaAuditActor")
+
+  // --- AI layer / evidence documents ---
   aiSettingsUpdates    AiSettings[]         @relation("AiSettingsUpdatedBy")
   aiInteractions       AiInteraction[]      @relation("AiInteractionUser")
   aiSuggestionsRaised  AiSuggestion[]       @relation("AiSuggestionRaisedBy")
@@ -137,12 +167,6 @@ model User {
   uploadedDocuments    SourceDocument[]     @relation("DocumentUploadedBy")
   createdExtractions   DocumentExtraction[] @relation("ExtractionCreatedBy")
   reviewedExtractions  DocumentExtraction[] @relation("ExtractionReviewedBy")
-  lcaProjects          LcaProject[]         @relation("LcaProjectCreatedBy")
-  confirmedGoalScopes  LcaGoalScope[]       @relation("LcaGoalScopeConfirmedBy")
-  lcaAssumptions       LcaAssumption[]      @relation("LcaAssumptionCreatedBy")
-  lcaScenarios         LcaScenario[]        @relation("LcaScenarioCreatedBy")
-  lcaResults           LcaResult[]          @relation("LcaResultCalculatedBy")
-  lcaReviewFindings    LcaReviewFinding[]   @relation("LcaFindingRaisedBy")
 }
 
 // ---------------------------------------------------------------------------
@@ -247,13 +271,25 @@ model EmissionFactor {
   co2eFactor  Decimal           @db.Decimal(18, 8) // kgCO2e per unit
   notes       String?
 
-  calculations         Calculation[]
-  /// Life-cycle inventory flows mapped to this factor. An LCA flow's
-  /// emissions are calculated by the deterministic LCA engine from this
-  /// factor's value — an AI suggestion can only ever propose *which*
-  /// factor to map, never what its value is.
-  lcaFlows             LcaFlow[]             @relation("LcaFlowFactor")
-  lcaScenarioOverrides LcaScenarioOverride[] @relation("LcaScenarioOverrideFactor")
+  /// Lifecycle metadata, only meaningful for factors used in product LCA
+  /// work. Nullable so the corporate factor library is unaffected: a
+  /// corporate Scope 1/2 factor has no LCA boundary to declare, while a
+  /// cradle-to-gate material factor must declare one or the product model
+  /// can silently double-count or gap a stage.
+  boundary           LcaFactorBoundary?
+  gwpBasis           String? // e.g. "IPCC AR6 (2021), GWP100"
+  referenceYear      Int? // the year the factor's underlying data represents
+  lcaDataSource      String? // dataset/process name within the publisher's library
+  uncertaintyPercent Decimal?           @db.Decimal(9, 4)
+
+  calculations Calculation[]
+
+  lcaInventoryItems         LcaInventoryItem[]     @relation("LcaItemFactor")
+  lcaRecycledInventoryItems LcaInventoryItem[]     @relation("LcaItemRecycledFactor")
+  lcaTransportLegs          LcaTransportLeg[]      @relation("LcaLegFactor")
+  lcaEndOfLifeRoutes        LcaEndOfLifeRoute[]    @relation("LcaEolFactor")
+  lcaResults                LcaCalculationResult[] @relation("LcaResultFactor")
+  lcaEvidence               LcaEvidence[]          @relation("LcaEvidenceFactor")
 
   @@unique([factorSetId, category, subtypeKey, basis])
 }
@@ -332,6 +368,9 @@ model ActivityEntry {
 
   calculations            Calculation[]
   commutingSurveyResponse CommutingSurveyResponse?
+  /// Product assessments that cite this corporate record as their source.
+  /// Reference only — see LcaCorporateDataLink.
+  lcaCorporateDataLinks   LcaCorporateDataLink[]
 
   @@index([activityDataPointId, siteId, periodStart])
   @@index([sourceDocumentId])
@@ -462,14 +501,1086 @@ model ReportSnapshotCalculation {
   @@unique([reportSnapshotId, calculationId])
 }
 
+// ===========================================================================
+// Product Life Cycle Assessment (LCA) / Product Carbon Footprint (PCF)
+//
+// A product-level system that sits alongside — never inside — the corporate
+// GHG inventory above. Corporate totals (Calculation rows) and product
+// totals (LcaCalculationResult rows) are never summed together: a product
+// footprint is an intensity figure for one product, a corporate inventory
+// is an absolute figure for one organisation. Where a product assessment
+// reuses a corporate record as its data source, that reuse is recorded
+// explicitly as an LcaCorporateDataLink (reference only, never a transfer
+// of emissions in either direction).
+// ===========================================================================
+
+enum LcaAssessmentStatus {
+  DRAFT
+  DATA_COLLECTION
+  CALCULATION
+  INTERNAL_REVIEW
+  READY_FOR_VERIFICATION
+  VERIFIED
+  SUPERSEDED
+}
+
+/// Lifecycle boundary of an assessment. Cradle-to-gate assessments normally
+/// report against a declared unit rather than a functional unit, because a
+/// function cannot be fully described without the use and end-of-life stages.
+enum LcaBoundary {
+  CRADLE_TO_GATE
+  CRADLE_TO_GRAVE
+  CRADLE_TO_CRADLE
+  GATE_TO_GATE
+  GATE_TO_GRAVE
+  CUSTOM
+}
+
+enum LcaLifecycleStage {
+  RAW_MATERIALS
+  INBOUND_TRANSPORT
+  MANUFACTURING
+  PACKAGING
+  DISTRIBUTION
+  USE_PHASE
+  END_OF_LIFE
+  OTHER
+}
+
+enum LcaAllocationMethod {
+  NONE
+  MASS
+  PHYSICAL
+  ECONOMIC
+  MANUAL
+}
+
+/// Kept separate on every result row so gross fossil emissions can never be
+/// netted down by removals, stored carbon or purchased offsets without that
+/// being visible (see LcaCalculationRun totals, which report each class).
+enum LcaEmissionClassification {
+  FOSSIL
+  BIOGENIC
+  BIOGENIC_REMOVAL
+  TECHNOLOGICAL_REMOVAL
+  STORED_CARBON
+  /// Credit for a burden avoided elsewhere (e.g. recovered material
+  /// displacing virgin production). Only produced when the assessment's
+  /// methodology selects an avoided-burden or circular-footprint treatment,
+  /// and always carried as its own class so it can be seen rather than
+  /// quietly shrinking the gross figure.
+  AVOIDED_BURDEN
+  OFFSET
+}
+
+enum LcaDataType {
+  PRIMARY
+  SUPPLIER_SPECIFIC
+  SECONDARY
+  PROXY
+  MODELLED
+}
+
+enum LcaItemType {
+  MATERIAL
+  ENERGY
+  FUEL
+  TRANSPORT
+  MANUFACTURING_PROCESS
+  PACKAGING
+  WASTE
+  WATER
+  USE_PHASE
+  END_OF_LIFE
+  SUPPLIER_PCF
+  OTHER
+}
+
+enum LcaTransportMode {
+  ROAD
+  RAIL
+  SEA
+  AIR
+  INLAND_WATERWAY
+  MULTIMODAL
+  CUSTOM
+}
+
+enum LcaEndOfLifeRouteType {
+  LANDFILL
+  RECYCLING
+  INCINERATION_ENERGY_RECOVERY
+  INCINERATION_NO_RECOVERY
+  REUSE
+  COMPOSTING
+  CUSTOM
+}
+
+enum LcaUncertaintyStatus {
+  NOT_ASSESSED
+  QUALITATIVE
+  ESTIMATED
+  QUANTIFIED
+}
+
+enum LcaMateriality {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum LcaAssuranceType {
+  NONE
+  INTERNAL_REVIEW
+  CRITICAL_REVIEW
+  LIMITED_ASSURANCE
+  REASONABLE_ASSURANCE
+}
+
+enum LcaPcfVerificationStatus {
+  UNVERIFIED
+  SELF_DECLARED
+  SECOND_PARTY_REVIEWED
+  THIRD_PARTY_VERIFIED
+}
+
+/// What a factor actually covers. Selecting a cradle-to-grave factor for a
+/// cradle-to-gate model (or applying a combustion-only factor as if it were
+/// well-to-wheel) is a silent double-count or gap, so it is recorded and
+/// validated rather than assumed.
+enum LcaFactorBoundary {
+  UNKNOWN
+  CRADLE_TO_GATE
+  CRADLE_TO_GRAVE
+  GATE_TO_GATE
+  UPSTREAM
+  DOWNSTREAM
+  COMBUSTION_ONLY
+  WELL_TO_TANK
+  WELL_TO_WHEEL
+  END_OF_LIFE
+}
+
+enum LcaFactorSelectionMode {
+  NONE
+  LIBRARY_FACTOR
+  SUPPLIER_PCF
+  MANUAL
+}
+
+enum LcaVersionStatus {
+  DRAFT_REVISION
+  ISSUED
+  SUPERSEDED
+}
+
+enum LcaBiogenicTreatment {
+  EXCLUDED
+  REPORTED_SEPARATELY
+  INCLUDED_IN_TOTAL
+}
+
+/// No single universal recycling methodology is hard-coded — the choice is
+/// recorded per methodology profile and applied by the engine.
+enum LcaRecyclingMethod {
+  CUT_OFF
+  AVOIDED_BURDEN
+  CIRCULAR_FOOTPRINT_FORMULA
+  MANUAL
+}
+
+enum LcaElectricityApproach {
+  LOCATION_BASED
+  MARKET_BASED
+  DUAL_REPORTED
+}
+
+enum LcaOffsetTreatment {
+  EXCLUDED
+  DISCLOSED_SEPARATELY
+}
+
+enum LcaProductStatus {
+  ACTIVE
+  DISCONTINUED
+}
+
+enum LcaEvidenceKind {
+  EXTERNAL_LINK
+  UPLOADED_FILE
+  SYSTEM_RECORD
+}
+
+enum LcaCorporateLinkType {
+  FACILITY_ENERGY
+  SUPPLIER_RECORD
+  SCOPE3_ACTIVITY
+  OTHER
+}
+
+// ---------------------------------------------------------------------------
+// Suppliers, products
+// ---------------------------------------------------------------------------
+
+/// A first-class supplier record. The corporate side of the platform matches
+/// suppliers by free-text name (ActivityEntry.supplierName /
+/// EmissionFactorSet.supplierName); `name` is kept aligned with that string
+/// so a supplier-specific corporate factor set and a product-level supplier
+/// PCF can be recognised as the same counterparty.
+model Supplier {
+  id         String   @id @default(cuid())
+  entityId   String
+  entity     Entity   @relation(fields: [entityId], references: [id])
+  name       String
+  identifier String? // internal supplier code, DUNS, VAT number...
+  country    String?
+  contact    String?
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  productPcfs    LcaSupplierPcf[]
+  inventoryItems LcaInventoryItem[]
+
+  @@unique([entityId, name])
+}
+
+model Product {
+  id          String           @id @default(cuid())
+  entityId    String
+  entity      Entity           @relation(fields: [entityId], references: [id])
+  name        String
+  sku         String
+  description String?
+  category    String?
+  status      LcaProductStatus @default(ACTIVE)
+  notes       String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  versions ProductVersion[]
+
+  @@unique([entityId, sku])
+  @@index([entityId])
+}
+
+model ProductVersion {
+  id            String    @id @default(cuid())
+  productId     String
+  product       Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  versionLabel  String // e.g. "Rev A", "2026 build"
+  description   String?
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+
+  manufacturingLocations ProductManufacturingLocation[]
+  assessments            LcaAssessment[]
+
+  @@unique([productId, versionLabel])
+}
+
+/// Where this product version is made. Optionally points at an internal Site
+/// so a product assessment can pull facility energy from the corporate
+/// inventory for the right building (see LcaCorporateDataLink).
+model ProductManufacturingLocation {
+  id               String         @id @default(cuid())
+  productVersionId String
+  productVersion   ProductVersion @relation(fields: [productVersionId], references: [id], onDelete: Cascade)
+  name             String
+  country          String?
+  siteId           String?
+  site             Site?          @relation(fields: [siteId], references: [id])
+  isPrimary        Boolean        @default(false)
+  notes            String?
+}
+
+// ---------------------------------------------------------------------------
+// Methodology register — structured configuration, not prose
+// ---------------------------------------------------------------------------
+
+model LcaMethodologyProfile {
+  id       String  @id @default(cuid())
+  entityId String?
+  entity   Entity? @relation(fields: [entityId], references: [id])
+
+  name    String
+  version String
+  summary String?
+
+  defaultBoundary           LcaBoundary            @default(CRADLE_TO_GATE)
+  gwpBasis                  String // e.g. "IPCC AR6 (2021), GWP100"
+  defaultAllocationMethod   LcaAllocationMethod    @default(MASS)
+  allocationRules           String?
+  recyclingMethod           LcaRecyclingMethod     @default(CUT_OFF)
+  recyclingRules            String?
+  electricityApproach       LcaElectricityApproach @default(LOCATION_BASED)
+  electricityRules          String?
+  biogenicTreatment         LcaBiogenicTreatment   @default(REPORTED_SEPARATELY)
+  biogenicRules             String?
+  removalsRules             String?
+  offsetTreatment           LcaOffsetTreatment     @default(DISCLOSED_SEPARATELY)
+  offsetRules               String?
+  cutOffRules               String? // e.g. "exclude flows < 1% of mass and < 1% of estimated impact, max 5% total"
+  cutOffThresholdPercent    Decimal?               @db.Decimal(6, 3)
+  /// Ordered list of factor sources, most preferred first — the hierarchy the
+  /// factor resolver and the validation engine both read.
+  factorHierarchy           String[]
+  dataQualityRequirements   String?
+  /// Minimum acceptable pedigree score (1 best .. 5 worst) for an assessment
+  /// to be considered ready for independent review.
+  minimumDataQualityScore   Decimal?               @db.Decimal(4, 2)
+  requireEvidenceForPrimary Boolean                @default(true)
+  standardsReferenced       String[]
+  notes                     String?
+  isDefault                 Boolean                @default(false)
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
+
+  assessments LcaAssessment[]
+
+  @@unique([name, version])
+}
+
+// ---------------------------------------------------------------------------
+// Assessments
+// ---------------------------------------------------------------------------
+
+model LcaAssessment {
+  id               String         @id @default(cuid())
+  entityId         String
+  entity           Entity         @relation(fields: [entityId], references: [id])
+  productVersionId String
+  productVersion   ProductVersion @relation(fields: [productVersionId], references: [id])
+
+  reference String
+  title     String
+
+  status LcaAssessmentStatus @default(DRAFT)
+
+  // --- versioning -------------------------------------------------------
+  version                  Int             @default(1)
+  versionLabel             String?
+  parentAssessmentId       String?
+  parentAssessment         LcaAssessment?  @relation("AssessmentRevisions", fields: [parentAssessmentId], references: [id])
+  revisions                LcaAssessment[] @relation("AssessmentRevisions")
+  supersededByAssessmentId String?         @unique
+  supersededBy             LcaAssessment?  @relation("AssessmentSupersession", fields: [supersededByAssessmentId], references: [id])
+  supersedes               LcaAssessment?  @relation("AssessmentSupersession")
+
+  // --- scenario modelling ----------------------------------------------
+  /// A scenario is a full, independent copy of a baseline assessment, so a
+  /// scenario edit can never write over baseline data.
+  isScenario           Boolean         @default(false)
+  baselineAssessmentId String?
+  baselineAssessment   LcaAssessment?  @relation("ScenarioOf", fields: [baselineAssessmentId], references: [id])
+  scenarioCopies       LcaAssessment[] @relation("ScenarioOf")
+  scenarioDescription  String?
+
+  // --- goal & scope -----------------------------------------------------
+  goal                          String?
+  intendedApplication           String?
+  intendedAudience              String?
+  comparativeAssertionDisclosed Boolean             @default(false)
+  scopeDescription              String?
+  boundary                      LcaBoundary         @default(CRADLE_TO_GATE)
+  boundaryNotes                 String?
+  includedStages                LcaLifecycleStage[]
+  periodStart                   DateTime?
+  periodEnd                     DateTime?
+  ownerUserId                   String?
+  owner                         User?               @relation("LcaAssessmentOwner", fields: [ownerUserId], references: [id])
+
+  // --- functional / declared unit and reference flow ---------------------
+  functionalUnitDescription String?
+  functionalUnitQuantity    Decimal @default(1) @db.Decimal(24, 10)
+  functionalUnitUnit        String?
+  isDeclaredUnit            Boolean @default(false)
+  declaredUnitDescription   String?
+  referenceFlowDescription  String?
+  referenceFlowQuantity     Decimal @default(1) @db.Decimal(24, 10)
+  referenceFlowUnit         String?
+  /// How much product the entered inventory represents (e.g. one batch of
+  /// 500 units). The engine divides model totals by the number of functional
+  /// units this represents to get the per-functional-unit figure.
+  modelledOutputQuantity    Decimal @default(1) @db.Decimal(24, 10)
+  modelledOutputUnit        String?
+  modelledOutputDescription String?
+
+  // --- methodology ------------------------------------------------------
+  methodologyProfileId String?
+  methodologyProfile   LcaMethodologyProfile? @relation(fields: [methodologyProfileId], references: [id])
+  /// Frozen copy of the methodology profile taken when a version is issued,
+  /// so an issued assessment's methodology can never change under it.
+  methodologySnapshot  Json?
+  methodologyNotes     String?
+
+  usePhaseLifetimeYears Decimal? @db.Decimal(12, 4)
+  usePhaseAssumptions   String?
+
+  // --- narrative --------------------------------------------------------
+  completenessNotes String?
+  limitations       String?
+  interpretation    String?
+
+  engineVersion        String    @default("lca-engine-v1")
+  lastCalculationRunId String?   @unique
+  issuedAt             DateTime?
+  issuedByUserId       String?
+  issuedBy             User?     @relation("LcaAssessmentIssuer", fields: [issuedByUserId], references: [id])
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  processes       LcaProcess[]
+  inventoryItems  LcaInventoryItem[]
+  assumptions     LcaAssumption[]
+  exclusions      LcaExclusion[]
+  evidence        LcaEvidence[]
+  calculationRuns LcaCalculationRun[]    @relation("RunsOfAssessment")
+  results         LcaCalculationResult[]
+  versions        LcaAssessmentVersion[]
+  verifications   LcaVerification[]
+  auditEvents     LcaAuditEvent[]
+
+  @@unique([entityId, reference])
+  @@index([entityId, status])
+  @@index([productVersionId])
+}
+
+/// A unit process in the lifecycle model. Self-referencing so a stage can be
+/// broken down as deeply as the modeller needs (e.g. Manufacturing ->
+/// Injection moulding -> Drying), with allocation applied at whichever level
+/// the multi-output split actually happens.
+model LcaProcess {
+  id           String        @id @default(cuid())
+  assessmentId String
+  assessment   LcaAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  parentProcessId String?
+  parentProcess   LcaProcess?  @relation("ProcessTree", fields: [parentProcessId], references: [id])
+  childProcesses  LcaProcess[] @relation("ProcessTree")
+
+  stage       LcaLifecycleStage
+  name        String
+  description String?
+  sortOrder   Int               @default(0)
+  isIncluded  Boolean           @default(true)
+
+  allocationMethod           LcaAllocationMethod @default(NONE)
+  /// Share of this process's emissions attributed to the assessed product,
+  /// as a percentage. Derived from process outputs for MASS/PHYSICAL/ECONOMIC,
+  /// entered directly for MANUAL, always 100 for NONE.
+  allocationPercent          Decimal             @default(100) @db.Decimal(9, 6)
+  allocationRationale        String?
+  allocationBasisDescription String?
+
+  geography String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  outputs        LcaProcessOutput[]
+  inventoryItems LcaInventoryItem[]
+  results        LcaCalculationResult[]
+  assumptions    LcaAssumption[]
+  exclusions     LcaExclusion[]
+  evidence       LcaEvidence[]
+
+  @@index([assessmentId, stage])
+}
+
+/// Co-products of a multi-output process. The engine computes the allocation
+/// factor from these according to the process's allocation method, so the
+/// split is reproducible and auditable rather than a typed-in number.
+model LcaProcessOutput {
+  id        String     @id @default(cuid())
+  processId String
+  process   LcaProcess @relation(fields: [processId], references: [id], onDelete: Cascade)
+
+  name              String
+  isAssessedProduct Boolean  @default(false)
+  massValue         Decimal? @db.Decimal(24, 10)
+  massUnit          String?
+  physicalValue     Decimal? @db.Decimal(24, 10)
+  physicalUnit      String?
+  economicValue     Decimal? @db.Decimal(24, 10)
+  economicCurrency  String?
+  manualPercent     Decimal? @db.Decimal(9, 6)
+  notes             String?
+  sortOrder         Int      @default(0)
+}
+
+/// One activity-data line: a material, an energy input, a freight movement,
+/// a waste flow, a supplier PCF, and so on. Everything the calculation
+/// engine consumes comes from this table.
+model LcaInventoryItem {
+  id           String        @id @default(cuid())
+  assessmentId String
+  assessment   LcaAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  processId    String
+  process      LcaProcess    @relation(fields: [processId], references: [id], onDelete: Cascade)
+
+  itemType    LcaItemType
+  name        String
+  description String?
+  sortOrder   Int         @default(0)
+
+  // --- bill of materials attributes (material/packaging items) ----------
+  componentName          String?
+  partNumber             String?
+  materialName           String?
+  recycledContentPercent Decimal? @db.Decimal(9, 6)
+  /// Manufacturing loss on this input: gross input = quantity / (1 - waste%).
+  wastePercent           Decimal? @db.Decimal(9, 6)
+
+  // --- activity data ----------------------------------------------------
+  quantity            Decimal @db.Decimal(24, 10)
+  unit                String
+  // The quantity expressed in the factor's own unit is NOT stored here: it is
+  // an output of a calculation run and lives on the result row, which also
+  // records the conversion that produced it. Copying it back onto the
+  // inventory would give the same figure two homes and, because writing it
+  // touches the row, would make every line read as changed the moment it was
+  // calculated.
+  /// Extra multiplier applied after unit conversion — e.g. "x 3 uses per year
+  /// x 5 years". Always shown as its own provenance step, never folded in.
+  adjustmentFactor    Decimal @default(1) @db.Decimal(24, 10)
+  adjustmentRationale String?
+
+  // --- provenance of the activity data ----------------------------------
+  dataType    LcaDataType @default(SECONDARY)
+  dataSource  String?
+  supplierId  String?
+  supplier    Supplier?   @relation(fields: [supplierId], references: [id])
+  geography   String?
+  periodStart DateTime?
+  periodEnd   DateTime?
+  notes       String?
+
+  // --- factor selection --------------------------------------------------
+  factorSelectionMode      LcaFactorSelectionMode @default(NONE)
+  emissionFactorId         String?
+  emissionFactor           EmissionFactor?        @relation("LcaItemFactor", fields: [emissionFactorId], references: [id])
+  /// Optional second factor used for the recycled share of a material, so
+  /// recycled content changes the result only when a sourced recycled-route
+  /// factor actually exists — never through an invented discount.
+  recycledEmissionFactorId String?
+  recycledEmissionFactor   EmissionFactor?        @relation("LcaItemRecycledFactor", fields: [recycledEmissionFactorId], references: [id])
+  supplierPcfId            String?
+  supplierPcf              LcaSupplierPcf?        @relation(fields: [supplierPcfId], references: [id])
+
+  manualFactorValue     Decimal?           @db.Decimal(24, 10)
+  manualFactorUnit      String?
+  manualFactorSource    String?
+  manualFactorVersion   String?
+  manualFactorBoundary  LcaFactorBoundary?
+  manualFactorGeography String?
+  manualFactorYear      Int?
+  manualFactorGwpBasis  String?
+  manualFactorRationale String?
+
+  // --- carbon classification --------------------------------------------
+  classification        LcaEmissionClassification @default(FOSSIL)
+  /// Biogenic carbon taken out of the atmosphere and held in this input,
+  /// expressed as kgCO2e per unit of the item's own quantity. Always
+  /// reported as its own class — never netted off the fossil total.
+  biogenicUptakePerUnit Decimal?                  @db.Decimal(24, 10)
+  storedCarbonPerUnit   Decimal?                  @db.Decimal(24, 10)
+
+  // --- data quality (pedigree, 1 best .. 5 worst) ------------------------
+  temporalScore      Int?
+  geographicalScore  Int?
+  technologicalScore Int?
+  completenessScore  Int?
+  reliabilityScore   Int?
+
+  // --- uncertainty -------------------------------------------------------
+  uncertaintyStatus  LcaUncertaintyStatus @default(NOT_ASSESSED)
+  uncertaintyPercent Decimal?             @db.Decimal(9, 4)
+  uncertaintyLower   Decimal?             @db.Decimal(24, 10)
+  uncertaintyUpper   Decimal?             @db.Decimal(24, 10)
+  uncertaintyNotes   String?
+
+  isExcluded      Boolean @default(false)
+  exclusionReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transportLegs   LcaTransportLeg[]
+  endOfLifeRoutes LcaEndOfLifeRoute[]
+  results         LcaCalculationResult[]
+  evidence        LcaEvidence[]
+  assumptions     LcaAssumption[]
+  corporateLinks  LcaCorporateDataLink[]
+
+  @@index([assessmentId, itemType])
+  @@index([processId])
+}
+
+/// One movement in a freight chain. A multimodal journey is several legs on
+/// one TRANSPORT item; each leg produces its own result row so the register
+/// export shows the tonne-km arithmetic leg by leg.
+model LcaTransportLeg {
+  id              String           @id @default(cuid())
+  inventoryItemId String
+  inventoryItem   LcaInventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  sequence        Int              @default(0)
+  mode            LcaTransportMode
+  modeDescription String?
+  originName      String?
+  destinationName String?
+
+  distanceValue      Decimal  @db.Decimal(24, 10)
+  distanceUnit       String   @default("km")
+  massValue          Decimal  @db.Decimal(24, 10)
+  massUnit           String   @default("kg")
+  /// Share of the vehicle's payload attributable to this consignment, and
+  /// whether the return leg is included — both change the answer materially
+  /// and neither is assumed.
+  loadFactorPercent  Decimal? @db.Decimal(9, 6)
+  includesReturnTrip Boolean  @default(false)
+
+  emissionFactorId   String?
+  emissionFactor     EmissionFactor? @relation("LcaLegFactor", fields: [emissionFactorId], references: [id])
+  manualFactorValue  Decimal?        @db.Decimal(24, 10)
+  manualFactorUnit   String?
+  manualFactorSource String?
+
+  assumptions String?
+  notes       String?
+
+  results LcaCalculationResult[]
+
+  @@index([inventoryItemId])
+}
+
+/// One end-of-life (or production-waste) route for an item's mass. Route
+/// percentages for an item must total 100%, which the validation engine
+/// enforces rather than silently normalising.
+model LcaEndOfLifeRoute {
+  id              String           @id @default(cuid())
+  inventoryItemId String
+  inventoryItem   LcaInventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  route            LcaEndOfLifeRouteType
+  routeDescription String?
+  percent          Decimal               @db.Decimal(9, 6)
+
+  emissionFactorId   String?
+  emissionFactor     EmissionFactor? @relation("LcaEolFactor", fields: [emissionFactorId], references: [id])
+  manualFactorValue  Decimal?        @db.Decimal(24, 10)
+  manualFactorUnit   String?
+  manualFactorSource String?
+
+  /// Recovery/credit figures are only applied when the assessment's
+  /// methodology profile says to (AVOIDED_BURDEN / CIRCULAR_FOOTPRINT), and
+  /// are always reported as their own line, never merged into gross.
+  recoveryRatePercent Decimal? @db.Decimal(9, 6)
+  avoidedFactorValue  Decimal? @db.Decimal(24, 10)
+  avoidedFactorUnit   String?
+  avoidedFactorSource String?
+  recoveryAssumptions String?
+  notes               String?
+
+  results LcaCalculationResult[]
+
+  @@index([inventoryItemId])
+}
+
+// ---------------------------------------------------------------------------
+// Supplier product carbon footprints
+// ---------------------------------------------------------------------------
+
+model LcaSupplierPcf {
+  id         String   @id @default(cuid())
+  entityId   String
+  entity     Entity   @relation(fields: [entityId], references: [id])
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  productName       String
+  productIdentifier String?
+  productCategory   String?
+
+  /// kgCO2e per declared unit, excluding biogenic where the supplier reports
+  /// the two separately.
+  pcfValue                Decimal  @db.Decimal(24, 10)
+  pcfBiogenicValue        Decimal? @db.Decimal(24, 10)
+  declaredUnitQuantity    Decimal  @default(1) @db.Decimal(24, 10)
+  declaredUnitUnit        String
+  declaredUnitDescription String?
+
+  boundary             LcaBoundary
+  boundaryNotes        String?
+  methodology          String?
+  methodologyVersion   String?
+  gwpBasis             String?
+  reportingPeriodStart DateTime?
+  reportingPeriodEnd   DateTime?
+  geography            String?
+
+  verificationStatus LcaPcfVerificationStatus @default(UNVERIFIED)
+  verifierName       String?
+  verificationDate   DateTime?
+  assuranceType      LcaAssuranceType         @default(NONE)
+
+  primaryDataSharePercent Decimal? @db.Decimal(9, 6)
+  temporalScore           Int?
+  geographicalScore       Int?
+  technologicalScore      Int?
+  completenessScore       Int?
+  reliabilityScore        Int?
+  uncertaintyPercent      Decimal? @db.Decimal(9, 4)
+
+  /// Set when this record was created by importing a PACT-aligned exchange
+  /// document, with the source payload kept verbatim for audit.
+  sourceFormat  String?
+  sourcePayload Json?
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  inventoryItems LcaInventoryItem[]
+  evidence       LcaEvidence[]
+
+  @@index([entityId])
+  @@index([supplierId])
+}
+
+// ---------------------------------------------------------------------------
+// Registers: assumptions, exclusions, corporate links, evidence
+// ---------------------------------------------------------------------------
+
+model LcaAssumption {
+  id           String        @id @default(cuid())
+  assessmentId String
+  assessment   LcaAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  assumption  String
+  category    String
+  rationale   String
+  source      String?
+  uncertainty String?
+  materiality LcaMateriality @default(MEDIUM)
+
+  ownerUserId      String?
+  owner            User?     @relation("LcaAssumptionOwner", fields: [ownerUserId], references: [id])
+  approvedByUserId String?
+  approvedBy       User?     @relation("LcaAssumptionApprover", fields: [approvedByUserId], references: [id])
+  approvedAt       DateTime?
+  recordedAt       DateTime  @default(now())
+
+  processId       String?
+  process         LcaProcess?       @relation(fields: [processId], references: [id])
+  inventoryItemId String?
+  inventoryItem   LcaInventoryItem? @relation(fields: [inventoryItemId], references: [id])
+
+  evidence LcaEvidence[]
+
+  @@index([assessmentId])
+}
+
+model LcaExclusion {
+  id           String        @id @default(cuid())
+  assessmentId String
+  assessment   LcaAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  excludedItem            String
+  rationale               String
+  estimatedRelevance      String
+  estimatedPercentOfTotal Decimal? @db.Decimal(9, 4)
+
+  ownerUserId      String?
+  owner            User?     @relation("LcaExclusionOwner", fields: [ownerUserId], references: [id])
+  approvedByUserId String?
+  approvedBy       User?     @relation("LcaExclusionApprover", fields: [approvedByUserId], references: [id])
+  approvedAt       DateTime?
+  recordedAt       DateTime  @default(now())
+
+  processId String?
+  process   LcaProcess? @relation(fields: [processId], references: [id])
+
+  evidence LcaEvidence[]
+
+  @@index([assessmentId])
+}
+
+/// Records that a product inventory line was sourced from an existing
+/// corporate record. Reference only: no emissions move between the corporate
+/// inventory and the product footprint in either direction, and both figures
+/// remain complete in their own right.
+model LcaCorporateDataLink {
+  id              String           @id @default(cuid())
+  inventoryItemId String
+  inventoryItem   LcaInventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  linkType        LcaCorporateLinkType
+  activityEntryId String?
+  activityEntry   ActivityEntry?       @relation(fields: [activityEntryId], references: [id])
+  siteId          String?
+  site            Site?                @relation(fields: [siteId], references: [id])
+  supplierName    String?
+
+  /// Share of the corporate figure attributed to this product line, and how
+  /// that share was arrived at.
+  allocationPercent Decimal  @default(100) @db.Decimal(9, 6)
+  allocationBasis   String?
+  notes             String?
+  createdAt         DateTime @default(now())
+
+  @@index([inventoryItemId])
+}
+
+model LcaEvidence {
+  id           String        @id @default(cuid())
+  assessmentId String
+  assessment   LcaAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?
+  kind        LcaEvidenceKind @default(EXTERNAL_LINK)
+
+  externalUrl     String?
+  fileName        String?
+  mimeType        String?
+  sizeBytes       Int?
+  checksumSha256  String?
+  /// Storage backend that holds the bytes. "database" is the built-in
+  /// fallback used when no object-storage credentials are configured; the
+  /// service layer can route to another provider without a schema change.
+  storageProvider String?
+  storageKey      String?
+
+  uploadedByUserId String?
+  uploadedBy       User?    @relation("LcaEvidenceUploader", fields: [uploadedByUserId], references: [id])
+  uploadedAt       DateTime @default(now())
+
+  processId        String?
+  process          LcaProcess?       @relation(fields: [processId], references: [id])
+  inventoryItemId  String?
+  inventoryItem    LcaInventoryItem? @relation(fields: [inventoryItemId], references: [id])
+  emissionFactorId String?
+  emissionFactor   EmissionFactor?   @relation("LcaEvidenceFactor", fields: [emissionFactorId], references: [id])
+  supplierPcfId    String?
+  supplierPcf      LcaSupplierPcf?   @relation(fields: [supplierPcfId], references: [id])
+  assumptionId     String?
+  assumption       LcaAssumption?    @relation(fields: [assumptionId], references: [id])
+  exclusionId      String?
+  exclusion        LcaExclusion?     @relation(fields: [exclusionId], references: [id])
+  verificationId   String?
+  verification     LcaVerification?  @relation(fields: [verificationId], references: [id])
+
+  blob LcaEvidenceBlob?
+
+  @@index([assessmentId])
+}
+
+/// Bytes for evidence held by the built-in database storage provider, kept in
+/// its own table so listing evidence never loads file contents.
+model LcaEvidenceBlob {
+  id         String      @id @default(cuid())
+  evidenceId String      @unique
+  evidence   LcaEvidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  data       Bytes
+}
+
+// ---------------------------------------------------------------------------
+// Calculations
+// ---------------------------------------------------------------------------
+
+model LcaCalculationRun {
+  id           String        @id @default(cuid())
+  assessmentId String
+  assessment   LcaAssessment @relation("RunsOfAssessment", fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  runAt               DateTime  @default(now())
+  runByUserId         String?
+  runBy               User?     @relation("LcaRunBy", fields: [runByUserId], references: [id])
+  /// The assessment's updatedAt as it stood once this run finished writing.
+  /// Staleness is judged against this rather than against runAt, because
+  /// storing a run itself touches the assessment row — comparing to runAt
+  /// would make every assessment read as out of date the instant it was
+  /// calculated.
+  assessmentUpdatedAt DateTime?
+  engineVersion       String
+  methodologyVersion  String?
+  /// Everything needed to reproduce this run: methodology configuration and
+  /// the factor set(s) each result drew on.
+  methodologySnapshot Json?
+  factorSnapshot      Json?
+  totals              Json
+  itemCount           Int       @default(0)
+  notes               String?
+
+  results LcaCalculationResult[]
+
+  @@index([assessmentId, runAt])
+}
+
+/// One emission figure, with every input to it snapshotted so the row stays
+/// readable even if the factor library, methodology or inventory changes.
+model LcaCalculationResult {
+  id           String            @id @default(cuid())
+  runId        String
+  run          LcaCalculationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  assessmentId String
+  assessment   LcaAssessment     @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  inventoryItemId  String?
+  inventoryItem    LcaInventoryItem?  @relation(fields: [inventoryItemId], references: [id])
+  processId        String?
+  process          LcaProcess?        @relation(fields: [processId], references: [id])
+  transportLegId   String?
+  transportLeg     LcaTransportLeg?   @relation(fields: [transportLegId], references: [id])
+  endOfLifeRouteId String?
+  endOfLifeRoute   LcaEndOfLifeRoute? @relation(fields: [endOfLifeRouteId], references: [id])
+
+  stage          LcaLifecycleStage
+  processName    String
+  itemName       String
+  itemType       LcaItemType
+  classification LcaEmissionClassification @default(FOSSIL)
+  /// Snapshotted alongside the figure so supplier and material contribution
+  /// breakdowns can be rebuilt from a historical run without depending on the
+  /// inventory still saying the same thing.
+  supplierName   String?
+  materialName   String?
+
+  activityValue    Decimal @db.Decimal(24, 10)
+  activityUnit     String
+  conversionFactor Decimal @db.Decimal(30, 15)
+  normalizedValue  Decimal @db.Decimal(24, 10)
+  normalizedUnit   String
+
+  factorValue         Decimal                @db.Decimal(24, 10)
+  factorUnit          String
+  factorSource        String
+  factorVersion       String
+  factorBoundary      LcaFactorBoundary      @default(UNKNOWN)
+  factorGeography     String?
+  factorYear          Int?
+  factorGwpBasis      String?
+  factorSelectionMode LcaFactorSelectionMode
+  emissionFactorId    String?
+  emissionFactor      EmissionFactor?        @relation("LcaResultFactor", fields: [emissionFactorId], references: [id])
+  isPlaceholderFactor Boolean                @default(false)
+
+  allocationMethod LcaAllocationMethod @default(NONE)
+  allocationFactor Decimal             @default(1) @db.Decimal(24, 10)
+  adjustmentFactor Decimal             @default(1) @db.Decimal(24, 10)
+
+  grossKgCo2e             Decimal @db.Decimal(24, 10)
+  allocatedKgCo2e         Decimal @db.Decimal(24, 10)
+  perFunctionalUnitKgCo2e Decimal @db.Decimal(24, 10)
+
+  dataType           LcaDataType
+  dataQualityScore   Decimal?    @db.Decimal(6, 3)
+  uncertaintyPercent Decimal?    @db.Decimal(9, 4)
+
+  formula    String
+  /// Ordered activity -> unit -> conversion -> factor -> methodology ->
+  /// adjustment/allocation -> calculation -> result steps behind this figure.
+  provenance Json
+
+  createdAt DateTime @default(now())
+
+  @@index([runId])
+  @@index([assessmentId, stage])
+}
+
+// ---------------------------------------------------------------------------
+// Versions, verification, audit
+// ---------------------------------------------------------------------------
+
+/// A frozen, immutable copy of an assessment at a point in time. Issued
+/// versions are never rewritten — a change means a new revision.
+model LcaAssessmentVersion {
+  id           String        @id @default(cuid())
+  assessmentId String
+  assessment   LcaAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  version        Int
+  label          String?
+  status         LcaVersionStatus @default(DRAFT_REVISION)
+  issuedAt       DateTime?
+  issuedByUserId String?
+  issuedBy       User?            @relation("LcaVersionIssuer", fields: [issuedByUserId], references: [id])
+
+  engineVersion      String
+  methodologyVersion String?
+  calculationRunId   String?
+  /// The complete assessment as it stood: goal and scope, model, inventory,
+  /// factor snapshots, results, registers, validation and readiness.
+  payload            Json
+
+  createdAt DateTime @default(now())
+
+  @@unique([assessmentId, version])
+}
+
+model LcaVerification {
+  id           String        @id @default(cuid())
+  assessmentId String
+  assessment   LcaAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  organisation        String
+  verifierName        String
+  verificationDate    DateTime
+  assuranceType       LcaAssuranceType
+  scopeOfVerification String
+  statementReference  String?
+  statementUrl        String?
+  conclusion          String?
+  notes               String?
+
+  recordedByUserId String?
+  recordedBy       User?    @relation("LcaVerificationRecorder", fields: [recordedByUserId], references: [id])
+  recordedAt       DateTime @default(now())
+
+  evidence LcaEvidence[]
+
+  @@index([assessmentId])
+}
+
+/// Append-only record of every material change. Never updated or deleted.
+model LcaAuditEvent {
+  id           String         @id @default(cuid())
+  assessmentId String?
+  assessment   LcaAssessment? @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  entityType String // "assessment", "inventory_item", "process", "supplier_pcf", ...
+  entityId   String?
+  action     String // "created", "updated", "deleted", "status_changed", "calculated", ...
+  summary    String
+
+  actorUserId String?
+  actor       User?    @relation("LcaAuditActor", fields: [actorUserId], references: [id])
+  occurredAt  DateTime @default(now())
+
+  before   Json?
+  after    Json?
+  metadata Json?
+
+  @@index([assessmentId, occurredAt])
+  @@index([entityType, entityId])
+}
+
 // ---------------------------------------------------------------------------
 // AI layer
 //
 // Design rule enforced by this schema: AI never owns an accounting number.
 // Everything AI produces lands in AiSuggestion / DocumentExtraction, which a
-// human must accept before it becomes an ActivityEntry or an LcaFlow. The
-// deterministic calculation engine then does the arithmetic against approved
-// EmissionFactor rows, exactly as it already did before AI existed.
+// human must accept before it becomes an ActivityEntry. The deterministic
+// calculation engines then do the arithmetic against approved EmissionFactor
+// rows, exactly as they already did before AI existed.
+//
+// The AI layer deliberately adds no life-cycle models of its own: product
+// assessment already has a full schema above (LcaAssessment and friends), and
+// the LCA copilot reads that rather than a parallel one.
 // ---------------------------------------------------------------------------
 
 /// The task types the model router knows about. A model is chosen per task
@@ -629,7 +1740,7 @@ model AiSuggestion {
   task       AiTaskType
   feature    String
   /// What the suggestion is about, e.g. "ACTIVITY_ENTRY", "EMISSION_FACTOR",
-  /// "LCA_FLOW", "DOCUMENT".
+  /// "LCA_ASSESSMENT", "DOCUMENT".
   targetType String
   targetId   String?
   status     AiSuggestionStatus @default(PENDING)
@@ -714,7 +1825,6 @@ model SourceDocument {
   extractions     DocumentExtraction[]
   activityEntries ActivityEntry[]
   aiInteractions  AiInteraction[]
-  lcaEvidence     LcaEvidence[]
 
   @@index([siteId, uploadedAt])
   @@index([sha256])
@@ -748,394 +1858,4 @@ model DocumentExtraction {
   acceptedEntries ActivityEntry[] @relation("ExtractionAcceptedEntries")
 
   @@index([documentId, createdAt])
-}
-
-// ---------------------------------------------------------------------------
-// Life Cycle Assessment
-//
-// An LCA is a persistent, structured project — not a chat transcript. The AI
-// copilot reads this data and can propose additions, but every methodological
-// choice below is stored because a human confirmed it.
-// ---------------------------------------------------------------------------
-
-enum LcaProjectStatus {
-  DRAFT
-  IN_PROGRESS
-  UNDER_REVIEW
-  COMPLETE
-  ARCHIVED
-}
-
-enum LcaBoundaryType {
-  CRADLE_TO_GATE
-  CRADLE_TO_GRAVE
-  GATE_TO_GATE
-  CRADLE_TO_CRADLE
-  OTHER
-}
-
-enum LcaAllocationMethod {
-  NOT_APPLICABLE
-  NONE_SUBDIVISION
-  MASS
-  ECONOMIC
-  ENERGY
-  PHYSICAL_CAUSALITY
-  SYSTEM_EXPANSION
-  OTHER
-}
-
-enum LcaStageKey {
-  RAW_MATERIALS
-  INBOUND_TRANSPORT
-  MANUFACTURING
-  PACKAGING
-  DISTRIBUTION
-  USE
-  END_OF_LIFE
-  OTHER
-}
-
-enum LcaFlowDirection {
-  INPUT
-  OUTPUT
-}
-
-enum LcaFlowType {
-  MATERIAL
-  ENERGY
-  FUEL
-  ELECTRICITY
-  WATER
-  TRANSPORT
-  WASTE
-  EMISSION
-  PRODUCT
-  CO_PRODUCT
-}
-
-enum LcaDataType {
-  PRIMARY
-  SECONDARY
-}
-
-enum LcaReviewStatus {
-  NOT_REVIEWED
-  INTERNAL_REVIEW
-  EXTERNAL_REVIEW
-  PANEL_REVIEW
-}
-
-enum LcaFindingSource {
-  HUMAN
-  AI
-}
-
-enum LcaFindingSeverity {
-  INFO
-  LOW
-  MEDIUM
-  HIGH
-}
-
-enum LcaFindingStatus {
-  OPEN
-  ACKNOWLEDGED
-  RESOLVED
-  DISMISSED
-}
-
-model LcaProject {
-  id          String           @id @default(cuid())
-  name        String
-  productName String
-  description String?
-  status      LcaProjectStatus @default(DRAFT)
-
-  /// Which operating unit/site the study belongs to. Used by the AI
-  /// authorization boundary as well as for reporting.
-  entityId String?
-  siteId   String?
-
-  /// The application methodology version the study was built against, so a
-  /// later methodology change is visible rather than silently applied.
-  methodologyVersion String @default("paragon-lca-v1")
-
-  createdByUserId String
-  createdBy       User     @relation("LcaProjectCreatedBy", fields: [createdByUserId], references: [id])
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  goalScope      LcaGoalScope?
-  stages         LcaStage[]
-  assumptions    LcaAssumption[]
-  scenarios      LcaScenario[]
-  results        LcaResult[]
-  evidence       LcaEvidence[]
-  reviewFindings LcaReviewFinding[]
-
-  @@index([entityId])
-  @@index([status, updatedAt])
-}
-
-/// ISO 14040/14044-shaped goal & scope definition. Every field here is a
-/// methodological choice: the wizard can explain each one and the AI can
-/// help word it, but `confirmedBy`/`confirmedAt` record that a human
-/// actually made the decision.
-model LcaGoalScope {
-  id        String     @id @default(cuid())
-  projectId String     @unique
-  project   LcaProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  purpose              String?
-  intendedApplication  String?
-  intendedAudience     String?
-  /// Whether results are intended to support a comparative assertion
-  /// disclosed to the public — which, under ISO 14044, brings additional
-  /// requirements including critical review by an interested-party panel.
-  comparativeAssertion Boolean @default(false)
-
-  functionalUnitDescription String?
-  functionalUnitQuantity    Decimal? @db.Decimal(18, 6)
-  functionalUnitUnit        String?
-  referenceFlowDescription  String?
-  referenceFlowQuantity     Decimal? @db.Decimal(18, 6)
-  referenceFlowUnit         String?
-
-  systemBoundaryType    LcaBoundaryType?
-  systemBoundaryNotes   String?
-  geography             String?
-  timePeriodStart       DateTime?
-  timePeriodEnd         DateTime?
-  technologyDescription String?
-
-  cutOffCriteria          String?
-  exclusions              String?
-  allocationMethod        LcaAllocationMethod @default(NOT_APPLICABLE)
-  allocationRationale     String?
-  impactCategories        String[]
-  dataQualityRequirements String?
-  limitations             String?
-
-  criticalReviewStatus LcaReviewStatus @default(NOT_REVIEWED)
-  criticalReviewNotes  String?
-
-  confirmedByUserId String?
-  confirmedBy       User?     @relation("LcaGoalScopeConfirmedBy", fields: [confirmedByUserId], references: [id])
-  confirmedAt       DateTime?
-  updatedAt         DateTime  @updatedAt
-}
-
-model LcaStage {
-  id        String     @id @default(cuid())
-  projectId String
-  project   LcaProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  key             LcaStageKey
-  name            String
-  description     String?
-  included        Boolean     @default(true)
-  /// Required when `included` is false — an exclusion has to be justified,
-  /// not silent.
-  exclusionReason String?
-  sortOrder       Int         @default(0)
-
-  processes LcaProcess[]
-
-  @@index([projectId, sortOrder])
-}
-
-model LcaProcess {
-  id      String   @id @default(cuid())
-  stageId String
-  stage   LcaStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
-
-  name           String
-  description    String?
-  geography      String?
-  referenceYear  Int?
-  technologyNote String?
-  sortOrder      Int     @default(0)
-
-  flows LcaFlow[]
-
-  @@index([stageId, sortOrder])
-}
-
-/// One life cycle inventory record. Quantities are per functional unit
-/// unless `perFunctionalUnit` is false, in which case the engine scales by
-/// the reference flow. `emissionFactorId` points at a row in the platform's
-/// own approved factor catalogue — an AI suggestion can propose which row,
-/// but the value always comes from the catalogue.
-model LcaFlow {
-  id        String     @id @default(cuid())
-  processId String
-  process   LcaProcess @relation(fields: [processId], references: [id], onDelete: Cascade)
-
-  direction         LcaFlowDirection
-  flowType          LcaFlowType
-  name              String
-  quantity          Decimal          @db.Decimal(18, 8)
-  unit              String
-  perFunctionalUnit Boolean          @default(true)
-
-  /// Transport flows: the engine computes tonne-km deterministically from
-  /// these two figures rather than trusting a pre-multiplied number.
-  transportMassTonnes Decimal? @db.Decimal(18, 8)
-  transportDistanceKm Decimal? @db.Decimal(18, 6)
-
-  emissionFactorId String?
-  emissionFactor   EmissionFactor? @relation("LcaFlowFactor", fields: [emissionFactorId], references: [id])
-
-  /// Share of this flow allocated to the product under study (ISO 14044
-  /// allocation). Defaults to 100%.
-  allocationPercent Decimal @default(100) @db.Decimal(6, 3)
-
-  dataSource    String?
-  dataType      LcaDataType?
-  geography     String?
-  referenceYear Int?
-  supplierName  String?
-  notes         String?
-
-  /// Transparent data-quality indicators, 1 (best) to 5 (worst). Null means
-  /// "not assessed" and is reported as UNKNOWN — never quietly treated as good.
-  dqReliability   Int?
-  dqCompleteness  Int?
-  dqTemporal      Int?
-  dqGeographical  Int?
-  dqTechnological Int?
-
-  dataOrigin DataOrigin @default(USER_ENTERED)
-  /// True when the row started life as an AI suggestion a human accepted.
-  aiAssisted Boolean    @default(false)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  scenarioOverrides LcaScenarioOverride[]
-  evidence          LcaEvidence[]
-
-  @@index([processId])
-}
-
-model LcaAssumption {
-  id        String     @id @default(cuid())
-  projectId String
-  project   LcaProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  topic      String
-  statement  String
-  rationale  String?
-  /// Recorded when the assumption text originated from an AI suggestion a
-  /// human accepted, so the report can disclose it.
-  aiAssisted Boolean @default(false)
-
-  createdByUserId String
-  createdBy       User     @relation("LcaAssumptionCreatedBy", fields: [createdByUserId], references: [id])
-  createdAt       DateTime @default(now())
-}
-
-/// A what-if variant of the baseline inventory. Scenario results are
-/// produced by the same deterministic engine as the baseline — the AI only
-/// ever interprets numbers the engine produced.
-model LcaScenario {
-  id        String     @id @default(cuid())
-  projectId String
-  project   LcaProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  name        String
-  description String?
-  isBaseline  Boolean @default(false)
-
-  createdByUserId String
-  createdBy       User     @relation("LcaScenarioCreatedBy", fields: [createdByUserId], references: [id])
-  createdAt       DateTime @default(now())
-
-  overrides LcaScenarioOverride[]
-  results   LcaResult[]
-
-  @@index([projectId])
-}
-
-model LcaScenarioOverride {
-  id         String      @id @default(cuid())
-  scenarioId String
-  scenario   LcaScenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
-
-  flowId String
-  flow   LcaFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
-
-  overrideQuantity            Decimal?        @db.Decimal(18, 8)
-  overrideTransportDistanceKm Decimal?        @db.Decimal(18, 6)
-  overrideEmissionFactorId    String?
-  overrideEmissionFactor      EmissionFactor? @relation("LcaScenarioOverrideFactor", fields: [overrideEmissionFactorId], references: [id])
-  excluded                    Boolean         @default(false)
-  note                        String?
-
-  @@unique([scenarioId, flowId])
-}
-
-/// A frozen deterministic calculation run. `payload` holds the full
-/// drill-down (stage -> process -> flow -> activity data -> factor ->
-/// equation), so a result stays explainable even if the inventory changes later.
-model LcaResult {
-  id         String       @id @default(cuid())
-  projectId  String
-  project    LcaProject   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  scenarioId String?
-  scenario   LcaScenario? @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
-
-  totalKgCo2e         Decimal @db.Decimal(18, 8)
-  functionalUnitLabel String?
-  payload             Json
-  engineVersion       String  @default("lca-engine-v1")
-  /// Flows that could not be calculated because no factor is mapped —
-  /// surfaced, never silently treated as zero.
-  unmappedFlowCount   Int     @default(0)
-
-  calculatedByUserId String?
-  calculatedBy       User?    @relation("LcaResultCalculatedBy", fields: [calculatedByUserId], references: [id])
-  calculatedAt       DateTime @default(now())
-
-  @@index([projectId, calculatedAt])
-}
-
-model LcaEvidence {
-  id        String     @id @default(cuid())
-  projectId String
-  project   LcaProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  flowId String?
-  flow   LcaFlow? @relation(fields: [flowId], references: [id], onDelete: Cascade)
-
-  documentId String
-  document   SourceDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
-
-  note      String?
-  createdAt DateTime @default(now())
-
-  @@unique([projectId, flowId, documentId])
-}
-
-/// Findings raised against a study — by a person, or by the AI data-quality
-/// review. AI-raised findings are labelled as such and are advisory only.
-model LcaReviewFinding {
-  id        String     @id @default(cuid())
-  projectId String
-  project   LcaProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  source     LcaFindingSource   @default(HUMAN)
-  severity   LcaFindingSeverity @default(INFO)
-  status     LcaFindingStatus   @default(OPEN)
-  category   String
-  finding    String
-  suggestion String?
-
-  raisedByUserId String?
-  raisedBy       User?     @relation("LcaFindingRaisedBy", fields: [raisedByUserId], references: [id])
-  createdAt      DateTime  @default(now())
-  resolvedAt     DateTime?
-
-  @@index([projectId, status])
 }
