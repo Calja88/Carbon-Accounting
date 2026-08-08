@@ -399,6 +399,33 @@ export function ReviewScreen(props: ReviewScreenProps) {
               ))
             )}
 
+            {proposalSet.blocked.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Figures on this document that disagree</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="text-sm text-slate-600">
+                    No entry is proposed for these: the document states the same quantity in more than one way and the
+                    figures don&apos;t match, so there is no defensible value to offer. Check the document and enter the
+                    right figure by hand.
+                  </p>
+                  {proposalSet.blocked.map((item) => (
+                    <div key={item.key} className="rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+                      <p className="text-sm font-medium text-slate-900">
+                        {item.label} ({item.dataPointCode})
+                      </p>
+                      {item.conflicts.map((conflict, i) => (
+                        <p key={i} className="mt-0.5 text-sm text-amber-900">
+                          {conflict}
+                        </p>
+                      ))}
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
             {proposalSet.unmapped.length > 0 && (
               <Card>
                 <CardHeader>

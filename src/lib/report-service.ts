@@ -121,7 +121,9 @@ export async function buildReportPayload(periodStart: Date, periodEnd: Date): Pr
       where: {
         activityEntry: {
           periodStart: { gte: periodStart, lte: periodEnd },
-          status: { not: "FLAGGED" },
+          // Withdrawn entries (REJECTED) are excluded alongside flagged ones —
+          // both are kept on file, neither is reportable.
+          status: { notIn: ["FLAGGED", "REJECTED"] },
         },
       },
       include: { activityEntry: { include: { activityDataPoint: true, site: true } } },

@@ -84,6 +84,15 @@ const documentMetadataSchema = z.object({
 
 const energySchema = z.object({
   electricityKwh: z.number().nullable(),
+  /**
+   * Day/night (or peak/off-peak) rates, when the bill splits them out. They
+   * are transcribed separately and combined by a platform rule, not by the
+   * model: this platform's grid electricity factor doesn't vary by time of
+   * use, so the two lines are one entry — but only after the application has
+   * checked they agree with any printed total (see document-proposals.ts).
+   */
+  electricityDayKwh: z.number().nullable(),
+  electricityNightKwh: z.number().nullable(),
   gasKwh: z.number().nullable(),
   gasVolumeM3: z.number().nullable(),
   fuelLitres: z.number().nullable(),
@@ -159,6 +168,41 @@ export const documentExtractionResultSchema = z.object({
   overall: aiConfidenceResultSchema,
 });
 export type DocumentExtractionResult = z.infer<typeof documentExtractionResultSchema>;
+
+// ---------------------------------------------------------------------------
+// Assistant action planning
+// ---------------------------------------------------------------------------
+
+/**
+ * What the assistant would like the application to do.
+ *
+ * `argumentsJson` is a *string*, not an object, and that is deliberate: every
+ * tool has its own argument schema, and forcing one union type through a
+ * provider's strict structured-output mode would either flatten the schemas
+ * into something permissive or fail on providers that don't support unions.
+ * Keeping it a string means the strict validation happens where it belongs —
+ * in the tool's own Zod schema, server-side, before anything runs (see
+ * src/lib/ai/tools/registry.ts).
+ *
+ * Nothing in this schema is an instruction. It is a request the application is
+ * free to refuse, and routinely does.
+ */
+export const assistantActionSchema = z.object({
+  tool: z.string().max(60),
+  argumentsJson: z.string().max(4000),
+  /** One line, for the audit trail: why this action was requested. */
+  reason: z.string().max(300),
+});
+export type AssistantAction = z.infer<typeof assistantActionSchema>;
+
+export const assistantPlanSchema = z.object({
+  /** A first reply, used only if no action runs. */
+  reply: z.string().max(4000),
+  actions: z.array(assistantActionSchema).max(6),
+  /** The one thing to ask when the request can't be completed as it stands. */
+  clarifyingQuestion: z.string().max(500).nullable(),
+});
+export type AssistantPlan = z.infer<typeof assistantPlanSchema>;
 
 // ---------------------------------------------------------------------------
 // Emission classification

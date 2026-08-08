@@ -113,7 +113,11 @@ async function loadCalculations(periodStart: Date, periodEnd: Date): Promise<Cal
     where: {
       activityEntry: {
         periodStart: { gte: periodStart, lte: periodEnd },
-        status: { not: "FLAGGED" },
+        // FLAGGED is held back pending review; REJECTED has been withdrawn by
+        // someone. Neither belongs in a total, and the entry and its
+        // calculations are kept either way so the audit trail still shows what
+        // was recorded and what happened to it.
+        status: { notIn: ["FLAGGED", "REJECTED"] },
       },
     },
     include: {

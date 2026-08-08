@@ -345,12 +345,29 @@ model ActivityEntry {
   plausibilityReason  String?
   notes               String?
 
-  /// How this row's activity data reached the platform. AI never writes an
-  /// entry on its own: AI_EXTRACTED means a human reviewed and accepted an
-  /// AI extraction, and `enteredBy`/`enteredAt` record who accepted it and
-  /// when. Defaults to USER_ENTERED so every pre-existing row keeps its
-  /// original meaning.
+  /// How this row's activity data reached the platform. AI_EXTRACTED means it
+  /// came from a document the AI read; AI_CHAT means the user stated it in the
+  /// assistant. `enteredBy`/`enteredAt` always record the person whose session
+  /// caused the write, and `autoLogged` records whether they accepted it
+  /// field by field or the platform's own checks cleared it. Defaults to
+  /// USER_ENTERED so every pre-existing row keeps its original meaning.
   dataOrigin DataOrigin @default(USER_ENTERED)
+
+  /// True when the platform created this row itself, because every
+  /// deterministic condition in src/lib/ai/auto-log.ts passed. False when a
+  /// person confirmed the values on screen. Never means "the model was
+  /// confident".
+  autoLogged Boolean @default(false)
+
+  /// Deterministic fingerprint of what this row records (document, data
+  /// point, site, period, quantity, unit, sub-type). Unique, so a retried
+  /// request, a re-run extraction, a repeated "log this" or a refreshed page
+  /// cannot produce a second row for the same fact.
+  aiIdempotencyKey String? @unique
+
+  /// The AiInteraction whose turn created this row, so "where did this number
+  /// come from?" reaches the model, provider and timestamp involved.
+  aiInteractionId String?
 
   /// The uploaded evidence document this entry was created from, kept
   /// linked for audit (methodology Section 8 evidence trail).
@@ -1630,7 +1647,27 @@ enum DataOrigin {
   USER_ENTERED
   IMPORTED
   AI_EXTRACTED
+  AI_CHAT
   DERIVED
+}
+
+/// How far the assistant may go on its own when it has read a document.
+///
+/// REVIEW_ALL               — nothing the assistant reads becomes accounting
+///                            data without a person accepting it.
+/// AUTO_LOG_HIGH_CONFIDENCE — the platform may create the entry itself, but
+///                            only when every deterministic condition in
+///                            src/lib/ai/auto-log.ts passes. "High confidence"
+///                            means those checks passed, never that a model
+///                            reported a high number.
+///
+/// Neither mode changes what an explicit instruction from the user does: a
+/// person typing "log this" has made the accounting decision themselves, and
+/// that request is still validated by the same checks before anything is
+/// written.
+enum AiDataEntryMode {
+  REVIEW_ALL
+  AUTO_LOG_HIGH_CONFIDENCE
 }
 
 /// Single-row application configuration for the AI layer (`id` is always
@@ -1652,6 +1689,11 @@ model AiSettings {
   /// Deliberately defaults to OFF: an extraction always goes to a human
   /// review screen before it becomes accounting data.
   autoAcceptExtraction Boolean        @default(false)
+  /// How much the assistant may write on its own — see AiDataEntryMode.
+  dataEntryMode        AiDataEntryMode @default(AUTO_LOG_HIGH_CONFIDENCE)
+  /// Whether a file attached to the assistant is read as soon as it is
+  /// uploaded. Off means the user has to ask for it explicitly.
+  autoExtractAttachments Boolean      @default(true)
   /// Suggestions below this confidence are always marked requiresReview.
   minConfidence        Decimal        @default(0.7) @db.Decimal(4, 3)
   loggingLevel         AiLoggingLevel @default(STANDARD)

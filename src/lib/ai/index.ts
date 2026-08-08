@@ -21,6 +21,7 @@ export type { AiActor } from "./authorization";
 export { getAiConfig, AI_TASK_TYPES, AI_TASK_LABELS } from "./config";
 
 import { askCarbonAssistant } from "./services/chat";
+import { runAssistantTurn } from "./services/agent";
 import { classifyEmission } from "./services/classify";
 import { suggestEmissionFactor, findFactorCandidates } from "./services/factor-suggest";
 import { extractDocument } from "./services/extract";
@@ -39,6 +40,12 @@ import { assistLca, reviewLcaProject, interpretScenario } from "./services/lca-c
 export const carbonAI = {
   /** Free-text carbon assistant, grounded in the organisation's own data. */
   chat: askCarbonAssistant,
+  /**
+   * One turn of the acting assistant: reads attachments, requests validated
+   * application actions, narrates what the application actually did. The
+   * model interprets; this platform validates, writes and calculates.
+   */
+  assistantTurn: runAssistantTurn,
   /** Reads an uploaded invoice / Waste Transfer Note / meter statement into a reviewable structure. */
   extractDocument,
   /** Suggests scope and category — platform rules first, model only when genuinely ambiguous. */

@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { AiLoggingLevel, AiTaskType } from "@prisma/client";
+import { AiDataEntryMode, AiLoggingLevel, AiTaskType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAdminSession } from "@/lib/admin";
 import { AI_SETTINGS_SINGLETON_ID, AI_TASK_TYPES, ensureAiSettingsRow, invalidateAiConfigCache } from "@/lib/ai/config";
@@ -28,6 +28,8 @@ const settingsSchema = z.object({
   freeOnly: z.coerce.boolean(),
   allowFreeRouter: z.coerce.boolean(),
   autoAcceptExtraction: z.coerce.boolean(),
+  autoExtractAttachments: z.coerce.boolean(),
+  dataEntryMode: z.enum(["REVIEW_ALL", "AUTO_LOG_HIGH_CONFIDENCE"]),
   minConfidence: z.coerce.number().min(0).max(1),
   loggingLevel: z.enum(["MINIMAL", "STANDARD", "VERBOSE"]),
   requestsPerMinute: z.coerce.number().int().min(1).max(600),
@@ -49,6 +51,8 @@ export async function saveAiSettingsAction(_prev: AiSettingsState, formData: For
     freeOnly: checkbox(formData, "freeOnly"),
     allowFreeRouter: checkbox(formData, "allowFreeRouter"),
     autoAcceptExtraction: checkbox(formData, "autoAcceptExtraction"),
+    autoExtractAttachments: checkbox(formData, "autoExtractAttachments"),
+    dataEntryMode: formData.get("dataEntryMode"),
     minConfidence: formData.get("minConfidence"),
     loggingLevel: formData.get("loggingLevel"),
     requestsPerMinute: formData.get("requestsPerMinute"),
@@ -81,6 +85,8 @@ export async function saveAiSettingsAction(_prev: AiSettingsState, formData: For
         freeOnly: parsed.data.freeOnly,
         allowFreeRouter: parsed.data.allowFreeRouter,
         autoAcceptExtraction: parsed.data.autoAcceptExtraction,
+        autoExtractAttachments: parsed.data.autoExtractAttachments,
+        dataEntryMode: parsed.data.dataEntryMode as AiDataEntryMode,
         minConfidence: parsed.data.minConfidence,
         loggingLevel: parsed.data.loggingLevel as AiLoggingLevel,
         requestsPerMinute: parsed.data.requestsPerMinute,

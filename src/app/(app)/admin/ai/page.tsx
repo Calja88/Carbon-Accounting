@@ -31,8 +31,9 @@ export default async function AdminAiPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">AI settings</h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-500">
           AI in this platform interprets, classifies, extracts, explains and suggests. It never calculates an emissions
-          figure and never writes accounting data on its own — every number comes from the deterministic engine and an
-          approved emission factor, and every AI suggestion is accepted by a person before it counts.
+          figure — every number comes from the deterministic engine and an approved emission factor. Where the assistant
+          records data itself, it does so only when this platform&apos;s own validation checks all pass, never because a
+          model reported that it was confident.
         </p>
       </div>
 
@@ -137,6 +138,8 @@ export default async function AdminAiPage() {
           freeOnly: settings.freeOnly,
           allowFreeRouter: settings.allowFreeRouter,
           autoAcceptExtraction: settings.autoAcceptExtraction,
+          dataEntryMode: settings.dataEntryMode,
+          autoExtractAttachments: settings.autoExtractAttachments,
           minConfidence: Number(settings.minConfidence),
           loggingLevel: settings.loggingLevel,
           requestsPerMinute: settings.requestsPerMinute,

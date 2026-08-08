@@ -28,6 +28,8 @@ const validExtraction = {
   },
   energy: {
     electricityKwh: 12450,
+    electricityDayKwh: null,
+    electricityNightKwh: null,
     gasKwh: null,
     gasVolumeM3: null,
     fuelLitres: null,

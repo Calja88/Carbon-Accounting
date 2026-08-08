@@ -25,6 +25,8 @@ function extraction(overrides: Partial<DocumentExtractionResult> = {}): Document
     },
     energy: {
       electricityKwh: null,
+      electricityDayKwh: null,
+      electricityNightKwh: null,
       gasKwh: null,
       gasVolumeM3: null,
       fuelLitres: null,
@@ -220,5 +222,98 @@ describe("buildProposals", () => {
   it("ignores a zero quantity rather than creating an empty entry", () => {
     const { proposals } = buildProposals(extraction({ energy: { ...extraction().energy, electricityKwh: 0 } }));
     expect(proposals).toHaveLength(0);
+  });
+});
+
+/**
+ * A bill can print the same consumption more than one way — a total, a
+ * day/night split, a pair of meter readings. Deciding what that means is a
+ * methodology rule, so it lives in code and is tested here rather than being
+ * left to a model to reconcile.
+ */
+describe("several figures for one consumption", () => {
+  it("adds a day/night split into one entry, because the factor doesn't vary by time of use", () => {
+    const { proposals, blocked } = buildProposals(
+      extraction({
+        energy: { ...extraction().energy, electricityKwh: null, electricityDayKwh: 12000, electricityNightKwh: 6420 },
+      }),
+    );
+
+    expect(blocked).toHaveLength(0);
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0].quantity).toBe(18420);
+    expect(proposals[0].basis).toContain("added together");
+  });
+
+  it("keeps the printed total when the split agrees with it", () => {
+    const { proposals } = buildProposals(
+      extraction({
+        energy: { ...extraction().energy, electricityKwh: 18420, electricityDayKwh: 12000, electricityNightKwh: 6420 },
+      }),
+    );
+    expect(proposals[0].quantity).toBe(18420);
+    expect(proposals[0].basis).toContain("agree with it");
+  });
+
+  it("records nothing when the total and the split disagree", () => {
+    const { proposals, blocked } = buildProposals(
+      extraction({
+        energy: { ...extraction().energy, electricityKwh: 18420, electricityDayKwh: 12000, electricityNightKwh: 2000 },
+      }),
+    );
+
+    expect(proposals).toHaveLength(0);
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0].conflicts[0]).toContain("18420");
+    expect(blocked[0].conflicts[0]).toContain("14000");
+  });
+
+  it("records nothing when the meter readings don't produce the stated consumption", () => {
+    const { proposals, blocked } = buildProposals(
+      extraction({
+        energy: {
+          ...extraction().energy,
+          electricityKwh: 18420,
+          meterReadingPrevious: 100000,
+          meterReadingCurrent: 105000,
+        },
+      }),
+    );
+
+    expect(proposals).toHaveLength(0);
+    expect(blocked[0].conflicts[0]).toContain("100000");
+  });
+
+  it("accepts meter readings that do produce it", () => {
+    const { proposals, blocked } = buildProposals(
+      extraction({
+        energy: {
+          ...extraction().energy,
+          electricityKwh: 18420,
+          meterReadingPrevious: 100000,
+          meterReadingCurrent: 118420,
+        },
+      }),
+    );
+    expect(blocked).toHaveLength(0);
+    expect(proposals).toHaveLength(1);
+  });
+
+  it("says so when only one half of a split could be read", () => {
+    const { proposals } = buildProposals(
+      extraction({ energy: { ...extraction().energy, electricityKwh: null, electricityDayKwh: 12000 } }),
+    );
+    expect(proposals).toHaveLength(0);
+  });
+
+  it("proposes an entry per activity when one document carries several", () => {
+    const { proposals } = buildProposals(
+      extraction({
+        energy: { ...extraction().energy, electricityKwh: 18420, gasKwh: 4200, fuelLitres: 300, fuelType: "Diesel" },
+      }),
+    );
+
+    expect(proposals.map((p) => p.dataPointCode).sort()).toEqual(["S1-01", "S1-03", "S2-01"]);
+    expect(proposals.find((p) => p.dataPointCode === "S1-03")?.subtypeKey).toBe("diesel");
   });
 });

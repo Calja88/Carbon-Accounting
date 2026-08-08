@@ -46,6 +46,28 @@ export interface UploadDocumentInput {
   notes?: string | null;
   uploadedByUserId: string;
   maxBytes: number;
+  /**
+   * Return the existing document when a file with identical bytes is already
+   * on file for the same site, instead of storing a second copy.
+   *
+   * Used by the assistant, where dragging the same invoice in twice is an
+   * ordinary mistake rather than a deliberate act. The /documents screen
+   * leaves this off: someone filing a document there has chosen to file it,
+   * and a second copy with its own notes may well be what they meant.
+   *
+   * Duplicate *entries* are prevented separately and unconditionally — see
+   * src/lib/ai/duplicate-check.ts. This only avoids storing the bytes twice.
+   */
+  reuseIdenticalUpload?: boolean;
+}
+
+export interface UploadedDocument {
+  id: string;
+  filename: string;
+  sha256: string;
+  byteSize: number;
+  /** True when this is an existing document rather than a newly stored one. */
+  reusedExisting: boolean;
 }
 
 /**
@@ -54,7 +76,7 @@ export interface UploadDocumentInput {
  * filename is normalised — a browser-supplied name is untrusted input and is
  * never used as a path.
  */
-export async function uploadDocument(input: UploadDocumentInput) {
+export async function uploadDocument(input: UploadDocumentInput): Promise<UploadedDocument> {
   const buffer = Buffer.from(input.bytes);
 
   if (buffer.byteLength === 0) {
@@ -74,7 +96,16 @@ export async function uploadDocument(input: UploadDocumentInput) {
   const safeName = input.filename.replace(/[/\\]/g, "_").slice(0, 200) || "document";
   const sha256 = createHash("sha256").update(buffer).digest("hex");
 
-  return prisma.sourceDocument.create({
+  if (input.reuseIdenticalUpload) {
+    const existing = await prisma.sourceDocument.findFirst({
+      where: { sha256, byteSize: buffer.byteLength, siteId: input.siteId ?? null },
+      orderBy: { uploadedAt: "desc" },
+      select: { id: true, filename: true, sha256: true, byteSize: true },
+    });
+    if (existing) return { ...existing, reusedExisting: true };
+  }
+
+  const created = await prisma.sourceDocument.create({
     data: {
       filename: safeName,
       mimeType: input.mimeType,
@@ -89,6 +120,8 @@ export async function uploadDocument(input: UploadDocumentInput) {
     },
     select: { id: true, filename: true, sha256: true, byteSize: true },
   });
+
+  return { ...created, reusedExisting: false };
 }
 
 export async function listDocuments(siteIds: string[], limit = 50) {

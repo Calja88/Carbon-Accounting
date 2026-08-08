@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AiLoggingLevel, AiTaskType } from "@prisma/client";
+import { AiDataEntryMode, AiLoggingLevel, AiTaskType } from "@prisma/client";
 import { buildCatalogSnapshot, toModelInfo } from "@/lib/ai/catalog";
 import { resolveModelChain, selectPdfEngine } from "@/lib/ai/model-routing";
 import type { AiRuntimeConfig } from "@/lib/ai/config";
@@ -22,6 +22,8 @@ function config(overrides: Partial<AiRuntimeConfig> = {}): AiRuntimeConfig {
     freeOnly: true,
     allowFreeRouter: true,
     autoAcceptExtraction: false,
+    dataEntryMode: AiDataEntryMode.AUTO_LOG_HIGH_CONFIDENCE,
+    autoExtractAttachments: true,
     minConfidence: 0.7,
     loggingLevel: AiLoggingLevel.STANDARD,
     requestsPerMinute: 12,

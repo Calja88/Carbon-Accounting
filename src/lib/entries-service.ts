@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import {
+  DataOrigin,
   DataQualityTier,
   EmissionFactor,
   EmissionFactorSet,
@@ -120,6 +121,183 @@ async function resolveFactorMultiSource(
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Factor resolution preflight
+// ---------------------------------------------------------------------------
+
+export interface ResolvedFactorPreview {
+  id: string;
+  label: string;
+  unit: string;
+  basis: FactorBasis;
+  co2eFactor: number;
+  factorSetName: string;
+  publisher: string;
+  vintageYear: number;
+  isPlaceholder: boolean;
+}
+
+export interface FactorResolutionPreview {
+  /** At least one factor resolved through the normal resolution order. */
+  resolved: boolean;
+  /**
+   * More than one factor could apply and nothing in the entry chooses between
+   * them — a sub-type is needed. Distinct from "not resolved": the platform
+   * has factors, it just can't tell which one this activity is.
+   */
+  ambiguous: boolean;
+  /** The factor's unit matches the canonical unit this entry would be stored in. */
+  unitCompatible: boolean;
+  canonicalUnit: string | null;
+  reason: string | null;
+  /** Everything that would be applied — two rows for Scope 2's dual reporting. */
+  factors: ResolvedFactorPreview[];
+  /** Sub-types available when the answer is ambiguous, for the question to ask. */
+  candidateSubtypeKeys: string[];
+}
+
+function toPreview(factor: EmissionFactor, factorSet: EmissionFactorSet): ResolvedFactorPreview {
+  return {
+    id: factor.id,
+    label: `${factorSet.name} — ${factor.category}${factor.subtypeKey ? ` / ${factor.subtypeKey}` : ""} (${factor.basis})`,
+    unit: factor.unit,
+    basis: factor.basis,
+    co2eFactor: Number(factor.co2eFactor),
+    factorSetName: factorSet.name,
+    publisher: factorSet.publisher,
+    vintageYear: factorSet.vintageYear,
+    isPlaceholder: factorSet.isPlaceholder,
+  };
+}
+
+const NOT_RESOLVED = (reason: string): FactorResolutionPreview => ({
+  resolved: false,
+  ambiguous: false,
+  unitCompatible: false,
+  canonicalUnit: null,
+  reason,
+  factors: [],
+  candidateSubtypeKeys: [],
+});
+
+/**
+ * Answers "would this entry calculate?" without creating anything.
+ *
+ * It walks the *same* resolution order `runCalculationsForEntry` walks —
+ * supplier-specific, then official, then EEIO; both bases for Scope 2 — so an
+ * automatic entry is only ever created when the real calculation is already
+ * known to succeed. Anything else would leave AWAITING_FACTOR rows behind that
+ * nobody asked for.
+ *
+ * It is also where "several plausible factors" is detected: a category holding
+ * factors under more than one sub-type, with no sub-type chosen, is ambiguous
+ * rather than resolvable, and the auto-log engine treats it as a question to
+ * ask rather than a choice to make.
+ */
+export async function previewFactorResolution(input: {
+  factorCategory: string;
+  scope: Scope;
+  subtypeKey: string | null;
+  rawValue: number;
+  rawUnit: string;
+  periodStart: Date;
+  siteId: string;
+  supplierName?: string | null;
+}): Promise<FactorResolutionPreview> {
+  let canonicalUnit: string;
+  try {
+    canonicalUnit = toCanonicalUnit(input.factorCategory, input.rawValue, input.rawUnit).unit;
+  } catch {
+    return NOT_RESOLVED(`"${input.rawUnit}" can't be converted to the unit this platform stores for ${input.factorCategory}.`);
+  }
+
+  const finish = (factors: ResolvedFactorPreview[], reason: string | null): FactorResolutionPreview => ({
+    resolved: factors.length > 0,
+    ambiguous: false,
+    unitCompatible: factors.length > 0 && factors.every((f) => f.unit === canonicalUnit),
+    canonicalUnit,
+    reason,
+    factors,
+    candidateSubtypeKeys: [],
+  });
+
+  if (input.scope === Scope.SCOPE_2 && input.factorCategory === "grid_electricity") {
+    const contract = await findActiveEnergyContract(input.siteId, input.periodStart);
+    const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, input.periodStart);
+    if (!officialSet) {
+      return NOT_RESOLVED("No official DEFRA/DESNZ factor set is effective for this period.");
+    }
+    const locationFactor = await findFactorInSet(officialSet.id, input.factorCategory, null, FactorBasis.LOCATION_BASED);
+    const marketBasisType = selectMarketBasis(
+      contract ? { regoBacked: contract.regoBacked, tariffType: contract.tariffType } : null,
+    );
+    const marketFactor = await findFactorInSet(
+      officialSet.id,
+      input.factorCategory,
+      null,
+      marketBasisType === "MARKET_BASED" ? FactorBasis.MARKET_BASED : FactorBasis.RESIDUAL_MIX,
+    );
+    if (!locationFactor || !marketFactor) {
+      return NOT_RESOLVED(
+        "Scope 2 needs both a location-based and a market-based/residual-mix factor, and one of them is missing for this period.",
+      );
+    }
+    return finish(
+      [toPreview(locationFactor, officialSet), toPreview(marketFactor, officialSet)],
+      "Scope 2 is reported on both bases, so both factors were resolved.",
+    );
+  }
+
+  const basis = FactorBasis.STANDARD;
+  const resolved =
+    input.scope === Scope.SCOPE_3
+      ? await resolveFactorMultiSource(input.factorCategory, input.subtypeKey, basis, input.periodStart, input.supplierName)
+      : await (async () => {
+          const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, input.periodStart);
+          if (!officialSet) return null;
+          const factor = await findFactorInSet(officialSet.id, input.factorCategory, input.subtypeKey, basis);
+          return factor ? { factor, factorSet: officialSet, tierOverride: null } : null;
+        })();
+
+  if (!resolved) {
+    // Nothing matched. If the category holds factors under sub-types and this
+    // entry names none, that is ambiguity, not absence — and the honest answer
+    // is a question rather than "no factor available".
+    const subtyped = await prisma.emissionFactor.findMany({
+      where: {
+        category: input.factorCategory,
+        subtypeKey: { not: null },
+        factorSet: {
+          effectiveFrom: { lte: input.periodStart },
+          OR: [{ effectiveTo: null }, { effectiveTo: { gte: input.periodStart } }],
+        },
+      },
+      select: { subtypeKey: true },
+      distinct: ["subtypeKey"],
+      take: 12,
+    });
+
+    const keys = subtyped.map((s) => s.subtypeKey).filter((k): k is string => Boolean(k));
+    if (!input.subtypeKey && keys.length > 1) {
+      return {
+        resolved: false,
+        ambiguous: true,
+        unitCompatible: false,
+        canonicalUnit,
+        reason: `More than one factor could apply for "${input.factorCategory}" and no type was determined.`,
+        factors: [],
+        candidateSubtypeKeys: keys,
+      };
+    }
+
+    return NOT_RESOLVED(
+      `No emission factor is available for "${input.factorCategory}"${input.subtypeKey ? ` / "${input.subtypeKey}"` : ""} in a factor set effective for this period.`,
+    );
+  }
+
+  return finish([toPreview(resolved.factor, resolved.factorSet)], null);
+}
+
 async function findActiveEnergyContract(siteId: string, asOfDate: Date) {
   return prisma.siteEnergyContract.findFirst({
     where: {
@@ -131,7 +309,27 @@ async function findActiveEnergyContract(siteId: string, asOfDate: Date) {
   });
 }
 
-export interface CreateEntryInput {
+/**
+ * Where a row came from, written *with* the row rather than patched on
+ * afterwards.
+ *
+ * `aiIdempotencyKey` in particular has to be part of the insert: it is backed
+ * by a unique constraint, and a key applied in a second statement leaves a
+ * window in which two concurrent requests both create an entry before either
+ * claims the key. Everything else here travels with it so a row is never
+ * briefly visible without its provenance.
+ */
+export interface EntryProvenanceInput {
+  dataOrigin?: DataOrigin;
+  sourceDocumentId?: string | null;
+  acceptedFromExtractionId?: string | null;
+  /** True only when the platform's own auto-log checks cleared this write. */
+  autoLogged?: boolean;
+  aiIdempotencyKey?: string | null;
+  aiInteractionId?: string | null;
+}
+
+export interface CreateEntryInput extends EntryProvenanceInput {
   activityDataPointId: string;
   siteId: string;
   periodStart: Date;
@@ -203,6 +401,12 @@ export async function createActivityEntryWithCalculations(input: CreateEntryInpu
       plausibilityReason: plausibility.reason,
       notes: input.notes,
       enteredByUserId: input.enteredByUserId,
+      dataOrigin: input.dataOrigin ?? DataOrigin.USER_ENTERED,
+      sourceDocumentId: input.sourceDocumentId ?? null,
+      acceptedFromExtractionId: input.acceptedFromExtractionId ?? null,
+      autoLogged: input.autoLogged ?? false,
+      aiIdempotencyKey: input.aiIdempotencyKey ?? null,
+      aiInteractionId: input.aiInteractionId ?? null,
     },
   });
 

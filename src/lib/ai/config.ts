@@ -11,7 +11,7 @@
  * value that crosses a server/client boundary.
  */
 
-import { AiLoggingLevel, AiTaskType } from "@prisma/client";
+import { AiDataEntryMode, AiLoggingLevel, AiTaskType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 export const AI_TASK_TYPES: AiTaskType[] = [
@@ -85,6 +85,15 @@ export interface AiRuntimeConfig {
   freeOnly: boolean;
   allowFreeRouter: boolean;
   autoAcceptExtraction: boolean;
+  /**
+   * How much the assistant may write on its own. Note that this governs the
+   * *unprompted* case — the platform acting on a document nobody asked it to
+   * act on. A user typing "log this" has made the decision themselves, and
+   * their instruction is validated by the same checks in either mode.
+   */
+  dataEntryMode: AiDataEntryMode;
+  /** Read an attachment as soon as it is uploaded. */
+  autoExtractAttachments: boolean;
   minConfidence: number;
   loggingLevel: AiLoggingLevel;
   requestsPerMinute: number;
@@ -129,6 +138,16 @@ export function defaultAiConfig(): AiRuntimeConfig {
     freeOnly: envBool("AI_FREE_ONLY", true),
     allowFreeRouter: envBool("AI_ALLOW_FREE_ROUTER", true),
     autoAcceptExtraction: envBool("AI_AUTO_ACCEPT_EXTRACTION", false),
+    // Automatic logging is the intended operating mode, and it is safe to
+    // default to precisely because "high confidence" is defined by the
+    // deterministic checks in src/lib/ai/auto-log.ts rather than by anything a
+    // model reports about itself. An operator who wants everything reviewed
+    // sets AI_DATA_ENTRY_MODE=REVIEW_ALL, or changes it in /admin/ai.
+    dataEntryMode: (() => {
+      const raw = process.env.AI_DATA_ENTRY_MODE?.trim().toUpperCase();
+      return raw && raw in AiDataEntryMode ? (raw as AiDataEntryMode) : AiDataEntryMode.AUTO_LOG_HIGH_CONFIDENCE;
+    })(),
+    autoExtractAttachments: envBool("AI_AUTO_EXTRACT_ATTACHMENTS", true),
     minConfidence: (() => {
       const raw = Number(process.env.AI_MIN_CONFIDENCE);
       return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 0.7;
@@ -196,6 +215,8 @@ export async function getAiConfig(): Promise<AiRuntimeConfig> {
         freeOnly: row.freeOnly,
         allowFreeRouter: row.allowFreeRouter,
         autoAcceptExtraction: row.autoAcceptExtraction,
+        dataEntryMode: row.dataEntryMode,
+        autoExtractAttachments: row.autoExtractAttachments,
         minConfidence: Number(row.minConfidence),
         loggingLevel: row.loggingLevel,
         requestsPerMinute: row.requestsPerMinute,
@@ -228,6 +249,8 @@ export async function ensureAiSettingsRow() {
       freeOnly: defaults.freeOnly,
       allowFreeRouter: defaults.allowFreeRouter,
       autoAcceptExtraction: defaults.autoAcceptExtraction,
+      dataEntryMode: defaults.dataEntryMode,
+      autoExtractAttachments: defaults.autoExtractAttachments,
       minConfidence: defaults.minConfidence,
       loggingLevel: defaults.loggingLevel,
       requestsPerMinute: defaults.requestsPerMinute,

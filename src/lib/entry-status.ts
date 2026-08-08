@@ -40,7 +40,16 @@ export async function getSiteQuantityStatus(siteId: string): Promise<SiteDataPoi
         orderBy: { enteredAt: "desc" },
       });
       if (entry) {
-        status = entry.status === "FLAGGED" ? "flagged" : entry.status === "AWAITING_FACTOR" ? "awaiting_factor" : "submitted";
+        // A withdrawn entry leaves the period genuinely uncollected again, so
+        // it shows as missing rather than as something already dealt with.
+        status =
+          entry.status === "FLAGGED"
+            ? "flagged"
+            : entry.status === "AWAITING_FACTOR"
+              ? "awaiting_factor"
+              : entry.status === "REJECTED"
+                ? "missing"
+                : "submitted";
       }
     }
 

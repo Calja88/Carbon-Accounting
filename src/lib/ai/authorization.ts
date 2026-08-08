@@ -23,7 +23,6 @@
  */
 
 import { Role } from "@prisma/client";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { AiActor, AiAuthorizationError, assertSiteInScope, isEntityInScope } from "./scope";
 
@@ -43,6 +42,10 @@ export {
  * there is no valid session — callers must treat that as "no AI, no context".
  */
 export async function resolveAiActor(): Promise<AiActor | null> {
+  // Imported here rather than at the top of the file so that modules needing
+  // only the scope checks — and the tests that exercise them — don't pull the
+  // whole auth stack in just by importing this one.
+  const { auth } = await import("@/auth");
   const session = await auth();
   if (!session?.user?.id) return null;
 

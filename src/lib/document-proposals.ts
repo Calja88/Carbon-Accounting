@@ -32,6 +32,12 @@ export interface EntryProposal {
   basis: string;
   /** Anything the reviewer must supply or check before accepting. */
   needsAttention: string[];
+  /**
+   * Figures on the document that contradict each other. Distinct from
+   * `needsAttention`: a conflict blocks automatic logging outright, because
+   * the platform genuinely doesn't know which number is the right one.
+   */
+  conflicts: string[];
 }
 
 export interface UnmappedFinding {
@@ -41,9 +47,24 @@ export interface UnmappedFinding {
   reason: string;
 }
 
+/**
+ * Something the platform *could* record, held back because the document
+ * contradicts itself. Kept apart from `unmapped` (which is "nowhere to put
+ * this") and from `proposals` (which is "here it is, check it"): a
+ * contradiction needs a person to say which figure is right, and until they
+ * do there is no defensible quantity to offer.
+ */
+export interface BlockedFinding {
+  key: string;
+  label: string;
+  dataPointCode: string;
+  conflicts: string[];
+}
+
 export interface ProposalSet {
   proposals: EntryProposal[];
   unmapped: UnmappedFinding[];
+  blocked: BlockedFinding[];
   /** Period the platform derived, if the document gave one. */
   derivedPeriodInput: string | null;
   derivedPeriodBasis: string | null;
@@ -98,6 +119,106 @@ export function derivePeriod(result: DocumentExtractionResult): { periodInput: s
   return { periodInput: null, basis: null, warning: "No date on the document could be read, so you'll need to choose the period." };
 }
 
+/** Two figures that should be the same figure, within reading-error of each other. */
+const AGREEMENT_TOLERANCE = 0.01;
+
+export interface CombinedElectricity {
+  kwh: number | null;
+  basis: string;
+  conflicts: string[];
+  notes: string[];
+}
+
+/**
+ * Combines the electricity figures a bill might print.
+ *
+ * A bill that splits day and night (or peak and off-peak) rates is still one
+ * quantity of grid electricity as far as this platform's Scope 2 factors are
+ * concerned — those factors don't vary by time of use — so the rule is to add
+ * them. What the rule will not do is *choose* between a printed total and a
+ * split that disagrees with it: that is a contradiction on the document, and
+ * the honest response is to record nothing and say which figures disagree.
+ *
+ * A methodology that did distinguish the rates would split this into two
+ * entries instead; that decision lives here, in code, for exactly that reason.
+ */
+export function combineElectricity(energy: DocumentExtractionResult["energy"]): CombinedElectricity {
+  const total = energy.electricityKwh !== null && energy.electricityKwh > 0 ? energy.electricityKwh : null;
+  const day = energy.electricityDayKwh !== null && energy.electricityDayKwh > 0 ? energy.electricityDayKwh : null;
+  const night = energy.electricityNightKwh !== null && energy.electricityNightKwh > 0 ? energy.electricityNightKwh : null;
+  const split = day !== null && night !== null ? day + night : null;
+
+  if (total !== null && split !== null) {
+    const difference = Math.abs(total - split) / Math.max(total, split);
+    if (difference > AGREEMENT_TOLERANCE) {
+      return {
+        kwh: null,
+        basis: "Electricity consumption read from the document.",
+        conflicts: [
+          `The document's total of ${total} kWh doesn't match its day (${day} kWh) and night (${night} kWh) figures, which add up to ${split} kWh.`,
+        ],
+        notes: [],
+      };
+    }
+    return {
+      kwh: total,
+      basis: `Total electricity consumption of ${total} kWh read from the document; its day (${day} kWh) and night (${night} kWh) figures agree with it.`,
+      conflicts: [],
+      notes: [],
+    };
+  }
+
+  if (split !== null) {
+    return {
+      kwh: split,
+      basis: `Day (${day} kWh) and night (${night} kWh) consumption read from the document and added together — this platform's grid electricity factors don't vary by time of use, so they belong in one entry.`,
+      conflicts: [],
+      notes: [],
+    };
+  }
+
+  if (total !== null) {
+    return { kwh: total, basis: "Electricity consumption in kWh read from the document.", conflicts: [], notes: [] };
+  }
+
+  // One half of a split with no total is not a consumption figure.
+  if (day !== null || night !== null) {
+    return {
+      kwh: null,
+      basis: "Electricity consumption read from the document.",
+      conflicts: [],
+      notes: [
+        `Only the ${day !== null ? "day" : "night"} rate could be read (${day ?? night} kWh) and no total was printed, so the period's total consumption isn't known.`,
+      ],
+    };
+  }
+
+  return { kwh: null, basis: "", conflicts: [], notes: [] };
+}
+
+/**
+ * Checks a printed consumption figure against the meter readings beside it.
+ * A bill whose readings don't produce its own consumption figure is a bill
+ * nothing should be logged from automatically.
+ */
+export function meterReadingConflicts(energy: DocumentExtractionResult["energy"], consumption: number | null): string[] {
+  const { meterReadingPrevious: previous, meterReadingCurrent: current } = energy;
+  if (previous === null || current === null || consumption === null) return [];
+  if (current < previous) {
+    return [
+      `The current meter reading (${current}) is lower than the previous one (${previous}), so the consumption on this document can't be checked.`,
+    ];
+  }
+  const implied = current - previous;
+  if (implied === 0) return [];
+  if (Math.abs(implied - consumption) / Math.max(implied, consumption) > AGREEMENT_TOLERANCE) {
+    return [
+      `The meter readings on this document (${previous} → ${current}) imply ${implied}, but it states ${consumption} was consumed.`,
+    ];
+  }
+  return [];
+}
+
 /** Maps a printed fuel description onto an S1-03 sub-type, or null if it isn't clear-cut. */
 function fuelSubtype(fuelType: string | null): string | null {
   if (!fuelType) return null;
@@ -110,28 +231,41 @@ function fuelSubtype(fuelType: string | null): string | null {
 export function buildProposals(result: DocumentExtractionResult): ProposalSet {
   const proposals: EntryProposal[] = [];
   const unmapped: UnmappedFinding[] = [];
+  const blocked: BlockedFinding[] = [];
 
   const period = derivePeriod(result);
   const periodWarnings = period.warning ? [period.warning] : [];
 
   const { energy, water, waste, transport } = result;
 
-  if (energy.electricityKwh !== null && energy.electricityKwh > 0) {
+  const electricity = combineElectricity(energy);
+  const electricityConflicts = [...electricity.conflicts, ...meterReadingConflicts(energy, electricity.kwh)];
+
+  if (electricity.kwh !== null && electricityConflicts.length === 0) {
     proposals.push({
       key: "electricity",
       dataPointCode: "S2-01",
       label: "Grid electricity consumption",
-      quantity: energy.electricityKwh,
+      quantity: electricity.kwh,
       unit: "kWh",
       subtypeKey: null,
       periodInput: period.periodInput,
-      basis: "Electricity consumption in kWh read from the document.",
+      basis: electricity.basis,
       needsAttention: [
         ...periodWarnings,
+        ...electricity.notes,
         ...(energy.renewableTariffStated
           ? ["The document mentions a renewable tariff. Record the supplier, tariff and any REGO volume on the site's electricity contract — that, not this entry, drives the market-based figure."]
           : []),
       ],
+      conflicts: [],
+    });
+  } else if (electricityConflicts.length > 0) {
+    blocked.push({
+      key: "electricity",
+      label: "Grid electricity consumption",
+      dataPointCode: "S2-01",
+      conflicts: electricityConflicts,
     });
   }
 
@@ -146,6 +280,7 @@ export function buildProposals(result: DocumentExtractionResult): ProposalSet {
       periodInput: period.periodInput,
       basis: "Gas consumption in kWh read from the document.",
       needsAttention: periodWarnings,
+      conflicts: [],
     });
   } else if (energy.gasVolumeM3 !== null && energy.gasVolumeM3 > 0) {
     proposals.push({
@@ -158,6 +293,7 @@ export function buildProposals(result: DocumentExtractionResult): ProposalSet {
       periodInput: period.periodInput,
       basis: "Gas volume in cubic metres read from the document. The platform converts m³ to kWh itself using its published constants.",
       needsAttention: periodWarnings,
+      conflicts: meterReadingConflicts(energy, energy.gasVolumeM3),
     });
   }
 
@@ -179,6 +315,7 @@ export function buildProposals(result: DocumentExtractionResult): ProposalSet {
           : ["The fuel type couldn't be determined from the document — choose petrol or diesel before accepting."]),
         "Check this fuel was for company-owned or leased vehicles. Fuel for a generator belongs under S1-02, and mileage claimed by an employee for their own car belongs under S1-04.",
       ],
+      conflicts: [],
     });
   }
 
@@ -246,6 +383,7 @@ export function buildProposals(result: DocumentExtractionResult): ProposalSet {
   return {
     proposals,
     unmapped,
+    blocked,
     derivedPeriodInput: period.periodInput,
     derivedPeriodBasis: period.basis,
   };

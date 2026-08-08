@@ -33,6 +33,8 @@ export interface SettingsFormProps {
     freeOnly: boolean;
     allowFreeRouter: boolean;
     autoAcceptExtraction: boolean;
+    dataEntryMode: string;
+    autoExtractAttachments: boolean;
     minConfidence: number;
     loggingLevel: string;
     requestsPerMinute: number;
@@ -217,10 +219,48 @@ export function AiSettingsForm(props: SettingsFormProps) {
             />
             <Toggle
               name="autoAcceptExtraction"
-              label="Auto-accept document extractions"
-              description="Off by design. With it off, an extraction always goes to the review screen and only a person's acceptance creates accounting data."
+              label="Auto-accept document extractions on the review screen"
+              description="Off by design. With it off, an extraction opened from /documents always goes to the review screen and only a person's acceptance creates accounting data."
               defaultChecked={props.settings.autoAcceptExtraction}
             />
+            <Toggle
+              name="autoExtractAttachments"
+              label="Read files attached to the assistant straight away"
+              description="On by default. With it off, an attached file is stored as evidence and only read when someone asks for it."
+              defaultChecked={props.settings.autoExtractAttachments}
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>AI data entry mode</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <Label htmlFor="dataEntryMode">What the assistant may record on its own</Label>
+              <Select id="dataEntryMode" name="dataEntryMode" defaultValue={props.settings.dataEntryMode} className="mt-1">
+                <option value="AUTO_LOG_HIGH_CONFIDENCE">
+                  Record automatically when every validation check passes
+                </option>
+                <option value="REVIEW_ALL">Review everything before it is recorded</option>
+              </Select>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+              <p className="font-medium text-slate-800">What &quot;every validation check passes&quot; means</p>
+              <p className="mt-1">
+                It is a fixed list of conditions this platform checks itself, not a confidence percentage from a model:
+                the document was readable, the quantity is unambiguous, the unit is one this platform records, the period
+                is known, the activity maps to a real data point, the sub-type is determined, the site is one you are
+                authorised for, exactly one emission factor resolves and its unit is compatible, the document&apos;s own
+                figures agree with each other, nothing matching it is already on file, and the evidence is retained. If
+                any of them fails, the assistant asks you rather than recording anything.
+              </p>
+              <p className="mt-2">
+                Reviewing everything does not stop you asking the assistant to record something directly — a person
+                saying &quot;log this&quot; has made the accounting decision, and the same checks still apply.
+              </p>
+            </div>
           </CardContent>
         </Card>
 

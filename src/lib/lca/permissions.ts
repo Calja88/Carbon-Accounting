@@ -16,7 +16,6 @@
  */
 
 import { LcaAssessmentStatus, Role } from "@prisma/client";
-import { auth } from "@/auth";
 
 export interface LcaActor {
   id: string;
@@ -106,6 +105,10 @@ export function checkCanApprove(actor: LcaActor | null | undefined): PermissionR
 
 /** Session -> actor, or null when signed out. */
 export async function getLcaActor(): Promise<LcaActor | null> {
+  // Imported here rather than at the top of the file so that the pure
+  // permission predicates above can be imported (and tested) without pulling
+  // the whole auth stack in.
+  const { auth } = await import("@/auth");
   const session = await auth();
   if (!session?.user?.id) return null;
   return {
