@@ -2,23 +2,28 @@ import { redirect } from "next/navigation";
 import { requireAdminSession } from "@/lib/admin";
 import { AI_TASK_LABELS, AI_TASK_TYPES } from "@/lib/ai";
 import { defaultAiConfig, ensureAiSettingsRow } from "@/lib/ai/config";
-import { loadCatalog } from "@/lib/ai/catalog-store";
+import { ensureAiInitialized, loadCatalog } from "@/lib/ai/catalog-store";
 import { getAiUsageSummary } from "@/lib/ai/audit";
 import { isProviderConfigured } from "@/lib/ai/provider-registry";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { AiSettingsForm } from "./settings-form";
 
 export default async function AdminAiPage() {
   const session = await requireAdminSession();
   if (!session) redirect("/");
 
-  // Creating the row on first visit is what makes these settings editable
-  // without a migration-time seed or a deploy step.
+  // This page is monitoring/override, not an installation step: AI already
+  // self-initialises (settings row + catalogue) the first time it's used
+  // anywhere in the app. This just makes sure that's happened before we read it.
+  await ensureAiInitialized();
   const settings = await ensureAiSettingsRow();
   const [catalog, usage] = await Promise.all([loadCatalog(), getAiUsageSummary(24)]);
 
   const defaults = defaultAiConfig();
   const byTask = new Map(settings.taskModels.map((tm) => [tm.task, tm]));
+  const providerConfigured = isProviderConfigured();
+  const catalogHealthy = catalog.models.length > 0;
 
   return (
     <div className="space-y-8">
@@ -30,6 +35,27 @@ export default async function AdminAiPage() {
           approved emission factor, and every AI suggestion is accepted by a person before it counts.
         </p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Status</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center gap-2">
+          <Badge tone={settings.aiEnabled && providerConfigured ? "success" : "warning"}>
+            AI: {settings.aiEnabled && providerConfigured ? "ACTIVE" : providerConfigured ? "DISABLED" : "NOT CONFIGURED"}
+          </Badge>
+          <Badge tone="neutral">Provider: OpenRouter</Badge>
+          <Badge tone={settings.freeOnly ? "success" : "warning"}>
+            Cost mode: {settings.freeOnly ? "FREE ONLY" : "FREE + PAID ALLOWED"}
+          </Badge>
+          <Badge tone={catalogHealthy ? "success" : "warning"}>
+            Catalogue: {catalogHealthy ? "HEALTHY" : "EMPTY"}
+          </Badge>
+          {catalog.refreshedAt && (
+            <span className="text-xs text-slate-400">refreshed {catalog.refreshedAt.toLocaleString("en-GB")}</span>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -124,7 +150,7 @@ export default async function AdminAiPage() {
         }))}
         models={catalog.models}
         catalogRefreshedAt={catalog.refreshedAt?.toISOString() ?? null}
-        providerConfigured={isProviderConfigured()}
+        providerConfigured={providerConfigured}
       />
     </div>
   );

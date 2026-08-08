@@ -16,7 +16,7 @@ import { AiCallStatus, AiTaskType, Prisma } from "@prisma/client";
 import { z } from "zod";
 import { AiAuditContext, recordAiInteraction } from "./audit";
 import { getAiConfig, AiRuntimeConfig } from "./config";
-import { loadCatalog } from "./catalog-store";
+import { ensureAiInitialized, loadCatalog } from "./catalog-store";
 import { ModelRequirements, resolveModelChain, selectPdfEngine } from "./model-routing";
 import { getAiProvider } from "./provider-registry";
 import { checkAiRateLimit } from "./rate-limit";
@@ -83,6 +83,10 @@ export interface AiAvailability {
  * instead of offering a button that will fail.
  */
 export async function getAiAvailability(): Promise<AiAvailability> {
+  // Self-initialising: creates the settings row and loads/refreshes the
+  // model catalogue automatically when a key is present, throttled so this
+  // never becomes a fetch-per-request. No-ops with no key configured.
+  await ensureAiInitialized();
   const config = await getAiConfig();
 
   if (!config.aiEnabled) {
