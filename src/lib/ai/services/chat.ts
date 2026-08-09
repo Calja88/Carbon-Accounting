@@ -17,8 +17,9 @@ import { AiTaskType } from "@prisma/client";
 import { AiActor } from "../authorization";
 import { buildCarbonContext } from "../carbon-context";
 import { formatMethodologyNotes, retrieveMethodologyNotes } from "../methodology";
-import { runTextTask } from "../run";
-import { buildSystemPrompt } from "../system-prompts";
+import { runStructuredTask } from "../run";
+import { chatResponseSchema, ChatResponse } from "../schemas";
+import { buildSystemPrompt, JSON_ONLY_CONTRACT } from "../system-prompts";
 import { fenceUntrusted, newFenceNonce, truncateForPrompt, untrustedContentRules } from "../untrusted";
 import { AiMessage, AiRunMetadata } from "../types";
 
@@ -59,14 +60,16 @@ export async function askCarbonAssistant(actor: AiActor, input: CarbonChatInput)
 
   const systemPrompt = buildSystemPrompt({
     role: [
-      "You are answering questions from the people who run this organisation's carbon accounting.",
+      "You are answering questions from the people who run this organisation's carbon accounting, through a chat panel in the product.",
       "Answer from the platform data and methodology given below. Quote figures from it exactly, with their units, and say which period they cover.",
       "If the data below does not answer the question, say so directly and say what would need to be entered or imported for it to be answerable. That is a useful answer; a guess is not.",
       "When you are drawing on general GHG accounting knowledge rather than this platform's data or methodology, say so in the sentence where you do it.",
-      "Do not perform arithmetic on the figures given. If a calculation is needed that the platform has not already done, say which report or screen produces it.",
-      "Be concise and businesslike. Plain prose or short bullet lists; no headings for a two-sentence answer.",
+      "Do not perform arithmetic on the figures given — quote the platform's own figures (including any percentage change) exactly as supplied, rather than computing your own. If a calculation is needed that the platform has not already done, say which report or screen produces it.",
+      "Before describing any period-on-period decrease as a genuine reduction, check the DATA STATUS line in the COMPLETENESS section below. If it says NO_DATA, state plainly that no activity has been recorded for the current period yet and that the total shown reflects missing data, not a measured reduction — never say emissions 'decreased' or 'fell' in that case. If it says PARTIAL_DATA, say the comparison may not be reliable because the current period looks incomplete. Only describe a decrease as real when entry counts for the two periods are broadly comparable.",
+      "Write `answer` as the complete, final reply the user will read: natural, concise plain prose or short bullet lists, no headings for a short answer, ready to display exactly as written with nothing added or removed.",
     ].join(" "),
     context: `OUR DATA:\n${context.text}\n\nOUR METHODOLOGY (authoritative for anything this platform calculates):\n${notes}`,
+    outputContract: JSON_ONLY_CONTRACT,
     untrustedRules: untrustedContentRules(nonce),
   });
 
@@ -79,13 +82,16 @@ export async function askCarbonAssistant(actor: AiActor, input: CarbonChatInput)
     },
   ];
 
-  const run = await runTextTask({
+  const run = await runStructuredTask<ChatResponse>({
     task: AiTaskType.GENERAL_CHAT,
     feature: "carbon-chat",
     systemPrompt,
+    schema: chatResponseSchema,
+    schemaName: "chat_response",
     messages,
     temperature: 0.2,
     maxOutputTokens: 1200,
+    requirements: { prefersStructuredOutputs: true },
     audit: {
       userId: actor.userId,
       siteId: input.siteId ?? null,
@@ -94,5 +100,9 @@ export async function askCarbonAssistant(actor: AiActor, input: CarbonChatInput)
     },
   });
 
-  return { answer: run.data, periodLabel: context.periodLabel, meta: run.meta };
+  // Only the validated `answer` field ever reaches the caller — confidence,
+  // state and reasoningSummary are recorded in the audit row (see run.ts)
+  // but are never rendered, and any field the model invented beyond this
+  // schema was already discarded by the Zod parse before this line runs.
+  return { answer: run.data.answer, periodLabel: context.periodLabel, meta: run.meta };
 }

@@ -43,6 +43,23 @@ export const evidenceItemSchema = z.object({
 });
 export type AiEvidenceItem = z.infer<typeof evidenceItemSchema>;
 
+/**
+ * Free-text assistant replies (general carbon chat). `answer` is the only
+ * field ever shown to a user — it must be the complete, final, natural-
+ * language reply and nothing else. `reasoningSummary` is a one-sentence
+ * audit note, never shown by default and never a place for step-by-step
+ * deliberation; if a model tries to put planning text there instead of in
+ * `answer`, the length cap and the "one sentence" prompt instruction bound
+ * the damage, and the caller only ever reads `.answer`.
+ */
+export const chatResponseSchema = z.object({
+  answer: z.string().min(1).max(4000),
+  confidence: confidenceSchema,
+  state: confidenceStateSchema,
+  reasoningSummary: z.string().max(300),
+});
+export type ChatResponse = z.infer<typeof chatResponseSchema>;
+
 export const aiConfidenceResultSchema = z.object({
   state: confidenceStateSchema,
   confidence: confidenceSchema,

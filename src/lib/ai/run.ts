@@ -297,9 +297,14 @@ async function runChain<T>(
   }
 
   const detail = lastError instanceof Error ? lastError.message : String(lastError ?? "unknown error");
+  // A validation failure means every model tried produced something that
+  // didn't fit the required shape — never a reason to fall back to showing
+  // whatever raw text it did produce.
   const error = new AiUnavailableError(
     lastStatus === AiCallStatus.VALIDATION_FAILED ? "VALIDATION_FAILED" : "PROVIDER_ERROR",
-    "AI assistance is temporarily unavailable.",
+    lastStatus === AiCallStatus.VALIDATION_FAILED
+      ? "I couldn't generate a reliable answer. Please try again."
+      : "AI assistance is temporarily unavailable.",
     detail,
   );
 

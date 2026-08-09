@@ -27,6 +27,48 @@ function pct(value: number | null): string {
   return `${sign}${value.toFixed(1)}% vs the same period last year`;
 }
 
+export type DataCompletenessStatus = "NO_DATA" | "PARTIAL_DATA" | "COMPLETE";
+
+export interface DataCompleteness {
+  status: DataCompletenessStatus;
+  currentEntryCount: number;
+  previousEntryCount: number;
+  /** The line put in front of the model — deliberately the only place this policy lives. */
+  note: string;
+}
+
+/**
+ * Distinguishes a true zero from missing or partial current-period data,
+ * from activity-entry counts alone — never from the calculated emissions
+ * total, which is exactly what a period with no data and a period with
+ * genuinely zero emissions have in common. Pure and DB-free so the policy
+ * (what counts as "far fewer entries") is unit-testable on its own.
+ */
+export function assessDataCompleteness(currentEntryCount: number, previousEntryCount: number): DataCompleteness {
+  if (currentEntryCount === 0) {
+    return {
+      status: "NO_DATA",
+      currentEntryCount,
+      previousEntryCount,
+      note: "DATA STATUS: NO_DATA. Zero activity entries exist for the current period. Any 0.00 tCO2e total shown for it is an absence of data, not a measured or confirmed zero, and must never be described as an emissions reduction — say plainly that no activity has been recorded yet.",
+    };
+  }
+  if (previousEntryCount > 0 && currentEntryCount < previousEntryCount * 0.5) {
+    return {
+      status: "PARTIAL_DATA",
+      currentEntryCount,
+      previousEntryCount,
+      note: `DATA STATUS: PARTIAL_DATA. The current period has far fewer recorded entries (${currentEntryCount}) than the comparison period (${previousEntryCount}). Treat any decrease as unconfirmed and say the current period may still be incomplete, rather than presenting the change as a genuine reduction.`,
+    };
+  }
+  return {
+    status: "COMPLETE",
+    currentEntryCount,
+    previousEntryCount,
+    note: "DATA STATUS: entry counts for the two periods are broadly comparable.",
+  };
+}
+
 export interface CarbonContextOptions {
   periodStart: Date;
   periodEnd: Date;
@@ -98,13 +140,35 @@ export async function buildCarbonContext(actor: AiActor, options: CarbonContextO
     lines.push(`- ${dq.tier}: ${dq.percent.toFixed(1)}% (${t(dq.kgCo2e)})`);
   }
 
+  // Activity entry *counts* — independent of whether those entries produced
+  // a calculated figure — so the model can tell a true zero apart from an
+  // empty or partially-entered period. Scoped to the same authorized sites
+  // as everything else above.
+  const allowedSiteIdList = Array.from(allowedSiteIds);
+  const [currentEntryCount, previousEntryCount] = await Promise.all([
+    prisma.activityEntry.count({
+      where: { siteId: { in: allowedSiteIdList }, periodStart: { gte: options.periodStart, lte: options.periodEnd } },
+    }),
+    prisma.activityEntry.count({
+      where: {
+        siteId: { in: allowedSiteIdList },
+        periodStart: { gte: analytics.previousPeriodStart, lte: analytics.previousPeriodEnd },
+      },
+    }),
+  ]);
+
+  const completeness = assessDataCompleteness(currentEntryCount, previousEntryCount);
+
   lines.push("");
   lines.push("COMPLETENESS:");
   lines.push(`- Entries flagged for review and excluded from totals: ${analytics.flaggedCount}`);
   lines.push(`- Entries captured but awaiting an emission factor (not in any total): ${analytics.awaitingFactorCount}`);
+  lines.push(`- Activity entries recorded for the current period: ${currentEntryCount}`);
+  lines.push(`- Activity entries recorded for the comparison period: ${previousEntryCount}`);
   if (!analytics.hasAnyData) {
     lines.push("- No calculated emissions exist in this period at all.");
   }
+  lines.push(`- ${completeness.note}`);
 
   const factorSets = await prisma.emissionFactorSet.findMany({
     where: {
