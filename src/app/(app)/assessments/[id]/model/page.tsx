@@ -7,7 +7,7 @@ import { resolveAllocations } from "@/lib/lca/engine/allocation";
 import { checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
 import { ALLOCATION_LABELS, LIFECYCLE_STAGE_ORDER, STAGE_DESCRIPTIONS, STAGE_LABELS } from "@/lib/lca/labels";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { EmptyState, Notice, PageHeading, SectionCard } from "@/components/lca/ui";
 import { ProcessForm, ProcessOutputForm } from "./model-forms";
 import { deleteProcessAction, deleteProcessOutputAction } from "./actions";
@@ -128,13 +128,16 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
                             />
                           )}
                           {canEdit && itemCount === 0 && process._count.childProcesses === 0 && (
-                            <form action={deleteProcessAction}>
+                            <DestructiveActionDialog
+                              triggerLabel={`Delete ${process.name}`}
+                              triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                              title={`Delete "${process.name}"?`}
+                              description="This process has no inventory lines or sub-processes, so nothing else depends on it. This cannot be undone."
+                              formAction={deleteProcessAction}
+                            >
                               <input type="hidden" name="assessmentId" value={id} />
                               <input type="hidden" name="processId" value={process.id} />
-                              <Button type="submit" variant="ghost" size="sm" aria-label={`Delete ${process.name}`}>
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </form>
+                            </DestructiveActionDialog>
                           )}
                         </div>
                       </div>
@@ -170,13 +173,17 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
                                   {output.physicalValue && `${output.physicalValue.toString()} ${output.physicalUnit ?? ""}`}
                                   {output.economicValue && `${output.economicValue.toString()} ${output.economicCurrency ?? ""}`}
                                   {canEdit && (
-                                    <form action={deleteProcessOutputAction}>
+                                    <DestructiveActionDialog
+                                      triggerLabel={`Remove ${output.name}`}
+                                      triggerIcon={<Trash2 className="h-3 w-3" />}
+                                      title={`Remove "${output.name}"?`}
+                                      description="This co-product will no longer be part of this process's allocation. This cannot be undone."
+                                      confirmLabel="Remove"
+                                      formAction={deleteProcessOutputAction}
+                                    >
                                       <input type="hidden" name="assessmentId" value={id} />
                                       <input type="hidden" name="outputId" value={output.id} />
-                                      <Button type="submit" variant="ghost" size="sm" aria-label={`Remove ${output.name}`}>
-                                        <Trash2 className="h-3 w-3" />
-                                      </Button>
-                                    </form>
+                                    </DestructiveActionDialog>
                                   )}
                                 </span>
                               </li>

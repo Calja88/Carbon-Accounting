@@ -61,7 +61,7 @@ export function buildNavGroups(opts: { isAdmin: boolean; historicalDataEnabled: 
   ];
 
   if (opts.isAdmin) {
-    groups.push({ label: null, items: [{ href: "/admin/ai", label: "Settings", icon: "settings" }] });
+    groups.push({ label: null, items: [{ href: "/settings/ai", label: "Settings", icon: "settings" }] });
   }
 
   return groups;

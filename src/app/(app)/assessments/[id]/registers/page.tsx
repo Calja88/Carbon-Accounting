@@ -6,6 +6,7 @@ import { canApproveLca, checkCanEditAssessment, getLcaActor } from "@/lib/lca/pe
 import { MATERIALITY_LABELS } from "@/lib/lca/labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { DataTable, EmptyState, Notice, PageHeading, SectionCard, Td } from "@/components/lca/ui";
 import { AssumptionForm, ExclusionForm } from "./register-forms";
 import {
@@ -98,13 +99,17 @@ export default async function RegistersPage({ params }: { params: Promise<{ id: 
                 </Td>
                 <Td align="right">
                   {canEdit && (
-                    <form action={deleteAssumptionAction}>
+                    <DestructiveActionDialog
+                      triggerLabel="Remove assumption"
+                      triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                      title="Remove this assumption?"
+                      description={assumption.assumption}
+                      confirmLabel="Remove"
+                      formAction={deleteAssumptionAction}
+                    >
                       <input type="hidden" name="assessmentId" value={id} />
                       <input type="hidden" name="assumptionId" value={assumption.id} />
-                      <Button type="submit" variant="ghost" size="sm" aria-label="Remove assumption">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </form>
+                    </DestructiveActionDialog>
                   )}
                 </Td>
               </tr>
@@ -157,13 +162,17 @@ export default async function RegistersPage({ params }: { params: Promise<{ id: 
                 </Td>
                 <Td align="right">
                   {canEdit && (
-                    <form action={deleteExclusionAction}>
+                    <DestructiveActionDialog
+                      triggerLabel="Remove exclusion"
+                      triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                      title="Remove this exclusion?"
+                      description={exclusion.excludedItem}
+                      confirmLabel="Remove"
+                      formAction={deleteExclusionAction}
+                    >
                       <input type="hidden" name="assessmentId" value={id} />
                       <input type="hidden" name="exclusionId" value={exclusion.id} />
-                      <Button type="submit" variant="ghost" size="sm" aria-label="Remove exclusion">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </form>
+                    </DestructiveActionDialog>
                   )}
                 </Td>
               </tr>

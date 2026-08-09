@@ -103,7 +103,7 @@ export async function saveAiSettingsAction(_prev: AiSettingsState, formData: For
   ]);
 
   invalidateAiConfigCache();
-  revalidatePath("/admin/ai");
+  revalidatePath("/settings/ai");
 
   return { error: null, saved: true };
 }
@@ -124,7 +124,7 @@ export async function refreshCatalogAction(): Promise<CatalogRefreshState> {
   try {
     await ensureAiSettingsRow();
     const result = await refreshModelCatalog();
-    revalidatePath("/admin/ai");
+    revalidatePath("/settings/ai");
     return {
       error: null,
       message: `Loaded ${result.modelCount} models, ${result.freeCount} of them free, at ${result.refreshedAt.toLocaleTimeString("en-GB")}.`,

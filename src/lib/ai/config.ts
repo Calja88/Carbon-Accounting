@@ -1,7 +1,7 @@
 /**
  * AI configuration: safe defaults from the environment, overridden by
  * database settings an administrator can change in the UI without a code
- * change or redeploy (`/admin/ai`).
+ * change or redeploy (`/settings/ai`).
  *
  * The OpenRouter API key is *not* part of this. It is read once, server-side,
  * inside the provider (src/lib/ai/providers/openrouter.ts) straight from
@@ -47,7 +47,7 @@ export const FREE_ROUTER_MODEL_ID = "openrouter/free";
 
 /**
  * Starting model per task. These are *defaults*, not a hard-coded routing
- * table: an administrator changes them in `/admin/ai`, or an operator sets
+ * table: an administrator changes them in `/settings/ai`, or an operator sets
  * the matching environment variable, without touching source. Every default
  * here is a free model (OpenRouter's `:free` suffix or the free router), so a
  * fresh install works under `AI_FREE_ONLY=true`.

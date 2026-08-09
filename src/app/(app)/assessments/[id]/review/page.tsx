@@ -7,8 +7,8 @@ import { groupIssuesBySection, SEVERITY_TONES } from "@/lib/lca/validation-servi
 import { canApproveLca, getLcaActor } from "@/lib/lca/permissions";
 import { ASSURANCE_LABELS, STATUS_LABELS, STATUS_ORDER } from "@/lib/lca/labels";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import {
   DataTable,
   Notice,
@@ -265,13 +265,17 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
                 </Td>
                 <Td align="right">
                   {canApprove && (
-                    <form action={deleteVerificationAction}>
+                    <DestructiveActionDialog
+                      triggerLabel="Remove verification record"
+                      triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                      title="Remove this verification record?"
+                      description="This is a formal assurance record — removing it does not affect the assessment's status, but any evidence linked to it is kept and unlinked, not deleted. This cannot be undone."
+                      confirmLabel="Remove"
+                      formAction={deleteVerificationAction}
+                    >
                       <input type="hidden" name="assessmentId" value={id} />
                       <input type="hidden" name="verificationId" value={verification.id} />
-                      <Button type="submit" variant="ghost" size="sm" aria-label="Remove verification record">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </form>
+                    </DestructiveActionDialog>
                   )}
                 </Td>
               </tr>

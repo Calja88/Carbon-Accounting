@@ -20,7 +20,7 @@ import {
 } from "@/lib/lca/labels";
 import { formatKgPrecise } from "@/components/charts/palette";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { BackLink, DataTable, FieldList, Notice, PageHeading, SectionCard, Td } from "@/components/lca/ui";
 import { InventoryItemForm } from "../inventory-forms";
 import {
@@ -128,14 +128,23 @@ export default async function InventoryItemPage({ params }: { params: Promise<{ 
               />
             )}
             {canEdit && (
-              <form action={deleteInventoryItemAction}>
+              <DestructiveActionDialog
+                triggerLabel="Delete"
+                triggerVariant="ghost"
+                title={`Delete "${item.name}"?`}
+                description="Its transport legs and end-of-life routes are removed with it. Evidence and assumptions attached to it are kept but unlinked, and any past calculation run that used it keeps its result lines. This cannot be undone."
+                dependents={[
+                  { label: "Transport legs", count: item.transportLegs.length },
+                  { label: "End-of-life routes", count: item.endOfLifeRoutes.length },
+                  { label: "Evidence (kept, unlinked)", count: item.evidence.length },
+                  { label: "Assumptions (kept, unlinked)", count: item.assumptions.length },
+                ]}
+                dependentsAreBlocking={false}
+                formAction={deleteInventoryItemAction}
+              >
                 <input type="hidden" name="assessmentId" value={id} />
                 <input type="hidden" name="itemId" value={item.id} />
-                <Button type="submit" size="sm" variant="ghost">
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete
-                </Button>
-              </form>
+              </DestructiveActionDialog>
             )}
           </div>
         }
@@ -287,13 +296,17 @@ export default async function InventoryItemPage({ params }: { params: Promise<{ 
                   <Td className="text-xs">{leg.assumptions ?? <span className="text-slate-400">—</span>}</Td>
                   <Td align="right">
                     {canEdit && (
-                      <form action={deleteTransportLegAction}>
+                      <DestructiveActionDialog
+                        triggerLabel="Remove leg"
+                        triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                        title="Remove this transport leg?"
+                        description="This cannot be undone."
+                        confirmLabel="Remove"
+                        formAction={deleteTransportLegAction}
+                      >
                         <input type="hidden" name="assessmentId" value={id} />
                         <input type="hidden" name="legId" value={leg.id} />
-                        <Button type="submit" variant="ghost" size="sm" aria-label="Remove leg">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </form>
+                      </DestructiveActionDialog>
                     )}
                   </Td>
                 </tr>
@@ -359,13 +372,17 @@ export default async function InventoryItemPage({ params }: { params: Promise<{ 
                     <Td className="text-xs">{route.recoveryAssumptions ?? <span className="text-slate-400">—</span>}</Td>
                     <Td align="right">
                       {canEdit && (
-                        <form action={deleteEndOfLifeRouteAction}>
+                        <DestructiveActionDialog
+                          triggerLabel="Remove route"
+                          triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                          title="Remove this end-of-life route?"
+                          description="This cannot be undone."
+                          confirmLabel="Remove"
+                          formAction={deleteEndOfLifeRouteAction}
+                        >
                           <input type="hidden" name="assessmentId" value={id} />
                           <input type="hidden" name="routeId" value={route.id} />
-                          <Button type="submit" variant="ghost" size="sm" aria-label="Remove route">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </form>
+                        </DestructiveActionDialog>
                       )}
                     </Td>
                   </tr>
@@ -409,13 +426,17 @@ export default async function InventoryItemPage({ params }: { params: Promise<{ 
                 <Td className="text-xs">{link.allocationBasis ?? <span className="text-slate-400">Not recorded</span>}</Td>
                 <Td align="right">
                   {canEdit && (
-                    <form action={deleteCorporateLinkAction}>
+                    <DestructiveActionDialog
+                      triggerLabel="Remove citation"
+                      triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                      title="Remove this corporate-record citation?"
+                      description="This only removes the citation — the underlying corporate record is untouched. This cannot be undone."
+                      confirmLabel="Remove"
+                      formAction={deleteCorporateLinkAction}
+                    >
                       <input type="hidden" name="assessmentId" value={id} />
                       <input type="hidden" name="linkId" value={link.id} />
-                      <Button type="submit" variant="ghost" size="sm" aria-label="Remove citation">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </form>
+                    </DestructiveActionDialog>
                   )}
                 </Td>
               </tr>

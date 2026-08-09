@@ -4,7 +4,7 @@ import { Factory, Trash2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getProduct } from "@/lib/lca/assessment-service";
 import { canEditLcaData, getLcaActor } from "@/lib/lca/permissions";
-import { Button } from "@/components/ui/button";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { BackLink, DataTable, EmptyState, PageHeading, SectionCard, StatusBadge, Td } from "@/components/lca/ui";
 import { AddLocationForm, AddVersionForm, EditProductForm } from "../product-forms";
 import { deleteManufacturingLocationAction } from "../actions";
@@ -133,13 +133,17 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                   <Td>{location.isPrimary ? "Yes" : "—"}</Td>
                   <Td align="right">
                     {canEdit && (
-                      <form action={deleteManufacturingLocationAction}>
+                      <DestructiveActionDialog
+                        triggerLabel={`Remove ${location.name}`}
+                        triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                        title={`Remove "${location.name}"?`}
+                        description="This manufacturing location will no longer be recorded against this product. This cannot be undone."
+                        confirmLabel="Remove"
+                        formAction={deleteManufacturingLocationAction}
+                      >
                         <input type="hidden" name="locationId" value={location.id} />
                         <input type="hidden" name="productId" value={product.id} />
-                        <Button type="submit" variant="ghost" size="sm" aria-label={`Remove ${location.name}`}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </form>
+                      </DestructiveActionDialog>
                     )}
                   </Td>
                 </tr>

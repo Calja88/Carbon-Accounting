@@ -16,18 +16,28 @@
  * specific outcome.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/cn";
 
 export interface DestructiveActionDialogProps {
-  /** The button that opens the dialog. */
+  /** Accessible name for the trigger — visible text unless triggerIcon is set, in which case it becomes the aria-label. */
   triggerLabel: string;
+  /** Renders the trigger as an icon-only button (dense inline lists) with triggerLabel as its aria-label instead of visible text. */
+  triggerIcon?: React.ReactNode;
   triggerVariant?: "danger" | "ghost" | "secondary";
   title: string;
   description: React.ReactNode;
-  /** Dependent records the action will affect or be blocked by — shown so nothing is deleted blind. */
+  /** Dependent records the action will affect — shown so nothing is deleted blind. */
   dependents?: { label: string; count: number }[];
+  /**
+   * Whether a nonzero dependent count means the server action will refuse
+   * the delete, vs. dependents that are safely cascaded/unlinked as part of
+   * it. Defaults to true (the safer assumption); set false only once you've
+   * checked the specific service function actually proceeds regardless.
+   */
+  dependentsAreBlocking?: boolean;
   confirmLabel?: string;
   /** The existing server action this dialog gates — signature and behaviour unchanged. */
   formAction: (formData: FormData) => void | Promise<void>;
@@ -38,10 +48,12 @@ export interface DestructiveActionDialogProps {
 
 export function DestructiveActionDialog({
   triggerLabel,
+  triggerIcon,
   triggerVariant = "ghost",
   title,
   description,
   dependents,
+  dependentsAreBlocking = true,
   confirmLabel = "Delete",
   formAction,
   children,
@@ -49,6 +61,7 @@ export function DestructiveActionDialog({
 }: DestructiveActionDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [pending, setPending] = useState(false);
+  const titleId = useId();
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -62,7 +75,7 @@ export function DestructiveActionDialog({
     return () => dialog.removeEventListener("click", onClick);
   }, []);
 
-  const hasBlockingDependents = (dependents ?? []).some((d) => d.count > 0);
+  const hasBlockingDependents = dependentsAreBlocking && (dependents ?? []).some((d) => d.count > 0);
 
   return (
     <>
@@ -70,14 +83,15 @@ export function DestructiveActionDialog({
         type="button"
         variant={triggerVariant}
         size="sm"
-        className={className}
+        className={cn(triggerIcon && "px-2", className)}
+        aria-label={triggerIcon ? triggerLabel : undefined}
         onClick={() => dialogRef.current?.showModal()}
       >
-        {triggerLabel}
+        {triggerIcon ?? triggerLabel}
       </Button>
       <dialog
         ref={dialogRef}
-        aria-labelledby="destructive-dialog-title"
+        aria-labelledby={titleId}
         className="m-auto w-[min(28rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-0 shadow-2xl backdrop:bg-slate-900/40"
       >
         <div className="p-5">
@@ -86,7 +100,7 @@ export function DestructiveActionDialog({
               <AlertTriangle className="h-4 w-4" aria-hidden="true" />
             </span>
             <div className="min-w-0 flex-1">
-              <h2 id="destructive-dialog-title" className="text-base font-semibold text-slate-900">
+              <h2 id={titleId} className="text-base font-semibold text-slate-900">
                 {title}
               </h2>
               <div className="mt-1 text-sm text-slate-600">{description}</div>
