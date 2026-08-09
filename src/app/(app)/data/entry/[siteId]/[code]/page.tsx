@@ -1,8 +1,7 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { defaultPeriodInputValue } from "@/lib/period";
+import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { EntryForm } from "./entry-form";
 import { SurveyForm } from "./survey-form";
 
@@ -21,10 +20,13 @@ export default async function EntryFormPage({ params }: { params: Promise<{ site
 
   return (
     <div>
-      <Link href={`/data/entry/${siteId}`} className="flex w-fit items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
-        <ArrowLeft className="h-3.5 w-3.5" />
-        {site.name}
-      </Link>
+      <Breadcrumbs
+        items={[
+          { label: "Enter data", href: "/data/entry" },
+          { label: site.name, href: `/data/entry/${siteId}` },
+          { label: dataPoint.dataPointName },
+        ]}
+      />
       <div className="mt-4">
         {dataPoint.formType === "SURVEY" ? (
           <SurveyForm

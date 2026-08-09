@@ -1,9 +1,8 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getSiteContractStatus } from "@/lib/entry-status";
 import { resolvePrompt } from "@/lib/prompts";
+import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { ContractForm } from "./contract-form";
 
 export default async function ElectricityContractPage({ params }: { params: Promise<{ siteId: string }> }) {
@@ -22,10 +21,13 @@ export default async function ElectricityContractPage({ params }: { params: Prom
 
   return (
     <div>
-      <Link href={`/data/entry/${siteId}`} className="flex w-fit items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
-        <ArrowLeft className="h-3.5 w-3.5" />
-        {site.name}
-      </Link>
+      <Breadcrumbs
+        items={[
+          { label: "Enter data", href: "/data/entry" },
+          { label: site.name, href: `/data/entry/${siteId}` },
+          { label: "Electricity supplier & REGO" },
+        ]}
+      />
       <div className="mt-4">
         <ContractForm
           site={{ id: site.id, name: site.name }}

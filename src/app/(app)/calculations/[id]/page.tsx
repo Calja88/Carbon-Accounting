@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, FileScan } from "lucide-react";
 import { getAiAvailability, resolveAiActor } from "@/lib/ai";
 import { isSiteInScope } from "@/lib/ai/authorization";
 import { prisma } from "@/lib/prisma";
 import { explainCalculation } from "@/lib/explain-calculation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { OriginBadge } from "@/components/ai/ai-disclosure";
+import { OriginBadge, type ValueOrigin } from "@/components/ai/ai-disclosure";
+import { ProvenanceStrip } from "@/components/ui/provenance-strip";
+import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { ExplainPanel } from "./explain-panel";
 
 function Row({ label, value, mono }: { label: string; value: string | null; mono?: boolean }) {
@@ -45,13 +46,18 @@ export default async function CalculationDetailPage({ params }: { params: Promis
   if (!explanation) notFound();
 
   const e = explanation;
+  const activityOrigin: ValueOrigin =
+    e.activity.dataOrigin === "AI_EXTRACTED"
+      ? "AI_EXTRACTED"
+      : e.activity.dataOrigin === "IMPORTED"
+        ? "IMPORTED"
+        : e.activity.dataOrigin === "DERIVED"
+          ? "DERIVED"
+          : "USER_ENTERED";
 
   return (
     <div className="max-w-3xl space-y-6">
-      <Link href="/reports" className="flex w-fit items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
-        <ArrowLeft className="h-3.5 w-3.5" />
-        Reports
-      </Link>
+      <Breadcrumbs items={[{ label: "Reports", href: "/reports" }, { label: "How this was calculated" }]} />
 
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">How this figure was calculated</h1>
@@ -63,17 +69,7 @@ export default async function CalculationDetailPage({ params }: { params: Promis
           <Badge tone="neutral">{e.basis.replace(/_/g, " ").toLowerCase()}</Badge>
           {e.scope3Category && <Badge tone="neutral">{e.scope3Category}</Badge>}
           <OriginBadge origin="CALCULATED" />
-          <OriginBadge
-            origin={
-              e.activity.dataOrigin === "AI_EXTRACTED"
-                ? "AI_EXTRACTED"
-                : e.activity.dataOrigin === "IMPORTED"
-                  ? "IMPORTED"
-                  : e.activity.dataOrigin === "DERIVED"
-                    ? "DERIVED"
-                    : "USER_ENTERED"
-            }
-          />
+          <OriginBadge origin={activityOrigin} />
         </div>
       </div>
 
@@ -165,17 +161,13 @@ export default async function CalculationDetailPage({ params }: { params: Promis
           </CardHeader>
           <CardContent className="space-y-2">
             {e.evidence.map((doc) => (
-              <Link
-                key={doc.documentId}
-                href={`/documents/${doc.documentId}`}
-                className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
-              >
-                <FileScan className="h-4 w-4 text-slate-400" />
-                {doc.filename}
-                <span className="text-xs text-slate-400">
-                  uploaded {new Date(doc.uploadedAt).toLocaleDateString("en-GB")}
-                </span>
-              </Link>
+              <div key={doc.documentId} className="rounded-lg bg-slate-50 px-3 py-2">
+                <ProvenanceStrip
+                  origin={activityOrigin}
+                  timestamp={`uploaded ${new Date(doc.uploadedAt).toLocaleDateString("en-GB")}`}
+                  evidence={{ label: doc.filename, href: `/documents/${doc.documentId}` }}
+                />
+              </div>
             ))}
           </CardContent>
         </Card>
