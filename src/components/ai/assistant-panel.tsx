@@ -133,19 +133,20 @@ export function AssistantPanel({ available, unavailableMessage }: AssistantPanel
         aria-expanded={open}
         aria-label={open ? "Close the AI assistant" : "Open the AI assistant"}
         className={cn(
-          "no-print fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full px-4 py-3 text-sm font-medium shadow-lg transition-colors",
+          "no-print fixed bottom-4 right-4 z-30 flex h-12 w-12 items-center justify-center rounded-full text-sm font-medium shadow-lg transition-colors",
+          "sm:bottom-5 sm:right-5 sm:h-auto sm:w-auto sm:gap-2 sm:rounded-full sm:px-4 sm:py-3",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2",
           open ? "bg-slate-700 text-white hover:bg-slate-600" : "bg-slate-900 text-white hover:bg-slate-800",
         )}
       >
-        {open ? <X className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-        {open ? "Close" : projectId ? "LCA copilot" : "Ask AI"}
+        {open ? <X className="h-5 w-5 sm:h-4 sm:w-4" aria-hidden="true" /> : <Bot className="h-5 w-5 sm:h-4 sm:w-4" aria-hidden="true" />}
+        <span className="hidden sm:inline">{open ? "Close" : projectId ? "LCA copilot" : "Ask AI"}</span>
       </button>
 
       {open && (
         <aside
           aria-label="AI assistant"
-          className="no-print fixed bottom-20 right-5 z-30 flex max-h-[min(36rem,calc(100vh-7rem))] w-[min(28rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
+          className="no-print fixed inset-x-3 bottom-[4.75rem] z-30 flex max-h-[min(36rem,calc(100vh-7rem))] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl sm:inset-x-auto sm:bottom-20 sm:right-5 sm:w-[min(28rem,calc(100vw-2.5rem))]"
         >
           <header className="shrink-0 border-b border-slate-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-slate-900">
