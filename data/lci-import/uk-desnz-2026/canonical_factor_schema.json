@@ -1,0 +1,309 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/lci-factor-import-v1.json",
+  "title": "LCI/PCF characterised factor import row",
+  "description": "Canonical transport schema. Claude should map these fields to the existing versioned EmissionFactor model rather than creating a parallel model.",
+  "type": "object",
+  "required": [
+    "factor_id",
+    "name",
+    "factor_value",
+    "numerator_unit",
+    "denominator_unit",
+    "source_name",
+    "source_version",
+    "source_year",
+    "license_decision",
+    "lifecycle_boundary",
+    "requires_human_review"
+  ],
+  "properties": {
+    "factor_id": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "source_factor_id": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "name": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "description": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "scope": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "category_level_1": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "category_level_2": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "category_level_3": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "category_level_4": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "column_text": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "factor_value": {
+      "type": "number"
+    },
+    "numerator_unit": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "denominator_unit": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "original_uom": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "impact_category": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "characterisation_basis": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "geography": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "lifecycle_boundary": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "dataset_type": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "is_full_unit_process_lci": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "data_type": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "factor_status": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "lca_relevance": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "lca_use_status": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "requires_human_review": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "automated_assignment_allowed": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "is_placeholder": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "source_name": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "source_publisher": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "source_year": {
+      "type": "integer"
+    },
+    "source_version": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "publication_date": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "source_file_updated": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "source_page_last_updated": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "valid_to": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "license": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "license_decision": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "source_url": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "methodology_url": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "license_url": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    },
+    "review_notes": {
+      "type": [
+        "string",
+        "number",
+        "integer"
+      ]
+    }
+  },
+  "additionalProperties": false
+}
