@@ -255,7 +255,69 @@ model EmissionFactorSet {
   importedBy       User?            @relation("FactorSetImportedBy", fields: [importedByUserId], references: [id])
   createdAt        DateTime         @default(now())
 
+  /// Governance/provenance fields for imports that go through the LCI
+  /// governance path (src/lib/lci-import.ts) — null for sets loaded through
+  /// the generic template importer, which has no such registry to link to.
+  sourceVersion     String? // the publisher's own version string for this vintage, e.g. "1.2"
+  publicationDate   DateTime? // when the publisher issued this version
+  sourceUpdatedDate DateTime? // when the publisher's source file/page was last updated
+  methodologyUrl    String?
+  licenseName       String? // e.g. "Open Government Licence v3.0"
+  licenseDecision   LciLicenseDecision? // normalised governance decision this import was made under
+  geography         String? // free-text geography this set's factors mostly cover, e.g. "United Kingdom"
+  lciSourceId       String?
+  lciSource         LciSource?          @relation(fields: [lciSourceId], references: [id])
+
   factors EmissionFactor[]
+}
+
+/// Normalised governance/licence decision for an external LCI/PCF factor
+/// source — mirrors lci_source_manifest.json's `policy` block. Only
+/// ALLOW_WITH_ATTRIBUTION may ever have numeric values imported; the other
+/// three are catalogued for discovery/audit but numerically blocked (brief:
+/// "do not import numerical data" for anything else).
+enum LciLicenseDecision {
+  ALLOW_WITH_ATTRIBUTION
+  CONDITIONAL_DATASET_LEVEL_REVIEW
+  BLOCK
+  METADATA_ONLY
+}
+
+/// Governance registry of every candidate LCI/PCF data source considered for
+/// this platform — one row per lci_source_manifest.json entry. This is what
+/// the Admin -> LCI Data Sources page reads, and what an
+/// EmissionFactorSet.lciSourceId points at once a source has actually been
+/// imported. Upserted idempotently from the manifest (see
+/// src/lib/lci/source-registry.ts) — never duplicated on re-run.
+model LciSource {
+  id       String @id @default(cuid())
+  sourceId String @unique // manifest "source_id", e.g. "UK-DESNZ-2026"
+
+  sourceName String
+  owner      String?
+  coverage   String?
+
+  /// Our normalised decision, derived from the manifest's raw
+  /// `website_import_decision` (see src/lib/lci/source-registry.ts for the
+  /// mapping — anything starting with BLOCK, or the manifest's
+  /// NOT_AN_LCI_FACTOR_SOURCE marker, normalises to BLOCK).
+  licenseDecision    LciLicenseDecision
+  /// The manifest's own string verbatim, e.g. "BLOCK_UNTIL_WRITTEN_PERMISSION"
+  /// — kept so normalisation is never lossy and can be re-derived/audited.
+  rawLicenseDecision String
+
+  licenseSummary    String?
+  dataUrl           String?
+  licenseUrl        String?
+  relevance         String?
+  recommendedAction String?
+  lastChecked       DateTime?
+  manifestVersion   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  factorSets EmissionFactorSet[]
 }
 
 model EmissionFactor {
@@ -282,6 +344,44 @@ model EmissionFactor {
   lcaDataSource      String? // dataset/process name within the publisher's library
   uncertaintyPercent Decimal?           @db.Decimal(9, 4)
 
+  /// Governance/provenance fields for imports through the LCI governance
+  /// path (src/lib/lci-import.ts). Nullable/defaulted so pre-existing,
+  /// hand-curated corporate factors are unaffected: their booleans default
+  /// to whatever matches today's actual behaviour for those rows (see
+  /// inline comments), and externalFactorId/sourceVersion stay null.
+  externalFactorId           String? // the pack's own `factor_id`, e.g. "UK-DESNZ-2026-1_100_1000_15_1"
+  sourceVersion              String? // publisher's version string for this vintage, e.g. "1.2" — paired with externalFactorId for dedup
+  /// Secondary (published, characterised) data rather than primary/measured
+  /// data. Existing hand-curated rows are treated as unknown/not-secondary
+  /// (false) rather than asserting a provenance claim nothing verified.
+  isSecondaryData            Boolean   @default(false)
+  /// Already characterised into a single CO2e figure (as every factor in
+  /// this platform is), as opposed to a raw elementary-flow inventory. False
+  /// by default for the same reason as isSecondaryData.
+  isCharacterisedFactor      Boolean   @default(false)
+  /// True only for a complete unit-process LCI, which the UK DESNZ
+  /// characterised-factor pack never is (brief: never claim otherwise).
+  isFullUnitProcessLci       Boolean   @default(false)
+  /// Whether a human must review this factor before use in a product
+  /// assessment. False by default so existing corporate/product factors
+  /// keep behaving exactly as before; every row imported through the LCI
+  /// governance path sets this true.
+  humanReviewRequired        Boolean   @default(false)
+  /// Whether the AI factor-suggestion pipeline may treat this factor as
+  /// eligible to surface/auto-apply. True by default to preserve existing
+  /// behaviour for pre-existing rows; every row imported through the LCI
+  /// governance path sets this false (brief: no automated assignment of
+  /// these rows without a human approving).
+  automatedAssignmentAllowed Boolean   @default(true)
+  reviewNotes                String? // preserved verbatim from the pack's review_notes, including for the 38 legitimate zero-value rows
+  /// The pack's own raw lifecycle_boundary string (e.g.
+  /// "UPSTREAM_FUEL_ENERGY_OR_TRANSPORT_SUPPLY"), kept alongside the coarser
+  /// `boundary` enum because the double-counting heuristic
+  /// (direct-combustion vs WTT) needs the finer, un-lossy original signal.
+  sourceLifecycleBoundary    String?
+  validFrom                  DateTime?
+  validTo                    DateTime?
+
   calculations Calculation[]
 
   lcaInventoryItems         LcaInventoryItem[]     @relation("LcaItemFactor")
@@ -292,6 +392,13 @@ model EmissionFactor {
   lcaEvidence               LcaEvidence[]          @relation("LcaEvidenceFactor")
 
   @@unique([factorSetId, category, subtypeKey, basis])
+  /// Dedup key for the LCI governance importer (brief item 7): re-importing
+  /// the same factor_id + source_version is a no-op/reported-duplicate,
+  /// never an overwrite; a new source_version for a known factor_id is a
+  /// new, additional historical row. Postgres treats NULLs as distinct per
+  /// column pair, so existing/manually-entered rows (both fields null) are
+  /// entirely unaffected by this constraint.
+  @@unique([externalFactorId, sourceVersion])
 }
 
 // ---------------------------------------------------------------------------
