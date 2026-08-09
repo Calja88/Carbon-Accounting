@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowRight, FileScan } from "lucide-react";
-import { SourceDocumentKind } from "@prisma/client";
+import { FileScan } from "lucide-react";
+import { DocumentStatus, SourceDocumentKind } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAiAvailability, resolveAiActor } from "@/lib/ai";
 import { getAiConfig } from "@/lib/ai/config";
@@ -12,25 +12,31 @@ import {
   listDocuments,
 } from "@/lib/documents-service";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { DataTable, Td } from "@/components/ui/data-table";
+import { RecordList } from "@/components/ui/record-list";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { FilterBar } from "@/components/ui/filter-bar";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { AiUnavailableNotice } from "@/components/ai/ai-disclosure";
 import { UploadForm } from "./upload-form";
 
-const STATUS_TONES: Record<string, "neutral" | "info" | "success" | "warning" | "danger"> = {
-  UPLOADED: "neutral",
-  EXTRACTED: "info",
-  EXTRACTION_FAILED: "danger",
-  PARTIALLY_ACCEPTED: "warning",
-  ACCEPTED: "success",
-  REJECTED: "neutral",
-};
+interface SearchParams {
+  status?: string;
+  kind?: string;
+  siteId?: string;
+}
 
-export default async function DocumentsPage() {
+export default async function DocumentsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const actor = await resolveAiActor();
   if (!actor) redirect("/login");
 
+  const sp = await searchParams;
+  const statusFilter = sp.status && sp.status in DOCUMENT_STATUS_LABELS ? (sp.status as DocumentStatus) : undefined;
+  const kindFilter = sp.kind && sp.kind in DOCUMENT_KIND_LABELS ? (sp.kind as SourceDocumentKind) : undefined;
+
   const [documents, sites, availability, config] = await Promise.all([
-    listDocuments(actor.siteIds),
+    listDocuments(actor.siteIds, 50, { status: statusFilter, kind: kindFilter, siteId: sp.siteId || undefined }),
     prisma.site.findMany({
       where: { isActive: true, id: { in: actor.siteIds } },
       include: { entity: true },
@@ -41,9 +47,11 @@ export default async function DocumentsPage() {
   ]);
 
   const kinds = Object.values(SourceDocumentKind).map((k) => ({ value: k, label: DOCUMENT_KIND_LABELS[k] }));
+  const statuses = Object.values(DocumentStatus).map((s) => ({ value: s, label: DOCUMENT_STATUS_LABELS[s] }));
+  const hasActiveFilters = Boolean(sp.status || sp.kind || sp.siteId);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Documents</h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-500">
@@ -74,43 +82,78 @@ export default async function DocumentsPage() {
         </CardContent>
       </Card>
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         <h2 className="text-base font-semibold text-slate-900">Uploaded documents</h2>
-        {documents.length === 0 && (
-          <p className="text-sm text-slate-500">Nothing uploaded yet. The first document you add will appear here.</p>
-        )}
-        {documents.map((doc) => (
-          <Link key={doc.id} href={`/documents/${doc.id}`}>
-            <Card className="transition-all hover:-translate-y-0.5 hover:shadow-md">
-              <CardContent className="flex items-center justify-between gap-4">
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
-                    <FileScan className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate font-medium text-slate-900">{doc.filename}</span>
-                      <Badge tone={STATUS_TONES[doc.status] ?? "neutral"}>{DOCUMENT_STATUS_LABELS[doc.status]}</Badge>
+
+        <FilterBar action="/documents" hasActiveFilters={hasActiveFilters} clearHref="/documents">
+          <div>
+            <Label htmlFor="siteId">Site</Label>
+            <Select id="siteId" name="siteId" defaultValue={sp.siteId ?? ""} className="mt-1">
+              <option value="">All sites</option>
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} · {s.entity.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="kind">Type</Label>
+            <Select id="kind" name="kind" defaultValue={sp.kind ?? ""} className="mt-1">
+              <option value="">All types</option>
+              {kinds.map((k) => (
+                <option key={k.value} value={k.value}>
+                  {k.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="status">Status</Label>
+            <Select id="status" name="status" defaultValue={sp.status ?? ""} className="mt-1">
+              <option value="">All statuses</option>
+              {statuses.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </FilterBar>
+
+        <RecordList
+          state={documents.length === 0 ? "empty" : "ready"}
+          emptyTitle={hasActiveFilters ? "No documents match these filters" : "Nothing uploaded yet"}
+          emptyDescription={hasActiveFilters ? "Try widening the site, type or status filters above." : "The first document you add will appear here."}
+        >
+          <div className="rounded-lg border border-slate-200 bg-white">
+            <DataTable
+              caption="Uploaded evidence documents"
+              headers={["Document", "Type", "Site", "Status", { label: "Extractions", align: "right" }, { label: "Entries", align: "right" }]}
+            >
+              {documents.map((doc) => (
+                <tr key={doc.id} className="hover:bg-slate-50">
+                  <Td>
+                    <Link href={`/documents/${doc.id}`} className="flex items-center gap-2 font-medium text-slate-900 hover:text-brand-700">
+                      <FileScan className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                      <span className="truncate">{doc.filename}</span>
+                    </Link>
+                    <div className="mt-0.5 text-xs text-slate-400">
+                      {(doc.byteSize / 1024).toFixed(0)} KB · uploaded {new Date(doc.uploadedAt).toLocaleDateString("en-GB")} by {doc.uploadedBy.name}
                     </div>
-                    <div className="text-sm text-slate-500">
-                      {DOCUMENT_KIND_LABELS[doc.kind]}
-                      {doc.site ? ` · ${doc.site.name}` : ""} · {(doc.byteSize / 1024).toFixed(0)} KB ·{" "}
-                      {doc._count.extractions} extraction{doc._count.extractions === 1 ? "" : "s"} ·{" "}
-                      {doc._count.activityEntries} entr{doc._count.activityEntries === 1 ? "y" : "ies"} created
-                    </div>
-                    <div className="text-xs text-slate-400">
-                      Uploaded {new Date(doc.uploadedAt).toLocaleDateString("en-GB")} by {doc.uploadedBy.name}
-                    </div>
-                  </div>
-                </div>
-                <span className="flex shrink-0 items-center gap-1 text-sm font-medium text-brand-700">
-                  Review
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </span>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
+                  </Td>
+                  <Td>{DOCUMENT_KIND_LABELS[doc.kind]}</Td>
+                  <Td>{doc.site?.name ?? <span className="text-slate-400">Not site-specific</span>}</Td>
+                  <Td>
+                    <StatusBadge domain="document" status={doc.status} />
+                  </Td>
+                  <Td align="right">{doc._count.extractions}</Td>
+                  <Td align="right">{doc._count.activityEntries}</Td>
+                </tr>
+              ))}
+            </DataTable>
+          </div>
+        </RecordList>
       </div>
     </div>
   );

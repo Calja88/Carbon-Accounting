@@ -17,6 +17,7 @@
 
 import { useActionState, useState } from "react";
 import { AlertTriangle, CheckCircle2, FileWarning, RefreshCw, ShieldAlert, X } from "lucide-react";
+import { cn } from "@/lib/cn";
 import type { DocumentExtractionResult } from "@/lib/ai/schemas";
 import type { ProposalSet } from "@/lib/document-proposals";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -67,6 +68,7 @@ interface ExtractionView {
 
 export interface ReviewScreenProps {
   document: { id: string; filename: string; mimeType: string; status: string; siteId: string | null; notes: string | null };
+  duplicateOf: { id: string; filename: string; uploadedAt: string } | null;
   extraction: ExtractionView | null;
   result: DocumentExtractionResult | null;
   proposalSet: ProposalSet | null;
@@ -104,15 +106,52 @@ function FieldRow({ label, value }: { label: string; value: string | number | bo
 }
 
 export function ReviewScreen(props: ReviewScreenProps) {
-  const { document: doc, extraction, result, proposalSet, dataPoints, sites } = props;
+  const { document: doc, duplicateOf, extraction, result, proposalSet, dataPoints, sites } = props;
   const [extractState, extractAction, extracting] = useActionState(extractDocumentAction, extractInitial);
+  const [mobilePane, setMobilePane] = useState<"document" | "extraction">("document");
 
   const isViewableInline = doc.mimeType.startsWith("image/") || doc.mimeType === "application/pdf";
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      {/* --- Original document ------------------------------------------- */}
-      <div className="space-y-4">
+    <div className="space-y-4">
+      {duplicateOf && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-900">
+          <FileWarning className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <p>
+            A document with identical contents was already uploaded as{" "}
+            <a href={`/documents/${duplicateOf.id}`} className="font-medium underline">
+              {duplicateOf.filename}
+            </a>{" "}
+            on {new Date(duplicateOf.uploadedAt).toLocaleDateString("en-GB")}. This upload was still stored — check
+            whether you meant to link the existing document instead of creating a second copy.
+          </p>
+        </div>
+      )}
+
+      {/* Mobile/tablet pane switcher — below lg the two-column layout stacks
+          into a single column that would otherwise put the extraction
+          results a full screen-height scroll below the document. */}
+      <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 text-sm lg:hidden">
+        {(["document", "extraction"] as const).map((pane) => (
+          <button
+            key={pane}
+            type="button"
+            onClick={() => setMobilePane(pane)}
+            aria-pressed={mobilePane === pane}
+            className={
+              mobilePane === pane
+                ? "flex-1 rounded-md bg-white px-3 py-1.5 font-medium text-slate-900 shadow-sm"
+                : "flex-1 rounded-md px-3 py-1.5 text-slate-500"
+            }
+          >
+            {pane === "document" ? "Document" : "Extraction"}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* --- Original document ------------------------------------------- */}
+        <div className={cn("space-y-4", mobilePane !== "document" && "hidden lg:block")}>
         <Card>
           <CardHeader className="flex items-center justify-between gap-3">
             <CardTitle>Original document</CardTitle>
@@ -182,7 +221,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
       </div>
 
       {/* --- Extraction --------------------------------------------------- */}
-      <div className="space-y-4">
+      <div className={cn("space-y-4", mobilePane !== "extraction" && "hidden lg:block")}>
         <Card>
           <CardHeader className="flex flex-wrap items-center justify-between gap-3">
             <CardTitle>What AI read from this document</CardTitle>
@@ -418,9 +457,11 @@ export function ReviewScreen(props: ReviewScreenProps) {
           </>
         )}
       </div>
+      </div>
     </div>
   );
 }
+
 
 function ProposalCard({
   proposal,

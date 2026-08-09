@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 
-const initialState: UploadDocumentState = { error: null, documentId: null };
+const initialState: UploadDocumentState = { error: null, documentId: null, duplicateOfId: null, duplicateOfFilename: null };
 
 export interface SiteOption {
   id: string;
@@ -32,10 +32,14 @@ export function UploadForm({
   const router = useRouter();
 
   // Straight to the review screen once the file is stored — uploading is a
-  // step towards reviewing, not a destination.
+  // step towards reviewing, not a destination. A matching hash carries
+  // through as a query param so the review screen can show an advisory
+  // "you already have this" notice without a second round trip.
   useEffect(() => {
-    if (state.documentId) router.push(`/documents/${state.documentId}`);
-  }, [state.documentId, router]);
+    if (!state.documentId) return;
+    const query = state.duplicateOfId ? `?duplicateOf=${state.duplicateOfId}` : "";
+    router.push(`/documents/${state.documentId}${query}`);
+  }, [state.documentId, state.duplicateOfId, router]);
 
   return (
     <form action={formAction} className="space-y-4">

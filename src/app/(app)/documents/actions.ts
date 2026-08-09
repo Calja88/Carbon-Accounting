@@ -24,6 +24,9 @@ import {
 export interface UploadDocumentState {
   error: string | null;
   documentId: string | null;
+  /** A previously-uploaded document with identical bytes, if any — advisory only, never blocks the upload. */
+  duplicateOfId: string | null;
+  duplicateOfFilename: string | null;
 }
 
 const uploadSchema = z.object({
@@ -37,14 +40,14 @@ export async function uploadDocumentAction(
   formData: FormData,
 ): Promise<UploadDocumentState> {
   const actor = await resolveAiActor();
-  if (!actor) return { error: "You must be signed in.", documentId: null };
+  if (!actor) return { error: "You must be signed in.", documentId: null, duplicateOfId: null, duplicateOfFilename: null };
 
   const parsed = uploadSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { error: "Invalid input.", documentId: null };
+  if (!parsed.success) return { error: "Invalid input.", documentId: null, duplicateOfId: null, duplicateOfFilename: null };
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
-    return { error: "Choose a file to upload.", documentId: null };
+    return { error: "Choose a file to upload.", documentId: null, duplicateOfId: null, duplicateOfFilename: null };
   }
 
   const siteId = parsed.data.siteId?.trim() || null;
@@ -69,12 +72,17 @@ export async function uploadDocumentAction(
     });
 
     revalidatePath("/documents");
-    return { error: null, documentId: document.id };
+    return {
+      error: null,
+      documentId: document.id,
+      duplicateOfId: document.duplicateOf?.id ?? null,
+      duplicateOfFilename: document.duplicateOf?.filename ?? null,
+    };
   } catch (err) {
     if (err instanceof DocumentValidationError || err instanceof AiAuthorizationError) {
-      return { error: err.message, documentId: null };
+      return { error: err.message, documentId: null, duplicateOfId: null, duplicateOfFilename: null };
     }
-    return { error: "Could not store that file.", documentId: null };
+    return { error: "Could not store that file.", documentId: null, duplicateOfId: null, duplicateOfFilename: null };
   }
 }
 

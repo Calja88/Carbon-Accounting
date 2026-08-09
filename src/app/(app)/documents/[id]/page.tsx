@@ -1,6 +1,4 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { resolveAiActor, getAiAvailability } from "@/lib/ai";
 import { AiAuthorizationError, assertDocumentInScope } from "@/lib/ai/authorization";
@@ -9,10 +7,19 @@ import { DOCUMENT_KIND_LABELS, getDocumentWithExtractions } from "@/lib/document
 import { buildProposals } from "@/lib/document-proposals";
 import type { DocumentExtractionResult } from "@/lib/ai/schemas";
 import { documentExtractionResultSchema } from "@/lib/ai/schemas";
+import { Breadcrumbs } from "@/components/shell/breadcrumbs";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { ReviewScreen } from "./review-screen";
 
-export default async function DocumentReviewPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function DocumentReviewPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ duplicateOf?: string }>;
+}) {
   const { id } = await params;
+  const { duplicateOf } = await searchParams;
 
   const actor = await resolveAiActor();
   if (!actor) redirect("/login");
@@ -24,7 +31,7 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
     throw err;
   }
 
-  const [document, sites, availability, config] = await Promise.all([
+  const [document, sites, availability, config, duplicateDocument] = await Promise.all([
     getDocumentWithExtractions(id),
     prisma.site.findMany({
       where: { isActive: true, id: { in: actor.siteIds } },
@@ -33,6 +40,7 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
     }),
     getAiAvailability(),
     getAiConfig(),
+    duplicateOf ? prisma.sourceDocument.findUnique({ where: { id: duplicateOf }, select: { id: true, filename: true, uploadedAt: true } }) : null,
   ]);
 
   if (!document) notFound();
@@ -56,13 +64,13 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
 
   return (
     <div className="space-y-6">
-      <Link href="/documents" className="flex w-fit items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
-        <ArrowLeft className="h-3.5 w-3.5" />
-        All documents
-      </Link>
+      <Breadcrumbs items={[{ label: "Documents", href: "/documents" }, { label: document.filename }]} />
 
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{document.filename}</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{document.filename}</h1>
+          <StatusBadge domain="document" status={document.status} />
+        </div>
         <p className="mt-1 text-sm text-slate-500">
           {DOCUMENT_KIND_LABELS[document.kind]}
           {document.site ? ` · ${document.site.name} (${document.site.entity.name})` : " · not site-specific"} ·{" "}
@@ -71,6 +79,11 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
       </div>
 
       <ReviewScreen
+        duplicateOf={
+          duplicateDocument
+            ? { id: duplicateDocument.id, filename: duplicateDocument.filename, uploadedAt: duplicateDocument.uploadedAt.toISOString() }
+            : null
+        }
         document={{
           id: document.id,
           filename: document.filename,

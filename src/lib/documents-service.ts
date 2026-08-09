@@ -74,7 +74,17 @@ export async function uploadDocument(input: UploadDocumentInput) {
   const safeName = input.filename.replace(/[/\\]/g, "_").slice(0, 200) || "document";
   const sha256 = createHash("sha256").update(buffer).digest("hex");
 
-  return prisma.sourceDocument.create({
+  // Advisory only — a duplicate is never blocked (a user may deliberately
+  // want the same file linked to a different site or kind). SourceDocument
+  // has always carried and indexed sha256 (@@index([sha256]) in the
+  // schema); this is its first reader.
+  const duplicateOf = await prisma.sourceDocument.findFirst({
+    where: { sha256 },
+    orderBy: { uploadedAt: "asc" },
+    select: { id: true, filename: true, uploadedAt: true },
+  });
+
+  const document = await prisma.sourceDocument.create({
     data: {
       filename: safeName,
       mimeType: input.mimeType,
@@ -89,11 +99,26 @@ export async function uploadDocument(input: UploadDocumentInput) {
     },
     select: { id: true, filename: true, sha256: true, byteSize: true },
   });
+
+  return { ...document, duplicateOf };
 }
 
-export async function listDocuments(siteIds: string[], limit = 50) {
+export interface ListDocumentsFilters {
+  status?: DocumentStatus;
+  kind?: SourceDocumentKind;
+  siteId?: string;
+}
+
+export async function listDocuments(siteIds: string[], limit = 50, filters: ListDocumentsFilters = {}) {
   return prisma.sourceDocument.findMany({
-    where: { OR: [{ siteId: null }, { siteId: { in: siteIds } }] },
+    where: {
+      AND: [
+        { OR: [{ siteId: null }, { siteId: { in: siteIds } }] },
+        filters.status ? { status: filters.status } : {},
+        filters.kind ? { kind: filters.kind } : {},
+        filters.siteId ? { siteId: filters.siteId } : {},
+      ],
+    },
     orderBy: { uploadedAt: "desc" },
     take: limit,
     select: {
