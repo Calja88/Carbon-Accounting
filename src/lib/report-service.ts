@@ -336,3 +336,17 @@ function buildExecutiveSummary(args: {
 
   return parts.join(" ");
 }
+
+/**
+ * Permanently removes a report snapshot. Nothing else references a
+ * ReportSnapshot except its own ReportSnapshotCalculation join rows (the
+ * calculations it links to are untouched — they belong to the underlying
+ * activity data, not to the report), so this never cascades into anything
+ * beyond the report itself.
+ */
+export async function deleteReportSnapshot(id: string) {
+  await prisma.$transaction(async (tx) => {
+    await tx.reportSnapshotCalculation.deleteMany({ where: { reportSnapshotId: id } });
+    await tx.reportSnapshot.delete({ where: { id } });
+  });
+}

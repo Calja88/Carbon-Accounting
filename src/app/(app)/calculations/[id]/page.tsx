@@ -1,15 +1,19 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { Trash2 } from "lucide-react";
 import { getAiAvailability, resolveAiActor } from "@/lib/ai";
 import { isSiteInScope } from "@/lib/ai/authorization";
 import { prisma } from "@/lib/prisma";
 import { explainCalculation } from "@/lib/explain-calculation";
+import { getActivityEntryDependents } from "@/lib/entries-service";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { OriginBadge, type ValueOrigin } from "@/components/ai/ai-disclosure";
 import { ProvenanceStrip } from "@/components/ui/provenance-strip";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { ExplainPanel } from "./explain-panel";
+import { deleteActivityEntryAction } from "../../data/entries/actions";
 
 function Row({ label, value, mono }: { label: string; value: string | null; mono?: boolean }) {
   return (
@@ -38,11 +42,15 @@ export default async function CalculationDetailPage({ params }: { params: Promis
 
   const owner = await prisma.calculation.findUnique({
     where: { id },
-    select: { activityEntry: { select: { siteId: true } } },
+    select: { activityEntry: { select: { id: true, siteId: true } } },
   });
   if (!owner || !isSiteInScope(actor, owner.activityEntry.siteId)) notFound();
 
-  const [explanation, availability] = await Promise.all([explainCalculation(id), getAiAvailability()]);
+  const [explanation, availability, entryDependents] = await Promise.all([
+    explainCalculation(id),
+    getAiAvailability(),
+    getActivityEntryDependents(owner.activityEntry.id),
+  ]);
   if (!explanation) notFound();
 
   const e = explanation;
@@ -201,6 +209,22 @@ export default async function CalculationDetailPage({ params }: { params: Promis
           <ExplainPanel calculationId={e.calculationId} aiAvailable={availability.available} />
         </CardContent>
       </Card>
+
+      {entryDependents && (
+        <div className="flex justify-end">
+          <DestructiveActionDialog
+            triggerLabel="Delete this entry and its calculation"
+            triggerIcon={<Trash2 className="h-4 w-4" />}
+            triggerVariant="secondary"
+            title="Delete this activity entry?"
+            description="This deletes the underlying activity entry and its calculation(s) shown above — not just this page. Refused if it's already included in a generated report."
+            dependents={[{ label: "Included in report version(s)", count: entryDependents.reportVersions.length }]}
+            formAction={deleteActivityEntryAction}
+          >
+            <input type="hidden" name="entryId" value={owner.activityEntry.id} />
+          </DestructiveActionDialog>
+        </div>
+      )}
     </div>
   );
 }

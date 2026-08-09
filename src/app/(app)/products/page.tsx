@@ -1,12 +1,14 @@
 import Link from "next/link";
-import { Package } from "lucide-react";
+import { Package, Trash2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { listProducts } from "@/lib/lca/assessment-service";
 import { canEditLcaData, getLcaActor } from "@/lib/lca/permissions";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { DataTable, EmptyState, PageHeading, Td } from "@/components/lca/ui";
 import { CreateProductForm } from "./product-forms";
+import { deleteProductAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +40,16 @@ export default async function ProductsPage() {
             </div>
           ) : (
             <DataTable
-              headers={["Product", "SKU", "Operating unit", "Category", "Versions", { label: "Assessments", align: "right" }, "Status"]}
+              headers={[
+                "Product",
+                "SKU",
+                "Operating unit",
+                "Category",
+                "Versions",
+                { label: "Assessments", align: "right" },
+                "Status",
+                { label: "", align: "right" },
+              ]}
             >
               {products.map((product) => {
                 const assessmentCount = product.versions.reduce((sum, v) => sum + v._count.assessments, 0);
@@ -60,6 +71,20 @@ export default async function ProductsPage() {
                       <Badge tone={product.status === "ACTIVE" ? "success" : "neutral"}>
                         {product.status === "ACTIVE" ? "Active" : "Discontinued"}
                       </Badge>
+                    </Td>
+                    <Td align="right">
+                      {canEdit && (
+                        <DestructiveActionDialog
+                          triggerLabel={`Delete ${product.name}`}
+                          triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                          title={`Delete "${product.name}"?`}
+                          description="This removes the product, all of its versions, and their manufacturing locations. This cannot be undone."
+                          dependents={[{ label: "Assessments against this product", count: assessmentCount }]}
+                          formAction={deleteProductAction}
+                        >
+                          <input type="hidden" name="productId" value={product.id} />
+                        </DestructiveActionDialog>
+                      )}
                     </Td>
                   </tr>
                 );

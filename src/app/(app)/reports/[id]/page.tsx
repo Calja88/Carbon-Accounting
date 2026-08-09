@@ -1,13 +1,16 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { Download } from "lucide-react";
+import { Download, Trash2 } from "lucide-react";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { ReportPayload } from "@/lib/report-service";
 import { buildDelta } from "@/lib/analytics-service";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { PrintButton } from "../print-button";
+import { deleteReportSnapshotAction } from "../actions";
 import { StackedBarChart } from "@/components/charts/stacked-bar-chart";
 import { GroupedColumnChart } from "@/components/charts/grouped-column-chart";
 import { TrendLineChart } from "@/components/charts/trend-line-chart";
@@ -34,8 +37,12 @@ function longDate(d: string | Date) {
 
 export default async function ReportDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const snapshot = await prisma.reportSnapshot.findUnique({ where: { id }, include: { generatedBy: true } });
+  const [snapshot, session] = await Promise.all([
+    prisma.reportSnapshot.findUnique({ where: { id }, include: { generatedBy: true } }),
+    auth(),
+  ]);
   if (!snapshot) notFound();
+  const isAdmin = session?.user?.role === "ADMIN";
 
   const rawPayload = snapshot.payload as unknown as ReportPayload;
   // Snapshots generated before a field existed must still render exactly as
@@ -98,6 +105,19 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
             </button>
           </a>
           <PrintButton />
+          {isAdmin && (
+            <DestructiveActionDialog
+              triggerLabel="Delete this report"
+              triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+              triggerVariant="secondary"
+              title={`Permanently delete report version ${snapshot.version}?`}
+              description="Reports are meant to be a permanent, reproducible record. Deleting one removes its frozen snapshot and audit-trail export entirely, with no undo — it does not affect the underlying activity data or calculations, only this generated document."
+              confirmLabel="Permanently delete"
+              formAction={deleteReportSnapshotAction}
+            >
+              <input type="hidden" name="reportSnapshotId" value={snapshot.id} />
+            </DestructiveActionDialog>
+          )}
         </div>
       </div>
 

@@ -14,6 +14,11 @@
  * will actually do (block on dependents vs. cascade) — see call sites for
  * the specific service's behaviour before writing copy that promises a
  * specific outcome.
+ *
+ * If the server action throws (e.g. a blocking-dependents check further
+ * down the stack), the dialog catches it, shows the message inline, and
+ * stays open — a failed delete must never bubble up to the nearest error
+ * boundary and replace the whole page with "Something went wrong."
  */
 
 import { useEffect, useId, useRef, useState } from "react";
@@ -61,6 +66,7 @@ export function DestructiveActionDialog({
 }: DestructiveActionDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const titleId = useId();
 
   useEffect(() => {
@@ -118,21 +124,38 @@ export function DestructiveActionDialog({
             </ul>
           )}
 
-          {hasBlockingDependents && (
+          {hasBlockingDependents && !error && (
             <p className="mt-3 text-sm text-amber-800">
               This has dependent records. Removing it may not be possible until they are dealt with first — the next
               step will tell you if that&apos;s the case.
             </p>
           )}
 
+          {error && (
+            <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+              {error}
+            </p>
+          )}
+
           <form
             action={async (formData) => {
               setPending(true);
+              setError(null);
               try {
                 await formAction(formData);
+                dialogRef.current?.close();
+              } catch (err) {
+                // redirect()/notFound() work by throwing a special error
+                // with a "NEXT_REDIRECT"/"NEXT_NOT_FOUND" digest — that must
+                // propagate to Next's runtime to actually navigate, never be
+                // swallowed here as a displayable error message.
+                const digest = (err as { digest?: string })?.digest;
+                if (typeof digest === "string" && (digest.startsWith("NEXT_REDIRECT") || digest.startsWith("NEXT_NOT_FOUND"))) {
+                  throw err;
+                }
+                setError(err instanceof Error ? err.message : "That didn't work. Try again.");
               } finally {
                 setPending(false);
-                dialogRef.current?.close();
               }
             }}
             className="mt-5 flex justify-end gap-2"

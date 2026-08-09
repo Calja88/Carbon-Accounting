@@ -2,9 +2,11 @@
 
 import { z } from "zod";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { buildReportPayload } from "@/lib/report-service";
+import { requireAdminSession } from "@/lib/admin";
+import { buildReportPayload, deleteReportSnapshot } from "@/lib/report-service";
 import { deriveCategory3Calculations } from "@/lib/entries-service";
 
 const schema = z.object({
@@ -70,4 +72,25 @@ export async function generateReportAction(
   }
 
   redirect(`/reports/${snapshotId}`);
+}
+
+/**
+ * Deleting a report snapshot is an admin-only action — this platform's
+ * whole premise is that a report is a permanent, reproducible record (see
+ * the "Every report is a permanent, versioned snapshot" copy on /reports),
+ * so removing one at all is treated the same way the codebase treats
+ * emission-factor library administration: a deliberate, restricted action,
+ * not a routine one available to anyone who can generate a report.
+ */
+export async function deleteReportSnapshotAction(formData: FormData): Promise<void> {
+  const session = await requireAdminSession();
+  if (!session) return;
+
+  const id = String(formData.get("reportSnapshotId") ?? "");
+  if (!id) return;
+
+  await deleteReportSnapshot(id);
+
+  revalidatePath("/reports");
+  redirect("/reports");
 }

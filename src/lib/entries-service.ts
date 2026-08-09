@@ -351,6 +351,73 @@ export async function recalculatePendingEntries() {
   return { checked: pending.length, recalculated };
 }
 
+export class EntryDeletionBlockedError extends Error {}
+
+/**
+ * What deleting this entry would touch — computed before any write so the
+ * caller can show it to a person and, if a report has already been
+ * generated from this entry's figures, refuse rather than quietly break
+ * that report's audit trail.
+ */
+export async function getActivityEntryDependents(entryId: string) {
+  const entry = await prisma.activityEntry.findUnique({
+    where: { id: entryId },
+    select: {
+      calculations: { select: { id: true, reportLinks: { select: { reportSnapshot: { select: { id: true, version: true } } } } } },
+      commutingSurveyResponse: { select: { id: true } },
+      lcaCorporateDataLinks: { select: { id: true } },
+    },
+  });
+  if (!entry) return null;
+
+  const reports = new Map<string, number>();
+  for (const calc of entry.calculations) {
+    for (const link of calc.reportLinks) {
+      reports.set(link.reportSnapshot.id, link.reportSnapshot.version);
+    }
+  }
+
+  return {
+    calculationCount: entry.calculations.length,
+    commutingSurveyResponseCount: entry.commutingSurveyResponse ? 1 : 0,
+    corporateCitationCount: entry.lcaCorporateDataLinks.length,
+    reportVersions: Array.from(reports.values()).sort((a, b) => a - b),
+  };
+}
+
+/**
+ * Deletes an activity entry and its calculation(s). Refuses outright if any
+ * of those calculations already fed a generated report — a report snapshot
+ * is a permanent, immutable record (see report-service.ts), and silently
+ * pulling the source figure out from under one would leave it unexplainable.
+ * A commuting-survey response or product-LCA corporate citation pointing at
+ * this entry is unlinked, not blocked — matching how every other
+ * "reference to a record" is treated elsewhere in this codebase (e.g.
+ * deleteCorporateLink, deleteInventoryItem's evidence/assumption unlinking).
+ */
+export async function deleteActivityEntry(entryId: string) {
+  const dependents = await getActivityEntryDependents(entryId);
+  if (!dependents) throw new Error("That entry no longer exists.");
+
+  if (dependents.reportVersions.length > 0) {
+    throw new EntryDeletionBlockedError(
+      `This entry is included in report version${dependents.reportVersions.length === 1 ? "" : "s"} ${dependents.reportVersions.join(", ")}. Reports are permanent snapshots, so an entry that fed one can't be deleted.`,
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.commutingSurveyResponse.updateMany({ where: { activityEntryId: entryId }, data: { activityEntryId: null } });
+    await tx.lcaCorporateDataLink.updateMany({ where: { activityEntryId: entryId }, data: { activityEntryId: null } });
+    // Cat 3 (well-to-tank/T&D) rows are derived FROM another calculation on
+    // this same entry (see deriveCategory3Calculations) — delete those
+    // before their source, since Calculation.derivedFromCalculationId has
+    // no cascade and would otherwise block the source row's delete.
+    await tx.calculation.deleteMany({ where: { activityEntry: { id: entryId }, derivedFromCalculationId: { not: null } } });
+    await tx.calculation.deleteMany({ where: { activityEntryId: entryId } });
+    await tx.activityEntry.delete({ where: { id: entryId } });
+  });
+}
+
 /**
  * Cat 3 (data map row S3-03) — "auto-calculated ... from Scope 1 and
  * Scope 2 activity data (well-to-tank, T&D losses)". Idempotent: the

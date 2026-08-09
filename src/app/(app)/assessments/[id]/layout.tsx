@@ -1,15 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Trash2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getAssessmentHeader } from "@/lib/lca/assessment-service";
 import { isCalculationStale, runTotals } from "@/lib/lca/calculation-service";
 import { runValidation } from "@/lib/lca/validation-service";
+import { canApproveLca, getLcaActor } from "@/lib/lca/permissions";
 import { formatKgPrecise } from "@/components/charts/palette";
 import { Badge } from "@/components/ui/badge";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { BackLink, Notice, StatusBadge } from "@/components/lca/ui";
 import { BOUNDARY_LABELS } from "@/lib/lca/labels";
 import { AssessmentNav } from "./assessment-nav";
 import { RunCalculationButton } from "./run-calculation-button";
+import { deleteAssessmentAction } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +28,7 @@ export default async function AssessmentLayout({
   const assessment = await getAssessmentHeader(id);
   if (!assessment) notFound();
 
-  const [staleness, validation, counts, run] = await Promise.all([
+  const [staleness, validation, counts, run, actor, revisionCount, supersedesCount] = await Promise.all([
     isCalculationStale(id),
     runValidation(id),
     Promise.all([
@@ -37,7 +41,11 @@ export default async function AssessmentLayout({
     assessment.lastCalculationRunId
       ? prisma.lcaCalculationRun.findUnique({ where: { id: assessment.lastCalculationRunId } })
       : null,
+    getLcaActor(),
+    prisma.lcaAssessment.count({ where: { parentAssessmentId: id } }),
+    prisma.lcaAssessment.count({ where: { supersededByAssessmentId: id } }),
   ]);
+  const canDelete = canApproveLca(actor);
 
   const [inventoryCount, assumptionCount, exclusionCount, evidenceCount, scenarioCount] = counts;
   const totals = run ? runTotals(run) : null;
@@ -115,7 +123,26 @@ export default async function AssessmentLayout({
             ) : (
               <div className="text-right text-sm text-slate-500">Not yet calculated</div>
             )}
-            <RunCalculationButton assessmentId={id} stale={staleness.stale} />
+            <div className="flex items-center gap-2">
+              {canDelete && (
+                <DestructiveActionDialog
+                  triggerLabel="Delete assessment"
+                  triggerIcon={<Trash2 className="h-4 w-4" />}
+                  triggerVariant="secondary"
+                  title={`Delete "${assessment.reference} — ${assessment.title}"?`}
+                  description="This removes the assessment and everything under it — the lifecycle model, inventory, evidence, assumptions, exclusions, calculation runs, issued versions and audit trail. This cannot be undone."
+                  dependents={[
+                    { label: "Later revisions", count: revisionCount },
+                    { label: "Scenario copies", count: counts[4] },
+                    { label: "Assessments it superseded", count: supersedesCount },
+                  ]}
+                  formAction={deleteAssessmentAction}
+                >
+                  <input type="hidden" name="assessmentId" value={id} />
+                </DestructiveActionDialog>
+              )}
+              <RunCalculationButton assessmentId={id} stale={staleness.stale} />
+            </div>
           </div>
         </div>
 

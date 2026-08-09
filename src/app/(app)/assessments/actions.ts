@@ -9,6 +9,7 @@ import {
   changeStatus,
   cloneAssessment,
   createAssessment,
+  deleteAssessment,
   issueVersion,
   supersedeWithRevision,
 } from "@/lib/lca/assessment-service";
@@ -350,4 +351,43 @@ export async function recalculateScenarioAction(formData: FormData): Promise<voi
 
   await runCalculation({ assessmentId: scenarioId, actorUserId: actor!.id });
   revalidatePath(`/assessments/${baselineId}/scenarios`);
+}
+
+// ---------------------------------------------------------------------------
+// Delete
+// ---------------------------------------------------------------------------
+
+/**
+ * Deletes a whole assessment (and, via schema-level cascade, everything
+ * under it — processes, inventory, evidence, assumptions, exclusions,
+ * calculation runs/results, versions, verifications, audit events; see
+ * deleteAssessment in assessment-service.ts). Gated to the same role that
+ * can approve/issue/change status — a bigger blast radius than the
+ * individual-record deletes data owners can already do, so it gets the
+ * stricter permission check rather than canEditLcaData.
+ */
+export async function deleteAssessmentAction(formData: FormData): Promise<void> {
+  const actor = await getLcaActor();
+  const permission = checkCanApprove(actor);
+  if (!permission.ok) throw new Error(permission.reason);
+
+  const assessmentId = String(formData.get("assessmentId") ?? "");
+  if (!assessmentId) return;
+
+  const assessment = await prisma.lcaAssessment.findUnique({ where: { id: assessmentId } });
+  if (!assessment) return;
+
+  await deleteAssessment(assessmentId);
+
+  await recordAuditEvent({
+    entityType: "assessment",
+    entityId: assessmentId,
+    action: "deleted",
+    actorUserId: actor!.id,
+    summary: `Assessment "${assessment.reference} — ${assessment.title}" deleted.`,
+    before: { reference: assessment.reference, title: assessment.title, status: assessment.status },
+  });
+
+  revalidatePath("/assessments");
+  redirect("/assessments");
 }

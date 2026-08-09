@@ -7,6 +7,7 @@ import { LcaProductStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { recordAuditEvent } from "@/lib/lca/audit-service";
 import { canEditLcaData, getLcaActor } from "@/lib/lca/permissions";
+import { deleteProduct } from "@/lib/lca/assessment-service";
 import type { ProductFormState } from "@/lib/lca/form-state";
 
 
@@ -242,4 +243,35 @@ export async function deleteManufacturingLocationAction(formData: FormData): Pro
   });
 
   revalidatePath(`/products/${productId}`);
+}
+
+/**
+ * Deletes a product. Refuses if any of its versions has an assessment
+ * (see deleteProduct in assessment-service.ts for why) — the thrown
+ * DependentRecordsExistError's message is what DestructiveActionDialog
+ * shows inline rather than letting it hit the error boundary.
+ */
+export async function deleteProductAction(formData: FormData): Promise<void> {
+  const actor = await getLcaActor();
+  if (!canEditLcaData(actor)) throw new Error("Your role does not allow deleting products.");
+
+  const productId = String(formData.get("productId") ?? "");
+  if (!productId) return;
+
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+  if (!product) return;
+
+  await deleteProduct(productId);
+
+  await recordAuditEvent({
+    entityType: "product",
+    entityId: productId,
+    action: "deleted",
+    actorUserId: actor?.id,
+    summary: `Product "${product.name}" (${product.sku}) deleted.`,
+    before: { name: product.name, sku: product.sku },
+  });
+
+  revalidatePath("/products");
+  redirect("/products");
 }

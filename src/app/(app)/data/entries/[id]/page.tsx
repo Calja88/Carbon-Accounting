@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { Trash2 } from "lucide-react";
 import { auth } from "@/auth";
 import { getActivityEntryDetail } from "@/lib/entries-explorer-service";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ProvenanceStrip } from "@/components/ui/provenance-strip";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { OriginBadge } from "@/components/ai/ai-disclosure";
+import { deleteActivityEntryAction } from "../actions";
 
 function Row({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
@@ -105,9 +108,21 @@ export default async function ActivityEntryDetailPage({ params }: { params: Prom
         </Card>
       )}
 
-      <Link href="/data/entries" className="text-sm font-medium text-brand-700 hover:text-brand-800">
-        ← Back to historical data
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link href="/data/entries" className="text-sm font-medium text-brand-700 hover:text-brand-800">
+          ← Back to historical data
+        </Link>
+        <DestructiveActionDialog
+          triggerLabel="Delete this entry"
+          triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+          triggerVariant="secondary"
+          title="Delete this activity entry?"
+          description="This entry has no calculation yet, so nothing else depends on it. This cannot be undone."
+          formAction={deleteActivityEntryAction}
+        >
+          <input type="hidden" name="entryId" value={entry.id} />
+        </DestructiveActionDialog>
+      </div>
     </div>
   );
 }

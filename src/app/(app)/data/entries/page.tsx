@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ChevronLeft, ChevronRight, FileScan } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileScan, Trash2 } from "lucide-react";
 import { auth } from "@/auth";
 import { DataOrigin, EntryStatus, Scope } from "@prisma/client";
 import { listActivityEntries, listFilterableSites } from "@/lib/entries-explorer-service";
@@ -12,8 +12,10 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { OriginBadge } from "@/components/ai/ai-disclosure";
 import { formatTonnes } from "@/components/charts/palette";
+import { deleteActivityEntryAction } from "./actions";
 
 const SCOPE_LABELS: Record<Scope, string> = {
   SCOPE_1: "Scope 1",
@@ -191,6 +193,7 @@ export default async function HistoricalDataPage({ searchParams }: { searchParam
               "Origin",
               { label: "Emissions", align: "right" },
               "",
+              { label: "", align: "right" },
             ]}
           >
             {result.rows.map((row) => {
@@ -231,6 +234,18 @@ export default async function HistoricalDataPage({ searchParams }: { searchParam
                         Evidence
                       </Link>
                     )}
+                  </Td>
+                  <Td align="right">
+                    <DestructiveActionDialog
+                      triggerLabel={`Delete ${row.dataPointName} entry`}
+                      triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                      title="Delete this activity entry?"
+                      description="This deletes the entry and its calculation(s). Refused if it's already included in a generated report — reports are permanent snapshots, so a source figure behind one can't be pulled out from under it."
+                      confirmLabel="Delete"
+                      formAction={deleteActivityEntryAction}
+                    >
+                      <input type="hidden" name="entryId" value={row.id} />
+                    </DestructiveActionDialog>
                   </Td>
                 </tr>
               );

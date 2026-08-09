@@ -720,3 +720,58 @@ export async function getProduct(productId: string) {
     },
   });
 }
+
+export class DependentRecordsExistError extends Error {}
+
+/**
+ * Deletes a product. Blocked if any of its versions have an assessment —
+ * an assessment carries its own calculated results, evidence and audit
+ * trail, so removing a product out from under one would either have to
+ * cascade a large, silent deletion or leave it orphaned. Neither is
+ * acceptable here; the assessment(s) must be dealt with first. With no
+ * assessments in the way, the delete cascades its versions and their
+ * manufacturing locations automatically (see the onDelete: Cascade on
+ * ProductVersion.product and ProductManufacturingLocation.productVersion
+ * in prisma/schema.prisma).
+ */
+export async function deleteProduct(productId: string) {
+  const assessmentCount = await prisma.lcaAssessment.count({ where: { productVersion: { productId } } });
+  if (assessmentCount > 0) {
+    throw new DependentRecordsExistError(
+      `This product has ${assessmentCount} assessment${assessmentCount === 1 ? "" : "s"} against it. Delete or reassign ${assessmentCount === 1 ? "it" : "them"} first.`,
+    );
+  }
+  await prisma.product.delete({ where: { id: productId } });
+}
+
+/**
+ * Deletes an assessment. Blocked if anything else's own referential
+ * integrity depends on this one specifically continuing to exist —
+ * revisions (parentAssessmentId), scenario copies (baselineAssessmentId),
+ * or an assessment this one superseded (supersededByAssessmentId pointing
+ * at it) — since none of those foreign keys cascade (see
+ * prisma/schema.prisma) and unwinding a whole assessment lineage silently
+ * is exactly the "unsafe cascading deletion" this platform's design
+ * avoids elsewhere (evidence, inventory items, etc.). With none of those
+ * in the way, every other child record (processes, inventory lines,
+ * evidence, assumptions, exclusions, calculation runs/results, versions,
+ * verifications, audit events) cascades automatically.
+ */
+export async function deleteAssessment(assessmentId: string) {
+  const [revisionCount, scenarioCount, supersedesCount] = await Promise.all([
+    prisma.lcaAssessment.count({ where: { parentAssessmentId: assessmentId } }),
+    prisma.lcaAssessment.count({ where: { baselineAssessmentId: assessmentId } }),
+    prisma.lcaAssessment.count({ where: { supersededByAssessmentId: assessmentId } }),
+  ]);
+
+  const blockers: string[] = [];
+  if (revisionCount > 0) blockers.push(`${revisionCount} later revision${revisionCount === 1 ? "" : "s"}`);
+  if (scenarioCount > 0) blockers.push(`${scenarioCount} scenario cop${scenarioCount === 1 ? "y" : "ies"}`);
+  if (supersedesCount > 0) blockers.push(`${supersedesCount} assessment${supersedesCount === 1 ? "" : "s"} it superseded`);
+
+  if (blockers.length > 0) {
+    throw new DependentRecordsExistError(`This assessment has ${blockers.join(" and ")} linked to it. Those must be dealt with first.`);
+  }
+
+  await prisma.lcaAssessment.delete({ where: { id: assessmentId } });
+}

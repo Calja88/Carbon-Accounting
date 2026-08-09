@@ -1,16 +1,23 @@
 import Link from "next/link";
-import { FileText } from "lucide-react";
+import { FileText, Trash2 } from "lucide-react";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, Td } from "@/components/ui/data-table";
 import { RecordList } from "@/components/ui/record-list";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { GenerateReportForm } from "./generate-report-form";
+import { deleteReportSnapshotAction } from "./actions";
 
 export default async function ReportsPage() {
-  const reports = await prisma.reportSnapshot.findMany({
-    include: { generatedBy: true },
-    orderBy: { generatedAt: "desc" },
-  });
+  const [reports, session] = await Promise.all([
+    prisma.reportSnapshot.findMany({
+      include: { generatedBy: true },
+      orderBy: { generatedAt: "desc" },
+    }),
+    auth(),
+  ]);
+  const isAdmin = session?.user?.role === "ADMIN";
 
   const now = new Date();
   const defaultEnd = now.toISOString().slice(0, 7);
@@ -43,7 +50,10 @@ export default async function ReportsPage() {
           emptyDescription="Generate one above once activity data has been entered and calculated."
         >
           <div className="rounded-lg border border-slate-200 bg-white">
-            <DataTable caption="Generated report snapshots" headers={["Report", "Period", "Generated"]}>
+            <DataTable
+              caption="Generated report snapshots"
+              headers={["Report", "Period", "Generated", { label: "", align: "right" }]}
+            >
               {reports.map((r) => (
                 <tr key={r.id} className="hover:bg-slate-50">
                   <Td>
@@ -59,6 +69,20 @@ export default async function ReportsPage() {
                   <Td>
                     <div className="text-slate-700">{r.generatedAt.toLocaleString("en-GB")}</div>
                     <div className="text-xs text-slate-400">by {r.generatedBy.name}</div>
+                  </Td>
+                  <Td align="right">
+                    {isAdmin && (
+                      <DestructiveActionDialog
+                        triggerLabel={`Delete report version ${r.version}`}
+                        triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                        title={`Permanently delete report version ${r.version}?`}
+                        description="Reports are meant to be a permanent, reproducible record. Deleting one removes its frozen snapshot and audit-trail export entirely, with no undo — it does not affect the underlying activity data or calculations, only this generated document."
+                        confirmLabel="Permanently delete"
+                        formAction={deleteReportSnapshotAction}
+                      >
+                        <input type="hidden" name="reportSnapshotId" value={r.id} />
+                      </DestructiveActionDialog>
+                    )}
                   </Td>
                 </tr>
               ))}

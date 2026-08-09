@@ -1,12 +1,15 @@
 import Link from "next/link";
+import { Trash2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { listAssessments } from "@/lib/lca/assessment-service";
-import { canEditLcaData, getLcaActor } from "@/lib/lca/permissions";
+import { canApproveLca, canEditLcaData, getLcaActor } from "@/lib/lca/permissions";
 import { formatKgPrecise } from "@/components/charts/palette";
 import { Card, CardContent } from "@/components/ui/card";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { DataTable, EmptyState, PageHeading, StatusBadge, Td } from "@/components/lca/ui";
 import { BOUNDARY_LABELS } from "@/lib/lca/labels";
 import { NewAssessmentForm } from "./new-assessment-form";
+import { deleteAssessmentAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +25,7 @@ export default async function AssessmentsPage() {
   ]);
 
   const canEdit = canEditLcaData(actor);
+  const canDelete = canApproveLca(actor);
 
   // The headline figure comes from each assessment's own latest run, so the
   // list can never show a number the assessment page disagrees with.
@@ -81,6 +85,7 @@ export default async function AssessmentsPage() {
                 "Status",
                 { label: "Per functional unit", align: "right" },
                 "Owner",
+                { label: "", align: "right" },
               ]}
             >
               {assessments.map((assessment) => {
@@ -121,6 +126,19 @@ export default async function AssessmentsPage() {
                       )}
                     </Td>
                     <Td>{assessment.owner?.name ?? <span className="text-slate-400">Unassigned</span>}</Td>
+                    <Td align="right">
+                      {canDelete && (
+                        <DestructiveActionDialog
+                          triggerLabel={`Delete ${assessment.reference}`}
+                          triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                          title={`Delete "${assessment.reference} — ${assessment.title}"?`}
+                          description="This removes the assessment and everything under it — the lifecycle model, inventory, evidence, assumptions, exclusions, calculation runs, issued versions and audit trail. This cannot be undone. Blocked if it has revisions, scenario copies, or is what a superseded assessment points to."
+                          formAction={deleteAssessmentAction}
+                        >
+                          <input type="hidden" name="assessmentId" value={assessment.id} />
+                        </DestructiveActionDialog>
+                      )}
+                    </Td>
                   </tr>
                 );
               })}

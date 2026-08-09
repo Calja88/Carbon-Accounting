@@ -7,7 +7,7 @@ import { canEditLcaData, getLcaActor } from "@/lib/lca/permissions";
 import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { BackLink, DataTable, EmptyState, PageHeading, SectionCard, StatusBadge, Td } from "@/components/lca/ui";
 import { AddLocationForm, AddVersionForm, EditProductForm } from "../product-forms";
-import { deleteManufacturingLocationAction } from "../actions";
+import { deleteManufacturingLocationAction, deleteProductAction } from "../actions";
 import { NewAssessmentForm } from "../../assessments/new-assessment-form";
 
 export const dynamic = "force-dynamic";
@@ -41,11 +41,23 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         }
         actions={
           canEdit ? (
-            <NewAssessmentForm
-              productVersions={product.versions.map((v) => ({ id: v.id, label: `${product.name} — ${v.versionLabel}`, entityId: product.entityId }))}
-              methodologies={methodologies.map((m) => ({ id: m.id, label: `${m.name} ${m.version}`, isDefault: m.isDefault }))}
-              defaultEntityId={product.entityId}
-            />
+            <>
+              <NewAssessmentForm
+                productVersions={product.versions.map((v) => ({ id: v.id, label: `${product.name} — ${v.versionLabel}`, entityId: product.entityId }))}
+                methodologies={methodologies.map((m) => ({ id: m.id, label: `${m.name} ${m.version}`, isDefault: m.isDefault }))}
+                defaultEntityId={product.entityId}
+              />
+              <DestructiveActionDialog
+                triggerLabel="Delete product"
+                triggerVariant="secondary"
+                title={`Delete "${product.name}"?`}
+                description="This removes the product, all of its versions, and their manufacturing locations. This cannot be undone."
+                dependents={[{ label: "Assessments against this product", count: allAssessments.length }]}
+                formAction={deleteProductAction}
+              >
+                <input type="hidden" name="productId" value={product.id} />
+              </DestructiveActionDialog>
+            </>
           ) : null
         }
       />
