@@ -159,7 +159,7 @@ export function ExpenseInImportForm({ site }: { site: { id: string; name: string
         {state.error && (
           <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
-            <p className="text-sm text-red-700">{state.error}</p>
+            <p role="alert" className="text-sm text-red-700">{state.error}</p>
           </div>
         )}
 

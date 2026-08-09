@@ -148,7 +148,7 @@ export function UploadForm({ existingSets }: { existingSets: { id: string; name:
 
       {state.error && (
         <div className="rounded-md border border-red-200 bg-red-50 p-3">
-          <p className="text-sm text-red-700">{state.error}</p>
+          <p role="alert" className="text-sm text-red-700">{state.error}</p>
           {state.rowErrors.length > 0 && (
             <ul className="mt-2 list-inside list-disc text-sm text-red-700">
               {state.rowErrors.slice(0, 20).map((e, i) => (

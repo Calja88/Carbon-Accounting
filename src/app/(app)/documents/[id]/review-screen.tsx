@@ -637,7 +637,7 @@ function ProposalCard({
             )}
           </div>
 
-          {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+          {state.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
 
           <Button type="submit" disabled={pending}>
             <CheckCircle2 className="h-4 w-4" />

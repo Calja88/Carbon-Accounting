@@ -159,7 +159,7 @@ export function AssistantPanel({ available, unavailableMessage }: AssistantPanel
             </p>
           </header>
 
-          <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+          <div ref={scrollRef} aria-live="polite" className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
             {turns.length === 0 && available && !unavailable && (
               <div className="space-y-2">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Try asking</p>

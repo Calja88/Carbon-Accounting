@@ -100,7 +100,7 @@ export function GenerateReportForm({ defaultStart, defaultEnd }: { defaultStart:
         calculation audit trail.
       </p>
 
-      {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
     </form>
   );
 }

@@ -321,7 +321,7 @@ export function AiSettingsForm(props: SettingsFormProps) {
           </CardContent>
         </Card>
 
-        {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+        {state.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
         {state.saved && <p className="text-sm text-emerald-700">Settings saved.</p>}
 
         <Button type="submit" disabled={pending}>

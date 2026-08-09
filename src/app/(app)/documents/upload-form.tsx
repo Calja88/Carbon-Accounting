@@ -90,7 +90,7 @@ export function UploadForm({
         <Input id="notes" name="notes" className="mt-1" placeholder="e.g. Q1 electricity bill, Hull" />
       </div>
 
-      {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
 
       <Button type="submit" disabled={pending}>
         <Upload className="h-4 w-4" />

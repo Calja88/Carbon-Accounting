@@ -38,7 +38,7 @@ export function ExplainPanel({ calculationId, aiAvailable }: { calculationId: st
           action="The full calculation record above is produced by the platform itself and is unaffected."
         />
       )}
-      {state.error && !state.aiUnavailable && <p className="text-sm text-red-600">{state.error}</p>}
+      {state.error && !state.aiUnavailable && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
 
       {state.text && (
         <div className="space-y-2 rounded-lg bg-slate-50 p-4">

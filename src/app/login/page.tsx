@@ -33,7 +33,7 @@ export default function LoginPage() {
                 <Label htmlFor="password">Password</Label>
                 <Input id="password" name="password" type="password" required autoComplete="current-password" className="mt-1" />
               </div>
-              {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+              {state.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
               <Button type="submit" className="w-full" disabled={pending}>
                 {pending ? "Signing in…" : "Sign in"}
               </Button>

@@ -94,7 +94,7 @@ export function Notice({
 }) {
   const { wrapper, Icon } = NOTICE_STYLES[tone];
   return (
-    <div className={cn("flex items-start gap-3 rounded-lg border px-4 py-3 text-sm", wrapper)}>
+    <div role={tone === "danger" ? "alert" : undefined} className={cn("flex items-start gap-3 rounded-lg border px-4 py-3 text-sm", wrapper)}>
       <Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         {title && <div className="font-semibold">{title}</div>}
