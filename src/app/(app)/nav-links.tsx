@@ -39,6 +39,7 @@ const BASE_ITEMS: NavItem[] = [
 
 const ADMIN_ITEMS: NavItem[] = [
   { href: "/admin/factors", label: "Emission factors", icon: Database },
+  { href: "/admin/lci-sources", label: "LCI data sources", icon: BookMarked },
   { href: "/admin/ai", label: "AI settings", icon: Bot },
 ];
 

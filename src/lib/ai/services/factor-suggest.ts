@@ -86,7 +86,12 @@ export async function findFactorCandidates(input: FactorSuggestionInput): Promis
     OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOf } }],
   };
 
-  const where: Prisma.EmissionFactorWhereInput = { factorSet: setFilter };
+  // automatedAssignmentAllowed: false gates factors imported through the LCI
+  // governance pipeline (src/lib/lci-import.ts) out of the AI suggestion
+  // pipeline entirely — the brief requires no automated AI assignment of
+  // those rows until a human explicitly approves via the ordinary admin
+  // factor-picker UI, not this candidate shortlist.
+  const where: Prisma.EmissionFactorWhereInput = { factorSet: setFilter, automatedAssignmentAllowed: true };
   if (input.factorCategory) where.category = input.factorCategory;
   if (input.scope) where.scope = input.scope;
   if (input.unit) where.unit = input.unit;
@@ -111,6 +116,7 @@ export async function findFactorCandidates(input: FactorSuggestionInput): Promis
       rows = await prisma.emissionFactor.findMany({
         where: {
           factorSet: setFilter,
+          automatedAssignmentAllowed: true,
           OR: terms.flatMap((term) => [
             { category: { contains: term, mode: "insensitive" as const } },
             { subtypeKey: { contains: term, mode: "insensitive" as const } },

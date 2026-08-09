@@ -12,7 +12,7 @@ import { LcaFactorBoundary, LcaItemType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { lcaFactorCategoriesForItemType, LCA_FACTOR_CATEGORIES } from "./factor-categories";
 import { FACTOR_CATEGORIES } from "@/lib/factor-categories";
-import { areUnitsCompatible } from "./units";
+import { areUnitsCompatible, unitDimension } from "./units";
 
 const include = { factorSet: true } as const;
 
@@ -108,6 +108,63 @@ export function factorSummary(factor: LibraryFactor): string {
       : "boundary not stated",
   ];
   return bits.filter(Boolean).join(" · ");
+}
+
+export interface FactorSelectionWarning {
+  code: "GEOGRAPHY_MISMATCH" | "STALE_REFERENCE_PERIOD" | "UNIT_DIMENSION_MISMATCH" | "HUMAN_REVIEW_REQUIRED";
+  message: string;
+}
+
+/**
+ * Warns (never blocks) when a selected factor may not actually fit the item
+ * it's being assigned to — brief item 10: dimensional compatibility plus
+ * boundary/geography/year mismatches. Called wherever an inventory item,
+ * transport leg or end-of-life route picks an emissionFactorId.
+ */
+export function factorSelectionWarnings(
+  factor: Pick<LibraryFactor, "region" | "referenceYear" | "validTo" | "unit" | "humanReviewRequired"> & { geography?: string | null },
+  context: { itemUnit?: string | null; assessmentYear?: number | null; nonUkAssessment?: boolean } = {},
+): FactorSelectionWarning[] {
+  const warnings: FactorSelectionWarning[] = [];
+
+  const geography = factor.geography ?? factor.region;
+  if (context.nonUkAssessment && geography && /united kingdom|^uk$/i.test(geography)) {
+    warnings.push({
+      code: "GEOGRAPHY_MISMATCH",
+      message: `This factor's geography ("${geography}") is UK-specific but the assessment isn't UK-only — confirm it's still the right proxy.`,
+    });
+  }
+
+  if (context.assessmentYear && factor.referenceYear != null && Math.abs(context.assessmentYear - factor.referenceYear) > 3) {
+    warnings.push({
+      code: "STALE_REFERENCE_PERIOD",
+      message: `This factor's reference year (${factor.referenceYear}) is more than 3 years from the assessment/activity period (${context.assessmentYear}).`,
+    });
+  }
+  if (context.assessmentYear && factor.validTo && factor.validTo.getFullYear() < context.assessmentYear) {
+    warnings.push({
+      code: "STALE_REFERENCE_PERIOD",
+      message: `This factor's stated validity ended ${factor.validTo.toISOString().slice(0, 10)}, before the assessment/activity period (${context.assessmentYear}).`,
+    });
+  }
+
+  if (context.itemUnit) {
+    if (!areUnitsCompatible(factor.unit, context.itemUnit) && unitDimension(factor.unit) && unitDimension(context.itemUnit)) {
+      warnings.push({
+        code: "UNIT_DIMENSION_MISMATCH",
+        message: `This factor is expressed per ${factor.unit} (${unitDimension(factor.unit)}), which isn't dimensionally compatible with the item's unit ${context.itemUnit} (${unitDimension(context.itemUnit)}).`,
+      });
+    }
+  }
+
+  if (factor.humanReviewRequired) {
+    warnings.push({
+      code: "HUMAN_REVIEW_REQUIRED",
+      message: "This factor was imported from an external reference library and requires human methodological review before use.",
+    });
+  }
+
+  return warnings;
 }
 
 /** True when nothing in the library is usable for product work yet. */
