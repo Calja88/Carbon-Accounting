@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { recordAuditEvent } from "@/lib/lca/audit-service";
 import { canEditLcaData, getLcaActor } from "@/lib/lca/permissions";
 import type { ProductFormState } from "@/lib/lca/form-state";
+import type { DeleteActionState } from "@/components/ui/delete-button";
 
 
 const productSchema = z.object({
@@ -217,6 +218,49 @@ export async function addManufacturingLocationAction(
 
   revalidatePath(`/products/${data.productId}`);
   return { error: null, success: true };
+}
+
+/**
+ * Deletes a product and its versions/manufacturing locations. Refused when
+ * any version has an assessment against it — an assessment is an
+ * authoritative record and must be dealt with (deleted or moved) first
+ * rather than silently cascaded away (G6).
+ */
+export async function deleteProductAction(_prev: DeleteActionState, formData: FormData): Promise<DeleteActionState> {
+  const actor = await getLcaActor();
+  if (!canEditLcaData(actor)) return { error: "Your role does not allow deleting products.", success: false, message: null };
+
+  const productId = String(formData.get("productId") ?? "");
+  if (!productId) return { error: "Missing product.", success: false, message: null };
+
+  const product = await prisma.product.findUnique({
+    where: { id: productId },
+    include: { versions: { select: { _count: { select: { assessments: true } } } } },
+  });
+  if (!product) return { error: "That product no longer exists.", success: false, message: null };
+
+  const assessmentCount = product.versions.reduce((sum, v) => sum + v._count.assessments, 0);
+  if (assessmentCount > 0) {
+    return {
+      error: `This product has ${assessmentCount} assessment(s) against it. Delete those assessments first before deleting the product.`,
+      success: false,
+      message: null,
+    };
+  }
+
+  await prisma.product.delete({ where: { id: productId } });
+
+  await recordAuditEvent({
+    entityType: "product",
+    entityId: productId,
+    action: "deleted",
+    actorUserId: actor?.id,
+    summary: `Product "${product.name}" (${product.sku}) deleted — it had no assessments against it.`,
+    before: { name: product.name, sku: product.sku },
+  });
+
+  revalidatePath("/products");
+  return { error: null, success: true, message: "Product deleted." };
 }
 
 export async function deleteManufacturingLocationAction(formData: FormData): Promise<void> {

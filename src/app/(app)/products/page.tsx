@@ -6,7 +6,9 @@ import { canEditLcaData, getLcaActor } from "@/lib/lca/permissions";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { DataTable, EmptyState, PageHeading, Td } from "@/components/lca/ui";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { CreateProductForm } from "./product-forms";
+import { deleteProductAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +40,16 @@ export default async function ProductsPage() {
             </div>
           ) : (
             <DataTable
-              headers={["Product", "SKU", "Operating unit", "Category", "Versions", { label: "Assessments", align: "right" }, "Status"]}
+              headers={[
+                "Product",
+                "SKU",
+                "Operating unit",
+                "Category",
+                "Versions",
+                { label: "Assessments", align: "right" },
+                "Status",
+                ...(canEdit ? [""] : []),
+              ]}
             >
               {products.map((product) => {
                 const assessmentCount = product.versions.reduce((sum, v) => sum + v._count.assessments, 0);
@@ -61,6 +72,20 @@ export default async function ProductsPage() {
                         {product.status === "ACTIVE" ? "Active" : "Discontinued"}
                       </Badge>
                     </Td>
+                    {canEdit && (
+                      <Td align="right">
+                        <DeleteButton
+                          action={deleteProductAction}
+                          hiddenFields={{ productId: product.id }}
+                          confirmText={
+                            assessmentCount > 0
+                              ? `"${product.name}" has ${assessmentCount} assessment(s) and can't be deleted until those are removed.`
+                              : `Delete "${product.name}" (${product.sku})? This removes all its versions too.`
+                          }
+                          size="sm"
+                        />
+                      </Td>
+                    )}
                   </tr>
                 );
               })}

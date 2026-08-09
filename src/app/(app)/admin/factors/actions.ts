@@ -4,8 +4,9 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { requireAdminSession } from "@/lib/admin";
 import { parseFactorFile, validateFactorRows, RowIssue } from "@/lib/factor-import";
-import { commitFactorImport } from "@/lib/factor-sets-service";
+import { commitFactorImport, deleteFactorSet, FactorSetInUseError } from "@/lib/factor-sets-service";
 import { FactorSourceType } from "@prisma/client";
+import type { DeleteActionState } from "@/components/ui/delete-button";
 
 const schema = z.object({
   name: z.string().min(1, "Enter a name for this factor set."),
@@ -130,5 +131,31 @@ export async function uploadFactorSetAction(
       success: false,
       ...initialLikeState,
     };
+  }
+}
+
+/**
+ * Deletes an emission factor set — admin-only, and refused (by
+ * deleteFactorSet) when any of its factors have ever been used, since the
+ * import history is otherwise append-only for audit reasons (see
+ * factor-sets-service.ts). A set imported by mistake and never used is
+ * safe to remove entirely.
+ */
+export async function deleteFactorSetAction(_prev: DeleteActionState, formData: FormData): Promise<DeleteActionState> {
+  const session = await requireAdminSession();
+  if (!session) return { error: "Admins only.", success: false, message: null };
+
+  const factorSetId = String(formData.get("factorSetId") ?? "");
+  if (!factorSetId) return { error: "Missing factor set.", success: false, message: null };
+
+  try {
+    await deleteFactorSet(factorSetId);
+    revalidatePath("/admin/factors");
+    return { error: null, success: true, message: "Factor set deleted." };
+  } catch (err) {
+    if (err instanceof FactorSetInUseError) {
+      return { error: err.message, success: false, message: null };
+    }
+    return { error: "Could not delete that factor set.", success: false, message: null };
   }
 }

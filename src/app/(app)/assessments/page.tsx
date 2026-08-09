@@ -6,7 +6,10 @@ import { formatKgPrecise } from "@/components/charts/palette";
 import { Card, CardContent } from "@/components/ui/card";
 import { DataTable, EmptyState, PageHeading, StatusBadge, Td } from "@/components/lca/ui";
 import { BOUNDARY_LABELS } from "@/lib/lca/labels";
+import { isAssessmentOpenForEditing } from "@/lib/lca/permissions";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { NewAssessmentForm } from "./new-assessment-form";
+import { deleteAssessmentAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +84,7 @@ export default async function AssessmentsPage() {
                 "Status",
                 { label: "Per functional unit", align: "right" },
                 "Owner",
+                ...(canEdit ? [""] : []),
               ]}
             >
               {assessments.map((assessment) => {
@@ -121,6 +125,20 @@ export default async function AssessmentsPage() {
                       )}
                     </Td>
                     <Td>{assessment.owner?.name ?? <span className="text-slate-400">Unassigned</span>}</Td>
+                    {canEdit && (
+                      <Td align="right">
+                        {isAssessmentOpenForEditing(assessment.status) ? (
+                          <DeleteButton
+                            action={deleteAssessmentAction}
+                            hiddenFields={{ assessmentId: assessment.id }}
+                            confirmText={`Delete assessment "${assessment.title}" (${assessment.reference})? This removes its process model, inventory and results too.`}
+                            size="sm"
+                          />
+                        ) : (
+                          <span className="text-xs text-slate-400">Locked</span>
+                        )}
+                      </Td>
+                    )}
                   </tr>
                 );
               })}

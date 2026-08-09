@@ -94,6 +94,46 @@ export async function listFactorSets() {
   });
 }
 
+export class FactorSetInUseError extends Error {}
+
+/**
+ * Deletes a factor set — but only when none of its factors have ever been
+ * used. The import path is deliberately append-only (a new import never
+ * edits an existing set — see commitFactorImport above) because a
+ * Calculation snapshots the factor value it used at the time, but also
+ * keeps a live emissionFactorId reference for "how was this calculated?"
+ * (see explain-calculation.ts). Removing a factor a real calculation still
+ * points at would break that trail, so this only ever removes a set that
+ * was imported by mistake and never actually used — anywhere: corporate
+ * calculations, LCA inventory items, transport legs, end-of-life routes, or
+ * LCA evidence.
+ */
+export async function deleteFactorSet(factorSetId: string) {
+  const factorIds = (await prisma.emissionFactor.findMany({ where: { factorSetId }, select: { id: true } })).map((f) => f.id);
+
+  if (factorIds.length > 0) {
+    const [calcCount, inventoryCount, recycledInventoryCount, transportCount, eolCount, evidenceCount] = await Promise.all([
+      prisma.calculation.count({ where: { emissionFactorId: { in: factorIds } } }),
+      prisma.lcaInventoryItem.count({ where: { emissionFactorId: { in: factorIds } } }),
+      prisma.lcaInventoryItem.count({ where: { recycledEmissionFactorId: { in: factorIds } } }),
+      prisma.lcaTransportLeg.count({ where: { emissionFactorId: { in: factorIds } } }),
+      prisma.lcaEndOfLifeRoute.count({ where: { emissionFactorId: { in: factorIds } } }),
+      prisma.lcaEvidence.count({ where: { emissionFactorId: { in: factorIds } } }),
+    ]);
+    const usageCount = calcCount + inventoryCount + recycledInventoryCount + transportCount + eolCount + evidenceCount;
+    if (usageCount > 0) {
+      throw new FactorSetInUseError(
+        `This factor set is referenced by ${usageCount} calculation(s)/inventory record(s) and can't be deleted — it's part of the audit trail for figures that already exist.`,
+      );
+    }
+  }
+
+  await prisma.$transaction([
+    prisma.emissionFactor.deleteMany({ where: { factorSetId } }),
+    prisma.emissionFactorSet.delete({ where: { id: factorSetId } }),
+  ]);
+}
+
 export async function getFactorSetDetail(id: string) {
   return prisma.emissionFactorSet.findUnique({
     where: { id },

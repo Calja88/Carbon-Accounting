@@ -6,6 +6,8 @@ import { listFactorSets } from "@/lib/factor-sets-service";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DeleteButton } from "@/components/ui/delete-button";
+import { deleteFactorSetAction } from "./actions";
 
 const SOURCE_TYPE_LABELS: Record<string, string> = {
   OFFICIAL_DEFRA_DESNZ: "Official (DEFRA/DESNZ)",
@@ -53,37 +55,43 @@ export default async function AdminFactorsPage() {
           </p>
         )}
         {sets.map((s) => (
-          <Link key={s.id} href={`/admin/factors/${s.id}`}>
-            <Card className="transition-all hover:-translate-y-0.5 hover:shadow-md">
-              <CardContent className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-                    <Database className="h-4 w-4" />
-                  </span>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium text-slate-900">{s.name}</span>
-                      {s.isPlaceholder && <Badge tone="warning">Placeholder — not verified</Badge>}
-                    </div>
-                    <div className="text-sm text-slate-500">
-                      {SOURCE_TYPE_LABELS[s.sourceType] ?? s.sourceType}
-                      {s.supplierName ? ` — ${s.supplierName}` : ""} · {s.publisher} · vintage {s.vintageYear} ·{" "}
-                      {s._count.factors} factor{s._count.factors === 1 ? "" : "s"}
-                    </div>
-                    <div className="text-xs text-slate-400">
-                      Effective from {new Date(s.effectiveFrom).toLocaleDateString("en-GB")}
-                      {s.effectiveTo ? ` to ${new Date(s.effectiveTo).toLocaleDateString("en-GB")}` : " — current"}
-                      {s.importedBy ? ` · imported by ${s.importedBy.name}` : ""}
-                    </div>
+          <Card key={s.id} className="transition-all hover:shadow-md">
+            <CardContent className="flex items-center justify-between gap-4">
+              <Link href={`/admin/factors/${s.id}`} className="flex min-w-0 flex-1 items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                  <Database className="h-4 w-4" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-slate-900">{s.name}</span>
+                    {s.isPlaceholder && <Badge tone="warning">Placeholder — not verified</Badge>}
+                  </div>
+                  <div className="text-sm text-slate-500">
+                    {SOURCE_TYPE_LABELS[s.sourceType] ?? s.sourceType}
+                    {s.supplierName ? ` — ${s.supplierName}` : ""} · {s.publisher} · vintage {s.vintageYear} ·{" "}
+                    {s._count.factors} factor{s._count.factors === 1 ? "" : "s"}
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    Effective from {new Date(s.effectiveFrom).toLocaleDateString("en-GB")}
+                    {s.effectiveTo ? ` to ${new Date(s.effectiveTo).toLocaleDateString("en-GB")}` : " — current"}
+                    {s.importedBy ? ` · imported by ${s.importedBy.name}` : ""}
                   </div>
                 </div>
-                <span className="flex shrink-0 items-center gap-1 text-sm font-medium text-blue-700">
+              </Link>
+              <div className="flex shrink-0 items-center gap-3">
+                <Link href={`/admin/factors/${s.id}`} className="flex items-center gap-1 text-sm font-medium text-blue-700">
                   View
                   <ArrowRight className="h-3.5 w-3.5" />
-                </span>
-              </CardContent>
-            </Card>
-          </Link>
+                </Link>
+                <DeleteButton
+                  action={deleteFactorSetAction}
+                  hiddenFields={{ factorSetId: s.id }}
+                  confirmText={`Delete factor set "${s.name}"? Only allowed if none of its ${s._count.factors} factor(s) have been used in a calculation yet.`}
+                  size="sm"
+                />
+              </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
     </div>

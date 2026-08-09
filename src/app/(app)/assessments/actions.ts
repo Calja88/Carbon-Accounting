@@ -17,6 +17,8 @@ import { checkStatusTransition } from "@/lib/lca/readiness-service";
 import { recordAuditEvent, diffRecords } from "@/lib/lca/audit-service";
 import { canEditLcaData, checkCanApprove, checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
 import type { AssessmentFormState } from "@/lib/lca/form-state";
+import type { DeleteActionState } from "@/components/ui/delete-button";
+import { Prisma } from "@prisma/client";
 
 
 function fail(error: string): AssessmentFormState {
@@ -80,6 +82,54 @@ export async function createAssessmentAction(
 
   revalidatePath("/assessments");
   redirect(`/assessments/${assessment.id}/goal-scope`);
+}
+
+// ---------------------------------------------------------------------------
+// Delete
+// ---------------------------------------------------------------------------
+
+/**
+ * Deletes an assessment (G5). Reuses checkCanEditAssessment — the same rule
+ * that already blocks editing a VERIFIED/locked assessment blocks deleting
+ * one, so there's no separate lifecycle rule to keep in sync. Processes,
+ * inventory items, calculation runs etc. cascade with it (schema-level
+ * onDelete: Cascade); a revision, scenario copy or supersession pointing at
+ * this assessment blocks the delete at the database level, surfaced here as
+ * a plain message rather than a raw constraint error.
+ */
+export async function deleteAssessmentAction(_prev: DeleteActionState, formData: FormData): Promise<DeleteActionState> {
+  const assessmentId = String(formData.get("assessmentId") ?? "");
+  if (!assessmentId) return { error: "Missing assessment.", success: false, message: null };
+
+  const guard = await guardEdit(assessmentId);
+  if (guard.error || !guard.assessment) return { error: guard.error ?? "That assessment no longer exists.", success: false, message: null };
+
+  const { reference, title } = guard.assessment;
+
+  try {
+    await prisma.lcaAssessment.delete({ where: { id: assessmentId } });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") {
+      return {
+        error: "This assessment has a revision, scenario or supersession record pointing at it. Deal with those first before deleting it.",
+        success: false,
+        message: null,
+      };
+    }
+    throw err;
+  }
+
+  await recordAuditEvent({
+    entityType: "assessment",
+    entityId: assessmentId,
+    action: "deleted",
+    actorUserId: guard.actor.id,
+    summary: `Assessment "${title}" (${reference}) deleted.`,
+    before: { reference, title },
+  });
+
+  revalidatePath("/assessments");
+  return { error: null, success: true, message: "Assessment deleted." };
 }
 
 // ---------------------------------------------------------------------------
