@@ -7,9 +7,12 @@ import { DOCUMENT_KIND_LABELS, getDocumentWithExtractions } from "@/lib/document
 import { buildProposals } from "@/lib/document-proposals";
 import type { DocumentExtractionResult } from "@/lib/ai/schemas";
 import { documentExtractionResultSchema } from "@/lib/ai/schemas";
+import { Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { ReviewScreen } from "./review-screen";
+import { deleteDocumentAction } from "../actions";
 
 export default async function DocumentReviewPage({
   params,
@@ -66,16 +69,29 @@ export default async function DocumentReviewPage({
     <div className="space-y-6">
       <Breadcrumbs items={[{ label: "Documents", href: "/documents" }, { label: document.filename }]} />
 
-      <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{document.filename}</h1>
-          <StatusBadge domain="document" status={document.status} />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{document.filename}</h1>
+            <StatusBadge domain="document" status={document.status} />
+          </div>
+          <p className="mt-1 text-sm text-slate-500">
+            {DOCUMENT_KIND_LABELS[document.kind]}
+            {document.site ? ` · ${document.site.name} (${document.site.entity.name})` : " · not site-specific"} ·{" "}
+            uploaded {new Date(document.uploadedAt).toLocaleDateString("en-GB")} by {document.uploadedBy.name}
+          </p>
         </div>
-        <p className="mt-1 text-sm text-slate-500">
-          {DOCUMENT_KIND_LABELS[document.kind]}
-          {document.site ? ` · ${document.site.name} (${document.site.entity.name})` : " · not site-specific"} ·{" "}
-          uploaded {new Date(document.uploadedAt).toLocaleDateString("en-GB")} by {document.uploadedBy.name}
-        </p>
+        <DestructiveActionDialog
+          triggerLabel="Delete this document"
+          triggerIcon={<Trash2 className="h-4 w-4" />}
+          triggerVariant="secondary"
+          title={`Delete "${document.filename}"?`}
+          description="This permanently removes the file and its extraction history. Refused if any activity entry was created from it."
+          dependents={[{ label: "Activity entries created from this document", count: document.activityEntries.length }]}
+          formAction={deleteDocumentAction}
+        >
+          <input type="hidden" name="documentId" value={document.id} />
+        </DestructiveActionDialog>
       </div>
 
       <ReviewScreen

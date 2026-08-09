@@ -312,3 +312,48 @@ export const DOCUMENT_STATUS_LABELS: Record<DocumentStatus, string> = {
 };
 
 export type DocumentListItem = Prisma.PromiseReturnType<typeof listDocuments>[number];
+
+export class DocumentInUseError extends Error {}
+
+/** What deleting this document would touch, computed before any write. */
+export async function getSourceDocumentDependents(documentId: string) {
+  const document = await prisma.sourceDocument.findUnique({
+    where: { id: documentId },
+    select: {
+      _count: { select: { extractions: true, activityEntries: true, aiInteractions: true } },
+    },
+  });
+  if (!document) return null;
+  return {
+    extractionCount: document._count.extractions,
+    activityEntryCount: document._count.activityEntries,
+    aiInteractionCount: document._count.aiInteractions,
+  };
+}
+
+/**
+ * Deletes an uploaded evidence document. Refused if any ActivityEntry was
+ * created from it — that entry's `sourceDocumentId` is the audit trail
+ * linking real accounting data back to its evidence (methodology Section 8),
+ * and that FK has no cascade, so it can't be pulled out from under a real
+ * entry the way a report snapshot can't. With no accepted entries, this is
+ * safe: AiInteraction rows referencing the document are unlinked (kept, not
+ * deleted — they're the AI usage audit log, not evidence) and
+ * DocumentExtraction rows cascade automatically
+ * (onDelete: Cascade on DocumentExtraction.document).
+ */
+export async function deleteSourceDocument(documentId: string) {
+  const dependents = await getSourceDocumentDependents(documentId);
+  if (!dependents) throw new DocumentValidationError("That document no longer exists.");
+
+  if (dependents.activityEntryCount > 0) {
+    throw new DocumentInUseError(
+      `${dependents.activityEntryCount} activity ${dependents.activityEntryCount === 1 ? "entry was" : "entries were"} created from this document. It can't be deleted while that evidence trail depends on it.`,
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.aiInteraction.updateMany({ where: { sourceDocumentId: documentId }, data: { sourceDocumentId: null } });
+    await tx.sourceDocument.delete({ where: { id: documentId } });
+  });
+}

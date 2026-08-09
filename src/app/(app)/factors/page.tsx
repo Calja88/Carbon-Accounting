@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Database, Download, Upload } from "lucide-react";
+import { Database, Download, Trash2, Upload } from "lucide-react";
 import { requireAdminSession } from "@/lib/admin";
 import { listFactorSets } from "@/lib/factor-sets-service";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable, Td } from "@/components/ui/data-table";
 import { RecordList } from "@/components/ui/record-list";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
+import { deleteFactorSetAction } from "./actions";
 
 const SOURCE_TYPE_LABELS: Record<string, string> = {
   OFFICIAL_DEFRA_DESNZ: "Official (DEFRA/DESNZ)",
@@ -54,7 +56,15 @@ export default async function AdminFactorsPage() {
         <div className="rounded-lg border border-slate-200 bg-white">
           <DataTable
             caption="Emission factor sets"
-            headers={["Set", "Source type", "Publisher", "Vintage", { label: "Factors", align: "right" }, "Effective"]}
+            headers={[
+              "Set",
+              "Source type",
+              "Publisher",
+              "Vintage",
+              { label: "Factors", align: "right" },
+              "Effective",
+              { label: "", align: "right" },
+            ]}
           >
             {sets.map((s) => (
               <tr key={s.id} className="hover:bg-slate-50">
@@ -82,6 +92,17 @@ export default async function AdminFactorsPage() {
                     {s.effectiveTo ? ` – ${new Date(s.effectiveTo).toLocaleDateString("en-GB")}` : " – current"}
                   </div>
                   {s.importedBy && <div className="text-xs text-slate-400">imported by {s.importedBy.name}</div>}
+                </Td>
+                <Td align="right">
+                  <DestructiveActionDialog
+                    triggerLabel={`Delete ${s.name}`}
+                    triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                    title={`Delete "${s.name}"?`}
+                    description="This deletes the set and all its factor rows. Refused if any factor in it has ever been used by a calculation, inventory line, transport leg, end-of-life route, result, or piece of evidence — this library is append-only by design, so a used set can't be removed."
+                    formAction={deleteFactorSetAction}
+                  >
+                    <input type="hidden" name="factorSetId" value={s.id} />
+                  </DestructiveActionDialog>
                 </Td>
               </tr>
             ))}

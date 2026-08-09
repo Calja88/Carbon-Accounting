@@ -1,14 +1,21 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Trash2 } from "lucide-react";
 import { requireAdminSession } from "@/lib/admin";
-import { getFactorSetDetail, getFactorSetCategoryCounts, getFactorSetCategoryRows } from "@/lib/factor-sets-service";
+import {
+  getFactorSetDetail,
+  getFactorSetCategoryCounts,
+  getFactorSetCategoryRows,
+  getFactorSetUsage,
+} from "@/lib/factor-sets-service";
 import { factorCategoryLabel } from "@/lib/factor-categories";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, Td } from "@/components/ui/data-table";
 import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { ProvenanceStrip } from "@/components/ui/provenance-strip";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
+import { deleteFactorSetAction } from "../actions";
 
 export default async function AdminFactorSetDetailPage({
   params,
@@ -25,7 +32,7 @@ export default async function AdminFactorSetDetailPage({
   const set = await getFactorSetDetail(id);
   if (!set) notFound();
 
-  const categoryCounts = await getFactorSetCategoryCounts(id);
+  const [categoryCounts, usage] = await Promise.all([getFactorSetCategoryCounts(id), getFactorSetUsage(id)]);
   const rows = category ? await getFactorSetCategoryRows(id, category) : null;
 
   return (
@@ -37,9 +44,22 @@ export default async function AdminFactorSetDetailPage({
         ]}
       />
 
-      <div className="flex items-center gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{set.name}</h1>
-        {set.isPlaceholder && <Badge tone="warning">Placeholder — not verified</Badge>}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">{set.name}</h1>
+          {set.isPlaceholder && <Badge tone="warning">Placeholder — not verified</Badge>}
+        </div>
+        <DestructiveActionDialog
+          triggerLabel="Delete this factor set"
+          triggerIcon={<Trash2 className="h-4 w-4" />}
+          triggerVariant="secondary"
+          title={`Delete "${set.name}"?`}
+          description={`This deletes the set and all ${usage.totalFactors} of its factor rows. This library is append-only by design — a used set can't be removed.`}
+          dependents={[{ label: "Factors in use", count: usage.usedFactors }]}
+          formAction={deleteFactorSetAction}
+        >
+          <input type="hidden" name="factorSetId" value={set.id} />
+        </DestructiveActionDialog>
       </div>
 
       <ProvenanceStrip

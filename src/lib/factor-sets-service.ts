@@ -122,3 +122,60 @@ export async function getFactorSetCategoryRows(factorSetId: string, category: st
     orderBy: [{ subtypeKey: "asc" }, { basis: "asc" }],
   });
 }
+
+export class FactorSetInUseError extends Error {}
+
+/**
+ * How many of this set's factors have been used anywhere — corporate
+ * calculations or any of the several product-LCA relations a factor can be
+ * attached to (inventory items, their recycled-content override, transport
+ * legs, end-of-life routes, calculation results, evidence). None of those
+ * foreign keys cascade (see prisma/schema.prisma), so a used factor set
+ * can't be deleted — this is what lets the caller show that count instead
+ * of a raw constraint violation.
+ */
+export async function getFactorSetUsage(factorSetId: string) {
+  const [totalFactors, usedFactors] = await Promise.all([
+    prisma.emissionFactor.count({ where: { factorSetId } }),
+    prisma.emissionFactor.count({
+      where: {
+        factorSetId,
+        OR: [
+          { calculations: { some: {} } },
+          { lcaInventoryItems: { some: {} } },
+          { lcaRecycledInventoryItems: { some: {} } },
+          { lcaTransportLegs: { some: {} } },
+          { lcaEndOfLifeRoutes: { some: {} } },
+          { lcaResults: { some: {} } },
+          { lcaEvidence: { some: {} } },
+        ],
+      },
+    }),
+  ]);
+  return { totalFactors, usedFactors };
+}
+
+/**
+ * Deletes a factor set. Refused outright if any of its factors have ever
+ * been used — this library is deliberately "versioned, never edited in
+ * place" (see README/schema comments): a calculation snapshots the factor
+ * value it used onto itself, but still keeps a live foreign key back to the
+ * EmissionFactor row, and that FK has no cascade, so a used factor set
+ * can't be removed without breaking calculations that depend on it being
+ * there. An unused set (imported by mistake, or a duplicate) deletes
+ * cleanly — its factor rows first, then the set itself, since
+ * EmissionFactor.factorSetId has no cascade either.
+ */
+export async function deleteFactorSet(factorSetId: string) {
+  const usage = await getFactorSetUsage(factorSetId);
+  if (usage.usedFactors > 0) {
+    throw new FactorSetInUseError(
+      `${usage.usedFactors} of this set's factors are in use by a calculation, inventory line, transport leg, end-of-life route, result, or piece of evidence. A used factor set can't be deleted.`,
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.emissionFactor.deleteMany({ where: { factorSetId } });
+    await tx.emissionFactorSet.delete({ where: { id: factorSetId } });
+  });
+}

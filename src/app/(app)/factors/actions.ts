@@ -2,9 +2,10 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireAdminSession } from "@/lib/admin";
 import { parseFactorFile, validateFactorRows, RowIssue } from "@/lib/factor-import";
-import { commitFactorImport } from "@/lib/factor-sets-service";
+import { commitFactorImport, deleteFactorSet } from "@/lib/factor-sets-service";
 import { FactorSourceType } from "@prisma/client";
 
 const schema = z.object({
@@ -131,4 +132,23 @@ export async function uploadFactorSetAction(
       ...initialLikeState,
     };
   }
+}
+
+/**
+ * Deletes a factor set (including LCI/LCA-secondary datasets — they live in
+ * this same table, see getActivityEntryDependents/LCI note in
+ * factor-sets-service.ts). Refused if any of its factors are in use — see
+ * deleteFactorSet, which is where that check and the actual delete live.
+ */
+export async function deleteFactorSetAction(formData: FormData): Promise<void> {
+  const session = await requireAdminSession();
+  if (!session) throw new Error("Admins only.");
+
+  const factorSetId = String(formData.get("factorSetId") ?? "");
+  if (!factorSetId) return;
+
+  await deleteFactorSet(factorSetId);
+
+  revalidatePath("/factors");
+  redirect("/factors");
 }

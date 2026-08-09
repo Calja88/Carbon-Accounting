@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { FileScan } from "lucide-react";
+import { FileScan, Trash2 } from "lucide-react";
 import { DocumentStatus, SourceDocumentKind } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getAiAvailability, resolveAiActor } from "@/lib/ai";
@@ -18,8 +18,10 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { DestructiveActionDialog } from "@/components/ui/destructive-action-dialog";
 import { AiUnavailableNotice } from "@/components/ai/ai-disclosure";
 import { UploadForm } from "./upload-form";
+import { deleteDocumentAction } from "./actions";
 
 interface SearchParams {
   status?: string;
@@ -129,7 +131,15 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
           <div className="rounded-lg border border-slate-200 bg-white">
             <DataTable
               caption="Uploaded evidence documents"
-              headers={["Document", "Type", "Site", "Status", { label: "Extractions", align: "right" }, { label: "Entries", align: "right" }]}
+              headers={[
+                "Document",
+                "Type",
+                "Site",
+                "Status",
+                { label: "Extractions", align: "right" },
+                { label: "Entries", align: "right" },
+                { label: "", align: "right" },
+              ]}
             >
               {documents.map((doc) => (
                 <tr key={doc.id} className="hover:bg-slate-50">
@@ -149,6 +159,19 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
                   </Td>
                   <Td align="right">{doc._count.extractions}</Td>
                   <Td align="right">{doc._count.activityEntries}</Td>
+                  <Td align="right">
+                    <DestructiveActionDialog
+                      triggerLabel={`Delete ${doc.filename}`}
+                      triggerIcon={<Trash2 className="h-3.5 w-3.5" />}
+                      title={`Delete "${doc.filename}"?`}
+                      description="This permanently removes the file and its extraction history. Refused if any activity entry was created from it."
+                      dependents={[{ label: "Activity entries created from this document", count: doc._count.activityEntries }]}
+                      confirmLabel="Delete"
+                      formAction={deleteDocumentAction}
+                    >
+                      <input type="hidden" name="documentId" value={doc.id} />
+                    </DestructiveActionDialog>
+                  </Td>
                 </tr>
               ))}
             </DataTable>

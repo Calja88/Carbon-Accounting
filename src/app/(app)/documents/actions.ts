@@ -2,12 +2,14 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { SourceDocumentKind } from "@prisma/client";
 import { AiUnavailableError, resolveAiActor, carbonAI, getAiConfig } from "@/lib/ai";
 import { AiAuthorizationError, assertDocumentInScope, assertSiteInScope } from "@/lib/ai/authorization";
 import {
   DocumentValidationError,
   acceptExtractionAsEntry,
+  deleteSourceDocument,
   markDocumentAccepted,
   rejectExtraction,
   uploadDocument,
@@ -219,4 +221,23 @@ export async function markDocumentAcceptedAction(formData: FormData): Promise<vo
   await assertDocumentInScope(actor, documentId);
   await markDocumentAccepted(documentId);
   revalidatePath(`/documents/${documentId}`);
+}
+
+/**
+ * Deletes an uploaded evidence document. Refused if any activity entry was
+ * created from it — see deleteSourceDocument in documents-service.ts, which
+ * is where that check and the actual delete live.
+ */
+export async function deleteDocumentAction(formData: FormData): Promise<void> {
+  const actor = await resolveAiActor();
+  if (!actor) throw new Error("You must be signed in.");
+
+  const documentId = String(formData.get("documentId") ?? "");
+  if (!documentId) return;
+
+  await assertDocumentInScope(actor, documentId);
+  await deleteSourceDocument(documentId);
+
+  revalidatePath("/documents");
+  redirect("/documents");
 }
