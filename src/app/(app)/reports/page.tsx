@@ -1,7 +1,9 @@
 import Link from "next/link";
-import { FileText, ArrowRight } from "lucide-react";
+import { FileText } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataTable, Td } from "@/components/ui/data-table";
+import { RecordList } from "@/components/ui/record-list";
 import { GenerateReportForm } from "./generate-report-form";
 
 export default async function ReportsPage() {
@@ -15,7 +17,7 @@ export default async function ReportsPage() {
   const startOfYear = new Date(Date.UTC(now.getUTCFullYear(), 0, 1)).toISOString().slice(0, 7);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Reports</h1>
         <p className="mt-1 text-sm text-slate-500">
@@ -33,39 +35,36 @@ export default async function ReportsPage() {
         </CardContent>
       </Card>
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Past reports</h2>
-        {reports.length === 0 && (
-          <p className="text-sm text-slate-500">No reports generated yet.</p>
-        )}
-        <div className="space-y-2">
-          {reports.map((r) => (
-            <Link key={r.id} href={`/reports/${r.id}`}>
-              <Card className="transition-all hover:-translate-y-0.5 hover:shadow-md">
-                <CardContent className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
-                      <FileText className="h-4 w-4" />
-                    </span>
-                    <div>
-                      <div className="font-medium text-slate-900">
-                        Version {r.version} — {new Date(r.periodStart).toLocaleDateString("en-GB", { month: "short", year: "numeric" })} to{" "}
-                        {new Date(r.periodEnd).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}
-                      </div>
-                      <div className="text-sm text-slate-500">
-                        Generated {r.generatedAt.toLocaleString("en-GB")} by {r.generatedBy.name}
-                      </div>
-                    </div>
-                  </div>
-                  <span className="flex items-center gap-1 text-sm font-medium text-brand-700">
-                    View
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </span>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
-        </div>
+        <RecordList
+          state={reports.length === 0 ? "empty" : "ready"}
+          emptyTitle="No reports generated yet"
+          emptyDescription="Generate one above once activity data has been entered and calculated."
+        >
+          <div className="rounded-lg border border-slate-200 bg-white">
+            <DataTable caption="Generated report snapshots" headers={["Report", "Period", "Generated"]}>
+              {reports.map((r) => (
+                <tr key={r.id} className="hover:bg-slate-50">
+                  <Td>
+                    <Link href={`/reports/${r.id}`} className="flex items-center gap-2 font-medium text-slate-900 hover:text-brand-700">
+                      <FileText className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+                      Version {r.version}
+                    </Link>
+                  </Td>
+                  <Td>
+                    {new Date(r.periodStart).toLocaleDateString("en-GB", { month: "short", year: "numeric" })} –{" "}
+                    {new Date(r.periodEnd).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}
+                  </Td>
+                  <Td>
+                    <div className="text-slate-700">{r.generatedAt.toLocaleString("en-GB")}</div>
+                    <div className="text-xs text-slate-400">by {r.generatedBy.name}</div>
+                  </Td>
+                </tr>
+              ))}
+            </DataTable>
+          </div>
+        </RecordList>
       </div>
     </div>
   );

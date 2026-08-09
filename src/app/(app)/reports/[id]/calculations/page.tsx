@@ -1,15 +1,25 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { resolveAiActor } from "@/lib/ai";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { DataTable, Td } from "@/components/ui/data-table";
+import { RecordList } from "@/components/ui/record-list";
+import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 
 /**
  * Every calculation that went into one report snapshot, each linking to its
  * own "how was this calculated" page. This is the browsable counterpart to
  * the audit-trail CSV export.
+ *
+ * Deliberately calculation-grain, not entry-grain — the historical data
+ * explorer (/data/entries) picks one calculation per entry to avoid
+ * double-counting a Scope 2 site's location-/market-based pair in a
+ * single-figure summary, but a report's audit trail must show every
+ * Calculation row that fed the totals, both of that pair included. Reusing
+ * the explorer's service here would silently drop rows from an audit
+ * export's browsable counterpart, so this page keeps its own calc-grain
+ * query and only shares presentation (DataTable, Breadcrumbs) with it.
  */
 export default async function ReportCalculationsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -19,7 +29,7 @@ export default async function ReportCalculationsPage({ params }: { params: Promi
 
   const snapshot = await prisma.reportSnapshot.findUnique({
     where: { id },
-    select: { id: true, periodStart: true, periodEnd: true },
+    select: { id: true, version: true, periodStart: true, periodEnd: true },
   });
   if (!snapshot) notFound();
 
@@ -41,16 +51,17 @@ export default async function ReportCalculationsPage({ params }: { params: Promi
     },
   });
 
-  const rows = links
-    .map((l) => l.calculation)
-    .sort((a, b) => Number(b.resultKgCo2e) - Number(a.resultKgCo2e));
+  const rows = links.map((l) => l.calculation).sort((a, b) => Number(b.resultKgCo2e) - Number(a.resultKgCo2e));
 
   return (
     <div className="space-y-6">
-      <Link href={`/reports/${id}`} className="flex w-fit items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
-        <ArrowLeft className="h-3.5 w-3.5" />
-        Back to the report
-      </Link>
+      <Breadcrumbs
+        items={[
+          { label: "Reports", href: "/reports" },
+          { label: `Version ${snapshot.version}`, href: `/reports/${id}` },
+          { label: "Calculations" },
+        ]}
+      />
 
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Calculations in this report</h1>
@@ -63,42 +74,39 @@ export default async function ReportCalculationsPage({ params }: { params: Promi
         </p>
       </div>
 
-      <div className="space-y-2">
-        {rows.map((calc) => (
-          <Link key={calc.id} href={`/calculations/${calc.id}`}>
-            <Card className="transition-all hover:-translate-y-0.5 hover:shadow-md">
-              <CardContent className="flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate font-medium text-slate-900">
-                      {calc.activityEntry.activityDataPoint.dataPointName}
-                    </span>
-                    <Badge tone="info">{calc.scope.replace("_", " ")}</Badge>
-                    {calc.basis !== "STANDARD" && (
-                      <Badge tone="neutral">{calc.basis.replace(/_/g, " ").toLowerCase()}</Badge>
-                    )}
-                  </div>
-                  <div className="text-sm text-slate-500">
-                    {calc.activityEntry.site.name} ({calc.activityEntry.site.entity.name}) ·{" "}
-                    {calc.activityEntry.periodStart.toLocaleDateString("en-GB", {
-                      month: "long",
-                      year: "numeric",
-                      timeZone: "UTC",
-                    })}
-                  </div>
+      <RecordList state={rows.length === 0 ? "empty" : "ready"} emptyTitle="No calculations in this report" emptyDescription="Nothing was calculable for this period.">
+        <div className="rounded-lg border border-slate-200 bg-white">
+          <DataTable
+            caption="Calculations included in this report"
+            headers={["Data point", "Site", "Period", "Scope", { label: "Result", align: "right" }]}
+          >
+            {rows.map((calc) => (
+              <tr key={calc.id} className="hover:bg-slate-50">
+                <Td>
+                  <Link href={`/calculations/${calc.id}`} className="font-medium text-slate-900 hover:text-brand-700">
+                    {calc.activityEntry.activityDataPoint.dataPointName}
+                  </Link>
                   <div className="text-xs text-slate-400">{calc.formulaApplied}</div>
-                </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  <span className="tabular-nums text-sm font-medium text-slate-900">
-                    {Number(calc.resultKgCo2e).toLocaleString("en-GB", { maximumFractionDigits: 1 })} kg
-                  </span>
-                  <ArrowRight className="h-3.5 w-3.5 text-brand-700" />
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
+                </Td>
+                <Td>
+                  <div>{calc.activityEntry.site.name}</div>
+                  <div className="text-xs text-slate-500">{calc.activityEntry.site.entity.name}</div>
+                </Td>
+                <Td>
+                  {calc.activityEntry.periodStart.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })}
+                </Td>
+                <Td>
+                  <div className="flex flex-wrap gap-1">
+                    <Badge tone="info">{calc.scope.replace("_", " ")}</Badge>
+                    {calc.basis !== "STANDARD" && <Badge tone="neutral">{calc.basis.replace(/_/g, " ").toLowerCase()}</Badge>}
+                  </div>
+                </Td>
+                <Td align="right">{Number(calc.resultKgCo2e).toLocaleString("en-GB", { maximumFractionDigits: 1 })} kg</Td>
+              </tr>
+            ))}
+          </DataTable>
+        </div>
+      </RecordList>
     </div>
   );
 }

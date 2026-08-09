@@ -36,24 +36,38 @@ export async function generateReportAction(
     return { error: "The end period must be after the start period." };
   }
 
-  // Cat 3 (fuel/energy-related activities) is auto-calculated from Scope
-  // 1/2 activity data — derive any newly-calculable rows for this period
-  // before building the report (idempotent, see deriveCategory3Calculations).
-  await deriveCategory3Calculations(periodStart, periodEnd);
+  let snapshotId: string;
+  try {
+    // Cat 3 (fuel/energy-related activities) is auto-calculated from Scope
+    // 1/2 activity data — derive any newly-calculable rows for this period
+    // before building the report (idempotent, see deriveCategory3Calculations).
+    await deriveCategory3Calculations(periodStart, periodEnd);
 
-  const payload = await buildReportPayload(periodStart, periodEnd);
+    const payload = await buildReportPayload(periodStart, periodEnd);
 
-  const snapshot = await prisma.reportSnapshot.create({
-    data: {
-      periodStart,
-      periodEnd,
-      generatedByUserId: session.user.id,
-      payload: JSON.parse(JSON.stringify(payload)),
-      calculationLinks: {
-        create: payload.calculationIds.map((calculationId) => ({ calculationId })),
+    const snapshot = await prisma.reportSnapshot.create({
+      data: {
+        periodStart,
+        periodEnd,
+        generatedByUserId: session.user.id,
+        payload: JSON.parse(JSON.stringify(payload)),
+        calculationLinks: {
+          create: payload.calculationIds.map((calculationId) => ({ calculationId })),
+        },
       },
-    },
-  });
+    });
+    snapshotId = snapshot.id;
+  } catch (err) {
+    // redirect() (called outside this try block, never inside it) works by
+    // throwing internally — a catch-all here must never intercept it, so
+    // the redirect happens after this block, not within it.
+    return {
+      error:
+        err instanceof Error
+          ? `Could not generate the report: ${err.message}`
+          : "Could not generate the report. Nothing was saved — try again, or contact an administrator if this keeps happening.",
+    };
+  }
 
-  redirect(`/reports/${snapshot.id}`);
+  redirect(`/reports/${snapshotId}`);
 }

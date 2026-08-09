@@ -1,11 +1,12 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Download } from "lucide-react";
+import { Download } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { ReportPayload } from "@/lib/report-service";
 import { buildDelta } from "@/lib/analytics-service";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Breadcrumbs } from "@/components/shell/breadcrumbs";
 import { PrintButton } from "../print-button";
 import { StackedBarChart } from "@/components/charts/stacked-bar-chart";
 import { GroupedColumnChart } from "@/components/charts/grouped-column-chart";
@@ -87,11 +88,8 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <div className="no-print flex items-center justify-between">
-        <Link href="/reports" className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
-          <ArrowLeft className="h-3.5 w-3.5" />
-          All reports
-        </Link>
+      <div className="no-print flex flex-wrap items-center justify-between gap-3">
+        <Breadcrumbs items={[{ label: "Reports", href: "/reports" }, { label: `Version ${snapshot.version}` }]} />
         <div className="flex gap-2">
           <a href={`/reports/${id}/audit-trail.csv`}>
             <button className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 shadow-sm hover:bg-slate-50">
