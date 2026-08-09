@@ -167,6 +167,8 @@ model User {
   uploadedDocuments    SourceDocument[]     @relation("DocumentUploadedBy")
   createdExtractions   DocumentExtraction[] @relation("ExtractionCreatedBy")
   reviewedExtractions  DocumentExtraction[] @relation("ExtractionReviewedBy")
+  retractedEntries     ActivityEntry[]      @relation("EntryRetractedBy")
+  archivedDocuments    SourceDocument[]     @relation("DocumentArchivedBy")
 }
 
 // ---------------------------------------------------------------------------
@@ -366,6 +368,15 @@ model ActivityEntry {
   enteredAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  /// Soft-delete for accounting records (G2): a retracted entry is excluded
+  /// from active totals/dashboards/reports but the row, its calculations and
+  /// its evidence link are kept for audit. Never physically deleted once it
+  /// has contributed a Calculation.
+  retractedAt       DateTime?
+  retractedByUserId String?
+  retractedBy       User?     @relation("EntryRetractedBy", fields: [retractedByUserId], references: [id])
+  retractionReason  String?
+
   calculations            Calculation[]
   commutingSurveyResponse CommutingSurveyResponse?
   /// Product assessments that cite this corporate record as their source.
@@ -374,6 +385,7 @@ model ActivityEntry {
 
   @@index([activityDataPointId, siteId, periodStart])
   @@index([sourceDocumentId])
+  @@index([retractedAt])
 }
 
 /// Cat 7 employee commuting (data map row S3-07) — "survey-based initially
@@ -1821,6 +1833,14 @@ model SourceDocument {
   uploadedBy       User     @relation("DocumentUploadedBy", fields: [uploadedByUserId], references: [id])
   uploadedAt       DateTime @default(now())
   notes            String?
+
+  /// G4: set instead of a hard delete when the document supports an
+  /// authoritative record (an ActivityEntry, calculation or LCA evidence).
+  /// An archived document drops off the normal document list but its bytes
+  /// and extraction history stay intact for audit.
+  archivedAt       DateTime?
+  archivedByUserId String?
+  archivedBy       User?     @relation("DocumentArchivedBy", fields: [archivedByUserId], references: [id])
 
   extractions     DocumentExtraction[]
   activityEntries ActivityEntry[]

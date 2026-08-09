@@ -82,8 +82,43 @@ const documentMetadataSchema = z.object({
   addressOnDocument: z.string().max(400).nullable(),
 });
 
+/**
+ * One consumption block as printed on the document — a single meter over a
+ * single date range. Utility invoices covering more than one billing period
+ * in one document (a mid-cycle tariff/meter change, a corrected re-bill)
+ * print two or more of these back to back. Each section is transcribed
+ * exactly as its own row; the platform aggregates compatible sections
+ * deterministically (see document-proposals.ts) rather than asking the
+ * model to add them up.
+ */
+const billingSectionSchema = z.object({
+  startDate: z.string().max(40).nullable(),
+  endDate: z.string().max(40).nullable(),
+  meterSerial: z.string().max(120).nullable(),
+  mpan: z.string().max(120).nullable(),
+  dayKwh: z.number().nullable(),
+  nightKwh: z.number().nullable(),
+  /** Any other named consumption band on this section (e.g. "weekend", "evening") that isn't day/night. */
+  otherKwh: z.number().nullable(),
+});
+
 const energySchema = z.object({
+  /**
+   * Fill this ONLY when the document itself prints a single consumption
+   * total in words or a labelled total row (e.g. "Total kWh used: 12,450")
+   * for the whole invoice. Never compute this by adding up billingSections
+   * yourself — leave it null and let billingSections carry the detail
+   * instead. A number here that isn't legible as a literal total on the
+   * document is worse than leaving it null.
+   */
   electricityKwh: z.number().nullable(),
+  /**
+   * One entry per billing section/consumption block found on the document.
+   * Most invoices have exactly one. A document covering two consecutive
+   * periods (e.g. a meter change mid-month) has two — transcribe each
+   * section's own day/night figures separately here; do not sum them.
+   */
+  billingSections: z.array(billingSectionSchema).max(20),
   gasKwh: z.number().nullable(),
   gasVolumeM3: z.number().nullable(),
   fuelLitres: z.number().nullable(),

@@ -122,16 +122,17 @@ export async function buildReportPayload(periodStart: Date, periodEnd: Date): Pr
         activityEntry: {
           periodStart: { gte: periodStart, lte: periodEnd },
           status: { not: "FLAGGED" },
+          retractedAt: null,
         },
       },
       include: { activityEntry: { include: { activityDataPoint: true, site: true } } },
     }),
     prisma.activityEntry.findMany({
-      where: { periodStart: { gte: periodStart, lte: periodEnd }, status: "FLAGGED" },
+      where: { periodStart: { gte: periodStart, lte: periodEnd }, status: "FLAGGED", retractedAt: null },
       include: { activityDataPoint: true, site: true },
     }),
     prisma.activityEntry.findMany({
-      where: { periodStart: { gte: periodStart, lte: periodEnd }, status: "AWAITING_FACTOR" },
+      where: { periodStart: { gte: periodStart, lte: periodEnd }, status: "AWAITING_FACTOR", retractedAt: null },
       include: { activityDataPoint: true, site: true },
     }),
   ]);

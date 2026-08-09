@@ -114,6 +114,7 @@ async function loadCalculations(periodStart: Date, periodEnd: Date): Promise<Cal
       activityEntry: {
         periodStart: { gte: periodStart, lte: periodEnd },
         status: { not: "FLAGGED" },
+        retractedAt: null,
       },
     },
     include: {

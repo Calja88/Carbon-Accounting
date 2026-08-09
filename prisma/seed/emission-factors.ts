@@ -203,6 +203,62 @@ export const FACTORS: SeedFactor[] = [
       " Zero-rated market-based factor applied when a site's contract is REGO-backed or on a green tariff — a simplification; a real supplier-specific residual factor should replace this once available.",
   },
 
+  // --- Scope 3 Category 5: waste generated in operations (per tonne, by treatment route) ---
+  {
+    scope: Scope.SCOPE_3,
+    category: "waste_operations",
+    subtypeKey: "recycled",
+    basis: FactorBasis.STANDARD,
+    unit: "tonnes",
+    co2eFactor: "21.3",
+    notes: PLACEHOLDER_NOTE,
+  },
+  {
+    scope: Scope.SCOPE_3,
+    category: "waste_operations",
+    subtypeKey: "composted",
+    basis: FactorBasis.STANDARD,
+    unit: "tonnes",
+    co2eFactor: "10.2",
+    notes: PLACEHOLDER_NOTE,
+  },
+  {
+    scope: Scope.SCOPE_3,
+    category: "waste_operations",
+    subtypeKey: "anaerobic_digestion",
+    basis: FactorBasis.STANDARD,
+    unit: "tonnes",
+    co2eFactor: "9.5",
+    notes: PLACEHOLDER_NOTE,
+  },
+  {
+    scope: Scope.SCOPE_3,
+    category: "waste_operations",
+    subtypeKey: "incinerated_energy_recovery",
+    basis: FactorBasis.STANDARD,
+    unit: "tonnes",
+    co2eFactor: "21.4",
+    notes: PLACEHOLDER_NOTE,
+  },
+  {
+    scope: Scope.SCOPE_3,
+    category: "waste_operations",
+    subtypeKey: "incinerated_no_energy_recovery",
+    basis: FactorBasis.STANDARD,
+    unit: "tonnes",
+    co2eFactor: "21.4",
+    notes: PLACEHOLDER_NOTE,
+  },
+  {
+    scope: Scope.SCOPE_3,
+    category: "waste_operations",
+    subtypeKey: "landfill",
+    basis: FactorBasis.STANDARD,
+    unit: "tonnes",
+    co2eFactor: "586.9",
+    notes: PLACEHOLDER_NOTE,
+  },
+
   // --- Scope 2: purchased heat/steam ---
   {
     scope: Scope.SCOPE_2,

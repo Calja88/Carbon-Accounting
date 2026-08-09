@@ -8,10 +8,12 @@ import { AiAuthorizationError, assertDocumentInScope, assertSiteInScope } from "
 import {
   DocumentValidationError,
   acceptExtractionAsEntry,
+  deleteDocument,
   markDocumentAccepted,
   rejectExtraction,
   uploadDocument,
 } from "@/lib/documents-service";
+import type { DeleteActionState } from "@/components/ui/delete-button";
 
 /**
  * Server actions for the evidence-document workflow.
@@ -211,4 +213,32 @@ export async function markDocumentAcceptedAction(formData: FormData): Promise<vo
   await assertDocumentInScope(actor, documentId);
   await markDocumentAccepted(documentId);
   revalidatePath(`/documents/${documentId}`);
+}
+
+/** G4/G6: same authorization check as every other document action, then the safe delete-or-archive service decides how. */
+export async function deleteDocumentAction(_prev: DeleteActionState, formData: FormData): Promise<DeleteActionState> {
+  const actor = await resolveAiActor();
+  if (!actor) return { error: "You must be signed in.", success: false, message: null };
+
+  const documentId = String(formData.get("documentId") ?? "");
+  if (!documentId) return { error: "Missing document.", success: false, message: null };
+
+  try {
+    await assertDocumentInScope(actor, documentId);
+    const result = await deleteDocument(documentId, actor.userId);
+    revalidatePath("/documents");
+    return {
+      error: null,
+      success: true,
+      message:
+        result.mode === "deleted"
+          ? "Document deleted."
+          : "This document supports an accounting record, so it was archived instead of deleted — it's removed from the list but kept for audit.",
+    };
+  } catch (err) {
+    if (err instanceof DocumentValidationError || err instanceof AiAuthorizationError) {
+      return { error: err.message, success: false, message: null };
+    }
+    return { error: "Could not delete that document.", success: false, message: null };
+  }
 }

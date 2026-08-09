@@ -13,7 +13,16 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
 
 /** The provenance of a value on screen. */
-export type ValueOrigin = "USER_ENTERED" | "IMPORTED" | "AI_EXTRACTED" | "AI_SUGGESTED" | "DERIVED" | "CALCULATED";
+export type ValueOrigin =
+  | "USER_ENTERED"
+  | "IMPORTED"
+  | "AI_EXTRACTED"
+  | "AI_SUGGESTED"
+  | "DERIVED"
+  | "CALCULATED"
+  | "SOURCE_STATED"
+  | "CALCULATED_FROM_SOURCE"
+  | "REVIEW_REQUIRED";
 
 const ORIGIN_META: Record<ValueOrigin, { label: string; tone: "neutral" | "info" | "success" | "warning"; Icon: typeof Sparkles }> = {
   USER_ENTERED: { label: "Entered by a person", tone: "neutral", Icon: UserRound },
@@ -22,6 +31,13 @@ const ORIGIN_META: Record<ValueOrigin, { label: string; tone: "neutral" | "info"
   AI_SUGGESTED: { label: "AI suggestion", tone: "warning", Icon: Sparkles },
   DERIVED: { label: "Derived by the platform", tone: "neutral", Icon: Cog },
   CALCULATED: { label: "Calculated by the platform", tone: "success", Icon: ShieldCheck },
+  // A2/A6: provenance for an extracted numeric field/proposal, distinct from
+  // the blanket "AI suggestion" badge — a figure legible on the document
+  // itself vs. one the platform derived from other source figures vs. one
+  // that needs a person's input before it means anything.
+  SOURCE_STATED: { label: "Stated in source", tone: "success", Icon: ShieldCheck },
+  CALCULATED_FROM_SOURCE: { label: "Calculated from source", tone: "neutral", Icon: Cog },
+  REVIEW_REQUIRED: { label: "Review required", tone: "warning", Icon: Sparkles },
 };
 
 export function OriginBadge({ origin, className }: { origin: ValueOrigin; className?: string }) {

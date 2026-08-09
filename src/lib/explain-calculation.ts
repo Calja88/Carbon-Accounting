@@ -22,6 +22,7 @@ export interface CalculationExplanation {
   scope3Category: string | null;
 
   activity: {
+    entryId: string;
     dataPointCode: string;
     dataPointName: string;
     siteName: string;
@@ -148,6 +149,11 @@ export async function explainCalculation(calculationId: string): Promise<Calcula
       "The activity data behind this figure was read from an uploaded document by AI and then accepted by a person before it was saved.",
     );
   }
+  if (entry.retractedAt) {
+    caveats.push(
+      `This entry was retracted on ${entry.retractedAt.toLocaleDateString("en-GB")} and is excluded from dashboards and reports. The record below is kept for audit only.`,
+    );
+  }
 
   return {
     calculationId: calc.id,
@@ -156,6 +162,7 @@ export async function explainCalculation(calculationId: string): Promise<Calcula
     scope3Category: calc.scope3Category,
 
     activity: {
+      entryId: entry.id,
       dataPointCode: entry.activityDataPoint.code,
       dataPointName: entry.activityDataPoint.dataPointName,
       siteName: entry.site.name,

@@ -31,11 +31,22 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
 
   const safeFilename = document.filename.replace(/["\\\r\n]/g, "_");
 
+  // The CSP `sandbox` directive with no tokens forces the response into a
+  // unique opaque origin — which also blocks Chrome's built-in PDF viewer
+  // from rendering inside the review screen's <iframe>, leaving it blank.
+  // mimeType is already constrained to an allow-list at upload time
+  // (ACCEPTED_DOCUMENT_MIME_TYPES) and nosniff stops the browser from
+  // reinterpreting the bytes as anything else, so PDFs and images — the
+  // only types embedded inline — don't need the extra sandbox restriction.
+  // Other types are never rendered inline (see review-screen.tsx), so they
+  // keep the stricter header as defence in depth.
+  const isInlineRenderable = document.mimeType === "application/pdf" || document.mimeType.startsWith("image/");
+
   return new NextResponse(Buffer.from(document.content) as unknown as BodyInit, {
     headers: {
       "Content-Type": document.mimeType,
       "Content-Disposition": `inline; filename="${safeFilename}"`,
-      "Content-Security-Policy": "sandbox; default-src 'none'",
+      ...(isInlineRenderable ? {} : { "Content-Security-Policy": "sandbox; default-src 'none'" }),
       "X-Content-Type-Options": "nosniff",
       "Cache-Control": "private, no-store",
     },

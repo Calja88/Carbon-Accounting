@@ -336,13 +336,51 @@ export async function runCalculationsForEntry(entryId: string) {
 }
 
 /**
+ * Deletes an activity entry the safe way (G2/G3): a draft that never
+ * produced a Calculation (still AWAITING_FACTOR, nothing computed yet) has
+ * no accounting significance, so it is hard-deleted. Anything that has
+ * contributed a Calculation is retracted instead — the row, its
+ * calculations and its evidence link are kept for audit, but it stops
+ * counting in dashboards/reports (see report-service.ts / analytics-service.ts).
+ */
+export async function deleteActivityEntry(entryId: string, userId: string, reason?: string | null) {
+  const entry = await prisma.activityEntry.findUnique({
+    where: { id: entryId },
+    include: { calculations: { select: { id: true } } },
+  });
+  if (!entry) throw new Error("That entry no longer exists.");
+  if (entry.retractedAt) return { mode: "already_retracted" as const };
+
+  if (entry.calculations.length === 0) {
+    await prisma.activityEntry.delete({ where: { id: entryId } });
+    return { mode: "deleted" as const };
+  }
+
+  await prisma.activityEntry.update({
+    where: { id: entryId },
+    data: { retractedAt: new Date(), retractedByUserId: userId, retractionReason: reason ?? null },
+  });
+  return { mode: "retracted" as const };
+}
+
+/** G9: undoes a retraction. Only meaningful for entries that were retracted, not hard-deleted. */
+export async function restoreActivityEntry(entryId: string) {
+  await prisma.activityEntry.update({
+    where: { id: entryId },
+    data: { retractedAt: null, retractedByUserId: null, retractionReason: null },
+  });
+}
+
+/**
  * Re-runs calculation for every entry stuck at AWAITING_FACTOR — call this
  * right after a new EmissionFactorSet is imported so any Scope 3 data
  * collected before the factor existed gets its figure the moment it's
  * available, with no separate manual step.
  */
 export async function recalculatePendingEntries() {
-  const pending = await prisma.activityEntry.findMany({ where: { status: EntryStatus.AWAITING_FACTOR } });
+  const pending = await prisma.activityEntry.findMany({
+    where: { status: EntryStatus.AWAITING_FACTOR, retractedAt: null },
+  });
   let recalculated = 0;
   for (const entry of pending) {
     const calculations = await runCalculationsForEntry(entry.id);
@@ -361,7 +399,7 @@ export async function recalculatePendingEntries() {
 export async function deriveCategory3Calculations(periodStart: Date, periodEnd: Date) {
   const sourceCalculations = await prisma.calculation.findMany({
     where: {
-      activityEntry: { periodStart: { gte: periodStart, lte: periodEnd } },
+      activityEntry: { periodStart: { gte: periodStart, lte: periodEnd }, retractedAt: null },
       scope: { in: [Scope.SCOPE_1, Scope.SCOPE_2] },
       basis: { in: [FactorBasis.STANDARD, FactorBasis.LOCATION_BASED] },
       derivedCategory3Row: { is: null },

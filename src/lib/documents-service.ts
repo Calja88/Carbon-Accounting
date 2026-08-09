@@ -93,7 +93,7 @@ export async function uploadDocument(input: UploadDocumentInput) {
 
 export async function listDocuments(siteIds: string[], limit = 50) {
   return prisma.sourceDocument.findMany({
-    where: { OR: [{ siteId: null }, { siteId: { in: siteIds } }] },
+    where: { archivedAt: null, OR: [{ siteId: null }, { siteId: { in: siteIds } }] },
     orderBy: { uploadedAt: "desc" },
     take: limit,
     select: {
@@ -261,6 +261,45 @@ export async function markDocumentAccepted(documentId: string) {
     where: { id: documentId },
     data: { status: DocumentStatus.ACCEPTED },
   });
+}
+
+/**
+ * Deletes a document the safe way (G4/G6): if it still supports an
+ * accounting record (a non-retracted ActivityEntry) or LCA evidence, its
+ * bytes and extraction history can't be destroyed — it's archived instead,
+ * which drops it off the normal document list but keeps the audit trail
+ * intact. Only a document with no such reference is hard-deleted.
+ */
+export async function deleteDocument(documentId: string, userId: string) {
+  const document = await prisma.sourceDocument.findUnique({
+    where: { id: documentId },
+    select: {
+      id: true,
+      archivedAt: true,
+      activityEntries: { where: { retractedAt: null }, select: { id: true } },
+    },
+  });
+  if (!document) throw new DocumentValidationError("That document no longer exists.");
+
+  // SourceDocument has one downstream authoritative link in this schema —
+  // ActivityEntry.sourceDocumentId. LCA evidence is stored separately
+  // (LcaEvidence has its own blob storage) and isn't linked to this model.
+  const hasAuthoritativeReferences = document.activityEntries.length > 0;
+
+  if (hasAuthoritativeReferences) {
+    if (document.archivedAt) return { mode: "already_archived" as const };
+    await prisma.sourceDocument.update({
+      where: { id: documentId },
+      data: { archivedAt: new Date(), archivedByUserId: userId },
+    });
+    return { mode: "archived" as const };
+  }
+
+  await prisma.$transaction([
+    prisma.documentExtraction.deleteMany({ where: { documentId } }),
+    prisma.sourceDocument.delete({ where: { id: documentId } }),
+  ]);
+  return { mode: "deleted" as const };
 }
 
 export const DOCUMENT_KIND_LABELS: Record<SourceDocumentKind, string> = {

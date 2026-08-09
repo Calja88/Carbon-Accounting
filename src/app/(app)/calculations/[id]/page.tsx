@@ -8,7 +8,9 @@ import { explainCalculation } from "@/lib/explain-calculation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { OriginBadge } from "@/components/ai/ai-disclosure";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { ExplainPanel } from "./explain-panel";
+import { deleteEntryAction } from "./actions";
 
 function Row({ label, value, mono }: { label: string; value: string | null; mono?: boolean }) {
   return (
@@ -106,6 +108,14 @@ export default async function CalculationDetailPage({ params }: { params: Promis
             <Row label="Entered by" value={`${e.activity.enteredBy} on ${e.activity.enteredAt.toLocaleString("en-GB")}`} />
             <Row label="Notes" value={e.activity.notes} />
           </dl>
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <DeleteButton
+              action={deleteEntryAction}
+              hiddenFields={{ entryId: e.activity.entryId }}
+              confirmText={`Delete this ${e.activity.dataPointName.toLowerCase()} entry (${e.activity.rawValue} ${e.activity.rawUnit}, ${e.activity.periodLabel})? This will remove it from active carbon reporting.`}
+              label="Delete this entry"
+            />
+          </div>
         </CardContent>
       </Card>
 

@@ -42,6 +42,16 @@ export function toCanonicalUnit(
     return { value: convertNaturalGasToKwh(rawValue, rawUnit), unit: "kWh" };
   }
 
+  // Waste (Scope 3 Category 5, data point S3-05): factors are published per
+  // tonne, but WTNs and waste invoices commonly state kg — deterministic
+  // kg → tonnes conversion (methodology-safe: 1000 kg = 1 tonne), never an
+  // LLM computing it (D4).
+  if (factorCategory === "waste_operations") {
+    if (rawUnit === "tonnes" || rawUnit === "tonne") return { value: rawValue, unit: "tonnes" };
+    if (rawUnit === "kg") return { value: rawValue / 1000, unit: "tonnes" };
+    throw new UnsupportedUnitError(`Unsupported unit "${rawUnit}" for waste`);
+  }
+
   // All other categories: the entry unit already is the canonical unit.
   return { value: rawValue, unit: rawUnit };
 }

@@ -289,6 +289,25 @@ export function ReviewScreen(props: ReviewScreenProps) {
                         <FieldRow label="Renewable tariff stated" value={result.energy.renewableTariffStated} />
                         <FieldRow label="Renewable tariff detail" value={result.energy.renewableTariffDetail} />
                       </dl>
+                      {result.energy.billingSections.length > 0 && (
+                        <div className="mt-2 space-y-2">
+                          <p className="text-xs font-medium text-slate-500">
+                            Billing sections read from the document ({result.energy.billingSections.length})
+                          </p>
+                          {result.energy.billingSections.map((section, i) => (
+                            <dl key={i} className="rounded-lg bg-slate-50 p-2">
+                              <FieldRow
+                                label={`Section ${i + 1} period`}
+                                value={section.startDate && section.endDate ? `${section.startDate} – ${section.endDate}` : section.startDate ?? section.endDate}
+                              />
+                              <FieldRow label="Meter / MPAN" value={section.meterSerial ?? section.mpan} />
+                              <FieldRow label="Day (kWh)" value={section.dayKwh} />
+                              <FieldRow label="Night (kWh)" value={section.nightKwh} />
+                              <FieldRow label="Other (kWh)" value={section.otherKwh} />
+                            </dl>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <div>
                       <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Water</h4>
@@ -475,7 +494,7 @@ function ProposalCard({
         <CardTitle>{proposal.label}</CardTitle>
         <div className="flex items-center gap-2">
           <Badge tone="neutral">{proposal.dataPointCode}</Badge>
-          <AiSuggestionBadge />
+          <OriginBadge origin={proposal.provenance === "DERIVED" ? "CALCULATED_FROM_SOURCE" : "SOURCE_STATED"} />
         </div>
       </CardHeader>
       <CardContent>

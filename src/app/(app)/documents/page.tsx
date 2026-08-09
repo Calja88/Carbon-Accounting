@@ -14,7 +14,9 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AiUnavailableNotice } from "@/components/ai/ai-disclosure";
+import { DeleteButton } from "@/components/ui/delete-button";
 import { UploadForm } from "./upload-form";
+import { deleteDocumentAction } from "./actions";
 
 const STATUS_TONES: Record<string, "neutral" | "info" | "success" | "warning" | "danger"> = {
   UPLOADED: "neutral",
@@ -80,36 +82,43 @@ export default async function DocumentsPage() {
           <p className="text-sm text-slate-500">Nothing uploaded yet. The first document you add will appear here.</p>
         )}
         {documents.map((doc) => (
-          <Link key={doc.id} href={`/documents/${doc.id}`}>
-            <Card className="transition-all hover:-translate-y-0.5 hover:shadow-md">
-              <CardContent className="flex items-center justify-between gap-4">
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-                    <FileScan className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate font-medium text-slate-900">{doc.filename}</span>
-                      <Badge tone={STATUS_TONES[doc.status] ?? "neutral"}>{DOCUMENT_STATUS_LABELS[doc.status]}</Badge>
-                    </div>
-                    <div className="text-sm text-slate-500">
-                      {DOCUMENT_KIND_LABELS[doc.kind]}
-                      {doc.site ? ` · ${doc.site.name}` : ""} · {(doc.byteSize / 1024).toFixed(0)} KB ·{" "}
-                      {doc._count.extractions} extraction{doc._count.extractions === 1 ? "" : "s"} ·{" "}
-                      {doc._count.activityEntries} entr{doc._count.activityEntries === 1 ? "y" : "ies"} created
-                    </div>
-                    <div className="text-xs text-slate-400">
-                      Uploaded {new Date(doc.uploadedAt).toLocaleDateString("en-GB")} by {doc.uploadedBy.name}
-                    </div>
+          <Card key={doc.id} className="transition-all hover:shadow-md">
+            <CardContent className="flex items-center justify-between gap-4">
+              <Link href={`/documents/${doc.id}`} className="flex min-w-0 flex-1 items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                  <FileScan className="h-4 w-4" />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate font-medium text-slate-900">{doc.filename}</span>
+                    <Badge tone={STATUS_TONES[doc.status] ?? "neutral"}>{DOCUMENT_STATUS_LABELS[doc.status]}</Badge>
+                  </div>
+                  <div className="text-sm text-slate-500">
+                    {DOCUMENT_KIND_LABELS[doc.kind]}
+                    {doc.site ? ` · ${doc.site.name}` : ""} · {(doc.byteSize / 1024).toFixed(0)} KB ·{" "}
+                    {doc._count.extractions} extraction{doc._count.extractions === 1 ? "" : "s"} ·{" "}
+                    {doc._count.activityEntries} entr{doc._count.activityEntries === 1 ? "y" : "ies"} created
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    Uploaded {new Date(doc.uploadedAt).toLocaleDateString("en-GB")} by {doc.uploadedBy.name}
                   </div>
                 </div>
-                <span className="flex shrink-0 items-center gap-1 text-sm font-medium text-blue-700">
+              </Link>
+              <div className="flex shrink-0 items-center gap-3">
+                <Link href={`/documents/${doc.id}`} className="flex items-center gap-1 text-sm font-medium text-blue-700">
                   Review
                   <ArrowRight className="h-3.5 w-3.5" />
-                </span>
-              </CardContent>
-            </Card>
-          </Link>
+                </Link>
+                <DeleteButton
+                  action={deleteDocumentAction}
+                  hiddenFields={{ documentId: doc.id }}
+                  confirmText={`Delete "${doc.filename}"? ${doc._count.activityEntries > 0 ? "It supports accounting records, so it will be archived rather than permanently deleted." : "This can't be undone."}`}
+                  label="Delete"
+                  size="sm"
+                />
+              </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
     </div>

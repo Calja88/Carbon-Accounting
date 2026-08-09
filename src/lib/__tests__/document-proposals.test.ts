@@ -25,6 +25,7 @@ function extraction(overrides: Partial<DocumentExtractionResult> = {}): Document
     },
     energy: {
       electricityKwh: null,
+      billingSections: [],
       gasKwh: null,
       gasVolumeM3: null,
       fuelLitres: null,
@@ -121,6 +122,72 @@ describe("buildProposals", () => {
     expect(proposals[0]).toMatchObject({ dataPointCode: "S2-01", quantity: 12450, unit: "kWh", periodInput: "2026-01" });
   });
 
+  it("aggregates two consecutive billing sections deterministically (Corona Energy IN0002774528 regression)", () => {
+    // Real invoice: two consecutive billing periods on one meter within a
+    // single document. Day/night must be summed per band, never taken from
+    // a model-produced single total — see A1-A4 in the brief.
+    const { proposals } = buildProposals(
+      extraction({
+        energy: {
+          ...extraction().energy,
+          electricityKwh: null,
+          billingSections: [
+            {
+              startDate: "2025-02-01",
+              endDate: "2025-02-20",
+              meterSerial: "MG20K00242",
+              mpan: null,
+              dayKwh: 77874.6,
+              nightKwh: 22848.2,
+              otherKwh: null,
+            },
+            {
+              startDate: "2025-02-21",
+              endDate: "2025-02-28",
+              meterSerial: "MG20K00242",
+              mpan: null,
+              dayKwh: 32812.9,
+              nightKwh: 9453.4,
+              otherKwh: null,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0].dataPointCode).toBe("S2-01");
+    expect(proposals[0].quantity).toBeCloseTo(142989.1, 3);
+    expect(proposals[0].provenance).toBe("DERIVED");
+    expect(proposals[0].basis).toMatch(/Calculated from invoice figures/);
+    // Never the unsupported model-only total from this scenario.
+    expect(proposals[0].quantity).not.toBeCloseTo(130414.1, 1);
+  });
+
+  it("keeps separate meters/MPANs as separate proposals rather than aggregating them together", () => {
+    const { proposals } = buildProposals(
+      extraction({
+        energy: {
+          ...extraction().energy,
+          billingSections: [
+            { startDate: "2025-02-01", endDate: "2025-02-28", meterSerial: "METER-A", mpan: null, dayKwh: 100, nightKwh: 50, otherKwh: null },
+            { startDate: "2025-02-01", endDate: "2025-02-28", meterSerial: "METER-B", mpan: null, dayKwh: 200, nightKwh: 20, otherKwh: null },
+          ],
+        },
+      }),
+    );
+
+    expect(proposals).toHaveLength(2);
+    expect(proposals.map((p) => p.quantity).sort()).toEqual([150, 220]);
+  });
+
+  it("uses the single stated total when the document has no billing sections to derive from", () => {
+    const { proposals } = buildProposals(
+      extraction({ energy: { ...extraction().energy, electricityKwh: 12450 } }),
+    );
+    expect(proposals[0].provenance).toBe("SOURCE_STATED");
+  });
+
   it("flags a stated renewable tariff as something to record on the contract, not the entry", () => {
     const { proposals } = buildProposals(
       extraction({
@@ -159,7 +226,7 @@ describe("buildProposals", () => {
     expect(unclear.proposals[0].needsAttention.join(" ")).toMatch(/couldn't be determined/);
   });
 
-  it("reports waste as unmapped rather than forcing it into a category that isn't built", () => {
+  it("proposes a Category 5 waste entry when weight and treatment route are both clear", () => {
     const { proposals, unmapped } = buildProposals(
       extraction({
         documentKind: "WASTE_TRANSFER_NOTE",
@@ -183,14 +250,63 @@ describe("buildProposals", () => {
       }),
     );
 
-    expect(proposals).toHaveLength(0);
-    expect(unmapped.length).toBeGreaterThanOrEqual(2);
-    // The EWC code identifies the line; the weight and treatment describe it.
-    expect(unmapped[0].label).toContain("20 03 01");
-    expect(unmapped[0].detail).toContain("1.2 tonnes");
-    expect(unmapped.map((u) => u.reason).join(" ")).toMatch(/Category 5/);
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]).toMatchObject({
+      dataPointCode: "S3-05",
+      quantity: 1200, // 1.2 tonnes normalised to kg
+      unit: "kg",
+      subtypeKey: "incinerated_energy_recovery",
+      provenance: "SOURCE_STATED",
+    });
+    expect(proposals[0].label).toContain("20 03 01");
     // Duty-of-care details are retained against the document, not discarded.
     expect(unmapped.map((u) => u.detail).join(" ")).toContain("WTN-001");
+  });
+
+  it("does not auto-log waste when the treatment route isn't clear from the document — the EWC code alone doesn't decide it", () => {
+    const { proposals, unmapped } = buildProposals(
+      extraction({
+        documentKind: "WASTE_TRANSFER_NOTE",
+        waste: {
+          lines: [
+            {
+              description: "Mixed waste",
+              ewcCode: "20 03 01",
+              weight: 740,
+              weightUnit: "kg",
+              treatmentMethod: null,
+              disposalOrRecovery: null,
+            },
+          ],
+          carrierName: null,
+          carrierRegistrationNumber: null,
+          destinationSite: null,
+          transferDate: null,
+          wtnReference: null,
+        },
+      }),
+    );
+
+    expect(proposals).toHaveLength(0);
+    expect(unmapped[0].reason).toMatch(/treatment route/);
+  });
+
+  it("converts waste weight in tonnes to kg deterministically for the proposal", () => {
+    const { proposals } = buildProposals(
+      extraction({
+        waste: {
+          lines: [
+            { description: "Cardboard", ewcCode: "15 01 01", weight: 0.74, weightUnit: "tonnes", treatmentMethod: "Recycled", disposalOrRecovery: null },
+          ],
+          carrierName: null,
+          carrierRegistrationNumber: null,
+          destinationSite: null,
+          transferDate: null,
+          wtnReference: null,
+        },
+      }),
+    );
+    expect(proposals[0]).toMatchObject({ quantity: 740, unit: "kg", subtypeKey: "recycled" });
   });
 
   it("reports freight as unmapped rather than guessing it into business travel", () => {
