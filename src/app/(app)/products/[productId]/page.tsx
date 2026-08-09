@@ -64,7 +64,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             {allAssessments.map((assessment) => (
               <tr key={assessment.id} className="hover:bg-slate-50">
                 <Td className="font-mono text-xs">
-                  <Link href={`/assessments/${assessment.id}`} className="text-blue-700 hover:text-blue-800">
+                  <Link href={`/assessments/${assessment.id}`} className="text-brand-700 hover:text-brand-800">
                     {assessment.reference}
                   </Link>
                 </Td>

@@ -44,7 +44,7 @@ export function SurveyForm({
         <p className="mt-2 text-sm text-emerald-800">
           Commuting emissions have been calculated for each mode you entered a percentage for.
         </p>
-        <Link href={`/entry/${site.id}`} className="mt-4 inline-block text-sm font-medium text-blue-700 hover:text-blue-800">
+        <Link href={`/entry/${site.id}`} className="mt-4 inline-block text-sm font-medium text-brand-700 hover:text-brand-800">
           ← Back to {site.name}
         </Link>
       </div>

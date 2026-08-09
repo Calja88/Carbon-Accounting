@@ -483,7 +483,7 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
             was in force for the period being reported rather than the latest one — so this report stays reproducible
             after factors are updated. The full calculation audit trail (input, factor, source, vintage, formula,
             calculated-by, timestamp) is available via the CSV export, or{" "}
-            <Link href={`/reports/${id}/calculations`} className="font-medium text-blue-700 hover:text-blue-800">
+            <Link href={`/reports/${id}/calculations`} className="font-medium text-brand-700 hover:text-brand-800">
               browse every calculation in this report
             </Link>{" "}
             to see how any single figure was arrived at.

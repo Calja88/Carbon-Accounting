@@ -31,7 +31,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
         title="Nothing calculated yet"
         description="Build the lifecycle model and inventory, then run the calculation. Results, contributions and hotspots all come from a stored run, so the figures on this page and in the exports can never disagree."
         action={
-          <Link href={`/assessments/${id}/inventory`} className="text-sm font-medium text-blue-700 hover:text-blue-800">
+          <Link href={`/assessments/${id}/inventory`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
             Go to the inventory →
           </Link>
         }
@@ -288,7 +288,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
           />
           <Link
             href={`/assessments/${id}/data-quality`}
-            className="mt-4 inline-block text-sm font-medium text-blue-700 hover:text-blue-800"
+            className="mt-4 inline-block text-sm font-medium text-brand-700 hover:text-brand-800"
           >
             Full data quality and uncertainty →
           </Link>
@@ -351,7 +351,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
               <Td align="right">{formatKgPrecise(Number(result.allocatedKgCo2e))}</Td>
               <Td align="right">{formatKgPrecise(Number(result.perFunctionalUnitKgCo2e))}</Td>
               <Td align="right">
-                <Link href={`/assessments/${id}/results/${result.id}`} className="text-xs font-medium text-blue-700 hover:text-blue-800">
+                <Link href={`/assessments/${id}/results/${result.id}`} className="text-xs font-medium text-brand-700 hover:text-brand-800">
                   How?
                 </Link>
               </Td>

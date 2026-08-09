@@ -20,7 +20,7 @@ export default async function AdminFactorsUploadPage() {
       <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-900">Import emission factors</h1>
       <p className="mt-1 text-sm text-slate-500">
         Upload a .csv or .xlsx file in the platform&apos;s factor template —{" "}
-        <a href="/api/admin/factor-template.csv" className="text-blue-700 hover:text-blue-800">
+        <a href="/api/admin/factor-template.csv" className="text-brand-700 hover:text-brand-800">
           download the template
         </a>
         . This never edits an existing set — it always creates a new one. Nothing is imported unless every row

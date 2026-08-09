@@ -207,7 +207,7 @@ export function GoalScopeForm({ assessment, users, methodologies, readOnly, read
               {LIFECYCLE_STAGE_ORDER.map((stage) => (
                 <label
                   key={stage}
-                  className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm has-[:checked]:border-blue-300 has-[:checked]:bg-blue-50"
+                  className="flex items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm has-[:checked]:border-brand-300 has-[:checked]:bg-brand-50"
                 >
                   <input
                     type="checkbox"

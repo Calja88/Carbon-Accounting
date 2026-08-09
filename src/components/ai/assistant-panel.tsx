@@ -134,7 +134,7 @@ export function AssistantPanel({ available, unavailableMessage }: AssistantPanel
         aria-label={open ? "Close the AI assistant" : "Open the AI assistant"}
         className={cn(
           "no-print fixed bottom-5 right-5 z-30 flex items-center gap-2 rounded-full px-4 py-3 text-sm font-medium shadow-lg transition-colors",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2",
           open ? "bg-slate-700 text-white hover:bg-slate-600" : "bg-slate-900 text-white hover:bg-slate-800",
         )}
       >
@@ -224,7 +224,7 @@ export function AssistantPanel({ available, unavailableMessage }: AssistantPanel
                 }}
                 disabled={!available}
                 placeholder={available ? "Ask about your emissions data…" : "AI assistance is unavailable"}
-                className="min-h-[2.75rem] flex-1 resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500"
+                className="min-h-[2.75rem] flex-1 resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 disabled:bg-slate-50 disabled:text-slate-500"
               />
               <Button type="submit" size="sm" disabled={!available || pending || question.trim().length === 0} aria-label="Send">
                 <Send className="h-4 w-4" />

@@ -48,11 +48,11 @@ export function UploadForm({ existingSets }: { existingSets: { id: string; name:
           )}
           <div className="mt-4 flex gap-3">
             {state.createdSetId && (
-              <Link href={`/admin/factors/${state.createdSetId}`} className="text-sm font-medium text-blue-700 hover:text-blue-800">
+              <Link href={`/admin/factors/${state.createdSetId}`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
                 View this set →
               </Link>
             )}
-            <Link href="/admin/factors" className="text-sm font-medium text-blue-700 hover:text-blue-800">
+            <Link href="/admin/factors" className="text-sm font-medium text-brand-700 hover:text-brand-800">
               All factor sets
             </Link>
           </div>
@@ -142,7 +142,7 @@ export function UploadForm({ existingSets }: { existingSets: { id: string; name:
           id="notes"
           name="notes"
           rows={2}
-          className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
         />
       </div>
 

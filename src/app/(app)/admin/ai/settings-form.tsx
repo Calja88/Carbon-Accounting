@@ -67,7 +67,7 @@ function Toggle({
         type="checkbox"
         name={name}
         defaultChecked={defaultChecked}
-        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-2 focus:ring-blue-500/30"
+        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-2 focus:ring-brand-500/30"
       />
       <span>
         <span className="block text-sm font-medium text-slate-800">{label}</span>
@@ -104,7 +104,7 @@ function ModelSelect({
       <div className="space-y-1">
         <Input name={name} defaultValue={value} placeholder="e.g. openrouter/free" />
         {models.length > 0 && (
-          <button type="button" onClick={() => setCustom(false)} className="text-xs text-blue-700 hover:text-blue-800">
+          <button type="button" onClick={() => setCustom(false)} className="text-xs text-brand-700 hover:text-brand-800">
             Choose from the catalogue instead
           </button>
         )}
@@ -126,7 +126,7 @@ function ModelSelect({
           </option>
         ))}
       </Select>
-      <button type="button" onClick={() => setCustom(true)} className="text-xs text-blue-700 hover:text-blue-800">
+      <button type="button" onClick={() => setCustom(true)} className="text-xs text-brand-700 hover:text-brand-800">
         Enter a model id by hand
       </button>
     </div>
@@ -198,7 +198,7 @@ export function AiSettingsForm(props: SettingsFormProps) {
                 name="freeOnly"
                 checked={freeOnly}
                 onChange={(e) => setFreeOnly(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-2 focus:ring-blue-500/30"
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-2 focus:ring-brand-500/30"
               />
               <span>
                 <span className="block text-sm font-medium text-slate-800">Free models only</span>

@@ -83,7 +83,7 @@ export function EntryForm({
           <p className="mt-2 text-sm text-emerald-800">The emissions figure has been calculated automatically.</p>
         )}
         <div className="mt-4 flex gap-3">
-          <Link href={`/entry/${site.id}`} className="text-sm font-medium text-blue-700 hover:text-blue-800">
+          <Link href={`/entry/${site.id}`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
             ← Back to {site.name}
           </Link>
         </div>
@@ -195,7 +195,7 @@ export function EntryForm({
           id="notes"
           name="notes"
           rows={2}
-          className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
         />
       </div>
 

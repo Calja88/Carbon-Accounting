@@ -219,7 +219,7 @@ export default function LcaHelpPage() {
               <div>
                 <div className="text-sm font-semibold text-slate-900">
                   {item.href ? (
-                    <Link href={item.href} className="hover:text-blue-700">
+                    <Link href={item.href} className="hover:text-brand-700">
                       {item.step}
                     </Link>
                   ) : (

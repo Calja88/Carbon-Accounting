@@ -134,7 +134,7 @@ export default async function AssessmentOverviewPage({ params }: { params: Promi
           </ul>
           <Link
             href={`/assessments/${id}/review`}
-            className="mt-4 inline-block text-sm font-medium text-blue-700 hover:text-blue-800"
+            className="mt-4 inline-block text-sm font-medium text-brand-700 hover:text-brand-800"
           >
             Open the review centre →
           </Link>
@@ -168,7 +168,7 @@ export default async function AssessmentOverviewPage({ params }: { params: Promi
           />
           <Link
             href={`/assessments/${id}/goal-scope`}
-            className="mt-3 inline-block text-sm font-medium text-blue-700 hover:text-blue-800"
+            className="mt-3 inline-block text-sm font-medium text-brand-700 hover:text-brand-800"
           >
             Edit goal and scope →
           </Link>
@@ -180,7 +180,7 @@ export default async function AssessmentOverviewPage({ params }: { params: Promi
           title="Largest contributors"
           description="Where the footprint actually comes from — the first place to look for both a reduction and a data-quality improvement."
           actions={
-            <Link href={`/assessments/${id}/results`} className="text-sm font-medium text-blue-700 hover:text-blue-800">
+            <Link href={`/assessments/${id}/results`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
               Full results →
             </Link>
           }

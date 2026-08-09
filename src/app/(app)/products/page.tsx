@@ -45,7 +45,7 @@ export default async function ProductsPage() {
                 return (
                   <tr key={product.id} className="hover:bg-slate-50">
                     <Td>
-                      <Link href={`/products/${product.id}`} className="flex items-center gap-2 font-medium text-slate-900 hover:text-blue-700">
+                      <Link href={`/products/${product.id}`} className="flex items-center gap-2 font-medium text-slate-900 hover:text-brand-700">
                         <Package className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
                         {product.name}
                       </Link>

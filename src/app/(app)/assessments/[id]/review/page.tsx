@@ -149,12 +149,12 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
                           {issue.target.type === "inventory_item" ? (
                             <Link
                               href={`/assessments/${id}/inventory/${issue.target.id}`}
-                              className="font-medium text-blue-700 hover:text-blue-800"
+                              className="font-medium text-brand-700 hover:text-brand-800"
                             >
                               Open {issue.target.label} →
                             </Link>
                           ) : issue.target.type === "process" ? (
-                            <Link href={`/assessments/${id}/model`} className="font-medium text-blue-700 hover:text-blue-800">
+                            <Link href={`/assessments/${id}/model`} className="font-medium text-brand-700 hover:text-brand-800">
                               Open the lifecycle model →
                             </Link>
                           ) : (
@@ -211,7 +211,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
             <ul className="mb-4 space-y-1.5">
               {versions.map((version) => (
                 <li key={version.id} className="flex items-center justify-between gap-2 text-sm">
-                  <Link href={`/assessments/${id}/versions/${version.id}`} className="text-blue-700 hover:text-blue-800">
+                  <Link href={`/assessments/${id}/versions/${version.id}`} className="text-brand-700 hover:text-brand-800">
                     Version {version.version}
                     {version.label ? ` — ${version.label}` : ""}
                   </Link>
@@ -249,7 +249,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
                 <Td className="text-xs">{verification.scopeOfVerification}</Td>
                 <Td className="text-xs">
                   {verification.statementUrl ? (
-                    <a href={verification.statementUrl} target="_blank" rel="noreferrer noopener" className="text-blue-700 hover:text-blue-800">
+                    <a href={verification.statementUrl} target="_blank" rel="noreferrer noopener" className="text-brand-700 hover:text-brand-800">
                       {verification.statementReference ?? "Statement"}
                     </a>
                   ) : (

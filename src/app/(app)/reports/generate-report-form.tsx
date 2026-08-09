@@ -53,7 +53,7 @@ export function GenerateReportForm({ defaultStart, defaultEnd }: { defaultStart:
               aria-pressed={isActive}
               className={
                 isActive
-                  ? "rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-800"
+                  ? "rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-medium text-brand-800"
                   : "rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 hover:border-slate-300 hover:bg-slate-50"
               }
             >

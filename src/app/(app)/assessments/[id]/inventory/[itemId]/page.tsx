@@ -453,7 +453,7 @@ export default async function InventoryItemPage({ params }: { params: Promise<{ 
                 <Td align="right">
                   <Link
                     href={`/assessments/${id}/results/${result.id}`}
-                    className="text-xs font-medium text-blue-700 hover:text-blue-800"
+                    className="text-xs font-medium text-brand-700 hover:text-brand-800"
                   >
                     How was this calculated?
                   </Link>

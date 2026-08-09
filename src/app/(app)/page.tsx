@@ -277,7 +277,7 @@ export default async function DashboardPage({
               Outstanding submissions for the current reporting period, by site.
             </p>
           </div>
-          <Link href="/entry" className="flex shrink-0 items-center gap-1 text-sm font-medium text-blue-700 hover:text-blue-800">
+          <Link href="/entry" className="flex shrink-0 items-center gap-1 text-sm font-medium text-brand-700 hover:text-brand-800">
             Enter data
             <ArrowRight className="h-3.5 w-3.5" />
           </Link>
@@ -324,7 +324,7 @@ export default async function DashboardPage({
                       )}
                     </>
                   )}
-                  <Link href={`/entry/${site.id}`} className="text-sm font-medium text-blue-700 hover:text-blue-800">
+                  <Link href={`/entry/${site.id}`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
                     Open
                   </Link>
                 </div>

@@ -92,7 +92,7 @@ export default async function ReportCalculationsPage({ params }: { params: Promi
                   <span className="tabular-nums text-sm font-medium text-slate-900">
                     {Number(calc.resultKgCo2e).toLocaleString("en-GB", { maximumFractionDigits: 1 })} kg
                   </span>
-                  <ArrowRight className="h-3.5 w-3.5 text-blue-700" />
+                  <ArrowRight className="h-3.5 w-3.5 text-brand-700" />
                 </div>
               </CardContent>
             </Card>

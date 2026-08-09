@@ -137,7 +137,7 @@ export default async function ResultProvenancePage({
           {result.inventoryItemId && (
             <Link
               href={`/assessments/${id}/inventory/${result.inventoryItemId}`}
-              className="mt-3 inline-block text-sm font-medium text-blue-700 hover:text-blue-800"
+              className="mt-3 inline-block text-sm font-medium text-brand-700 hover:text-brand-800"
             >
               Open the inventory line →
             </Link>

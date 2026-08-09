@@ -84,7 +84,7 @@ export default async function DocumentsPage() {
             <Card className="transition-all hover:-translate-y-0.5 hover:shadow-md">
               <CardContent className="flex items-center justify-between gap-4">
                 <div className="flex min-w-0 items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
                     <FileScan className="h-4 w-4" />
                   </span>
                   <div className="min-w-0">
@@ -103,7 +103,7 @@ export default async function DocumentsPage() {
                     </div>
                   </div>
                 </div>
-                <span className="flex shrink-0 items-center gap-1 text-sm font-medium text-blue-700">
+                <span className="flex shrink-0 items-center gap-1 text-sm font-medium text-brand-700">
                   Review
                   <ArrowRight className="h-3.5 w-3.5" />
                 </span>

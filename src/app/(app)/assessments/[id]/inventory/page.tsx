@@ -119,7 +119,7 @@ export default async function InventoryPage({
               : "Nothing has been entered yet."
           }
           action={
-            <Link href={`/assessments/${id}/import`} className="text-sm font-medium text-blue-700 hover:text-blue-800">
+            <Link href={`/assessments/${id}/import`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
               Import from CSV →
             </Link>
           }
@@ -180,7 +180,7 @@ export default async function InventoryPage({
                       {bomView ? (
                         <>
                           <Td>
-                            <Link href={`/assessments/${id}/inventory/${item.id}`} className="font-medium text-slate-900 hover:text-blue-700">
+                            <Link href={`/assessments/${id}/inventory/${item.id}`} className="font-medium text-slate-900 hover:text-brand-700">
                               {item.componentName ? `${item.componentName} — ` : ""}
                               {item.name}
                             </Link>
@@ -209,7 +209,7 @@ export default async function InventoryPage({
                       ) : (
                         <>
                           <Td>
-                            <Link href={`/assessments/${id}/inventory/${item.id}`} className="font-medium text-slate-900 hover:text-blue-700">
+                            <Link href={`/assessments/${id}/inventory/${item.id}`} className="font-medium text-slate-900 hover:text-brand-700">
                               {item.name}
                             </Link>
                             <span className="mt-0.5 flex flex-wrap gap-1.5">
@@ -242,7 +242,7 @@ export default async function InventoryPage({
                           <Td align="right">
                             <Link
                               href={`/assessments/${id}/inventory/${item.id}`}
-                              className="text-xs font-medium text-blue-700 hover:text-blue-800"
+                              className="text-xs font-medium text-brand-700 hover:text-brand-800"
                             >
                               Open
                             </Link>

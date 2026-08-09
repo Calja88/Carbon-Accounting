@@ -120,7 +120,7 @@ export function ReviewScreen(props: ReviewScreenProps) {
               href={`/api/documents/${doc.id}/file`}
               target="_blank"
               rel="noreferrer noopener"
-              className="text-sm font-medium text-blue-700 hover:text-blue-800"
+              className="text-sm font-medium text-brand-700 hover:text-brand-800"
             >
               Open in a new tab
             </a>

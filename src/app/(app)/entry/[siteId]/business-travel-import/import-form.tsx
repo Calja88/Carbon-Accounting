@@ -63,10 +63,10 @@ export function ExpenseInImportForm({ site }: { site: { id: string; name: string
             </p>
           )}
           <div className="mt-4 flex flex-wrap gap-4">
-            <Link href={`/entry/${site.id}`} className="text-sm font-medium text-blue-700 hover:text-blue-800">
+            <Link href={`/entry/${site.id}`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
               ← Back to {site.name}
             </Link>
-            <Link href="/" className="text-sm font-medium text-blue-700 hover:text-blue-800">
+            <Link href="/" className="text-sm font-medium text-brand-700 hover:text-brand-800">
               View the dashboard
             </Link>
           </div>
@@ -81,15 +81,15 @@ export function ExpenseInImportForm({ site }: { site: { id: string; name: string
     <div className="space-y-6">
       <Card className="border-blue-200 bg-blue-50/40">
         <CardContent className="flex items-start gap-3">
-          <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-brand-700" />
           <div className="text-sm text-blue-900">
             <p className="font-medium">How to get this file out of ExpenseIn</p>
-            <p className="mt-1 text-blue-800">
+            <p className="mt-1 text-brand-800">
               Finance → Completed → Export as CSV. The export needs at least an <strong>expense date</strong>, a{" "}
               <strong>category</strong>, and a <strong>distance or nights</strong> column. ExpenseIn export formats are
               configurable, so if your column names differ, map them by hand below after previewing.
             </p>
-            <p className="mt-2 text-blue-800">
+            <p className="mt-2 text-brand-800">
               Emissions for travel are calculated from <em>distance travelled</em> and <em>nights stayed</em>, not from
               the amount spent — a £ figure can&apos;t be used for this category.
             </p>

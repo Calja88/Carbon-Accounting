@@ -32,7 +32,7 @@ export default async function EntrySiteListPage() {
                 <Link key={site.id} href={`/entry/${site.id}`}>
                   <Card className="transition-all hover:-translate-y-0.5 hover:shadow-md">
                     <CardContent className="flex items-center gap-3">
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
                         <MapPin className="h-4 w-4" />
                       </span>
                       <div>

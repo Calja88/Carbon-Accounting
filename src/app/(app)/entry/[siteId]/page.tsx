@@ -70,7 +70,7 @@ export default async function SiteEntryPage({ params }: { params: Promise<{ site
                       {dataPoint.code === "S3-06" && (
                         <Link
                           href={`/entry/${siteId}/business-travel-import`}
-                          className="flex items-center gap-1 text-sm font-medium text-blue-700 hover:text-blue-800"
+                          className="flex items-center gap-1 text-sm font-medium text-brand-700 hover:text-brand-800"
                         >
                           <Upload className="h-3.5 w-3.5" />
                           Import from ExpenseIn
@@ -78,7 +78,7 @@ export default async function SiteEntryPage({ params }: { params: Promise<{ site
                       )}
                       <Link
                         href={`/entry/${siteId}/${dataPoint.code}`}
-                        className="text-sm font-medium text-blue-700 hover:text-blue-800"
+                        className="text-sm font-medium text-brand-700 hover:text-brand-800"
                       >
                         {status === "missing" || status === "log" ? "Enter data" : "View / update"}
                       </Link>
@@ -100,7 +100,7 @@ export default async function SiteEntryPage({ params }: { params: Promise<{ site
                       <Badge tone={contract ? "success" : "neutral"}>{contract ? "On file" : "Not yet submitted"}</Badge>
                       <Link
                         href={`/entry/${siteId}/electricity-contract`}
-                        className="text-sm font-medium text-blue-700 hover:text-blue-800"
+                        className="text-sm font-medium text-brand-700 hover:text-brand-800"
                       >
                         {contract ? "View / update" : "Enter details"}
                       </Link>

@@ -89,7 +89,7 @@ export default async function AdminFactorSetDetailPage({
               <CardTitle>
                 {factorCategoryLabel(category!)} ({rows.length})
               </CardTitle>
-              <Link href={`/admin/factors/${id}`} className="text-sm font-medium text-blue-700 hover:text-blue-800">
+              <Link href={`/admin/factors/${id}`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
                 ← All categories
               </Link>
             </div>
@@ -136,7 +136,7 @@ export default async function AdminFactorSetDetailPage({
                 </span>
                 <span className="flex items-center gap-2 text-slate-500">
                   {c.count} factor{c.count === 1 ? "" : "s"}
-                  <ArrowLeft className="h-3.5 w-3.5 rotate-180 text-blue-700" />
+                  <ArrowLeft className="h-3.5 w-3.5 rotate-180 text-brand-700" />
                 </span>
               </Link>
             ))}

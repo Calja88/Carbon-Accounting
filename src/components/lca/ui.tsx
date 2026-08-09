@@ -6,6 +6,12 @@ import { STATUS_LABELS, STATUS_TONES } from "@/lib/lca/labels";
 import { READINESS_LABELS, READINESS_TONES, type ReadinessState } from "@/lib/lca/readiness-service";
 import type { LcaAssessmentStatus } from "@prisma/client";
 
+// DataTable/Td now live in components/ui — promoted so the corporate-side
+// pages can use the same table the LCA workspace already relies on.
+// Re-exported here so the ~47 existing `import { DataTable, Td } from
+// "@/components/lca/ui"` call sites keep working unchanged.
+export { DataTable, Td } from "@/components/ui/data-table";
+
 export function PageHeading({
   eyebrow,
   title,
@@ -134,65 +140,6 @@ export function FieldList({ items }: { items: { label: string; value: React.Reac
   );
 }
 
-export function DataTable({
-  headers,
-  children,
-  caption,
-}: {
-  headers: (string | { label: string; align?: "left" | "right" })[];
-  children: React.ReactNode;
-  caption?: string;
-}) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[42rem] border-collapse text-sm">
-        {caption && <caption className="pb-2 text-left text-xs text-slate-500">{caption}</caption>}
-        <thead>
-          <tr className="border-b border-slate-200">
-            {headers.map((header, i) => {
-              const label = typeof header === "string" ? header : header.label;
-              const align = typeof header === "string" ? "left" : (header.align ?? "left");
-              return (
-                <th
-                  key={`${label}-${i}`}
-                  scope="col"
-                  className={cn(
-                    "whitespace-nowrap px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500",
-                    align === "right" ? "text-right" : "text-left",
-                  )}
-                >
-                  {label}
-                </th>
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">{children}</tbody>
-      </table>
-    </div>
-  );
-}
-
-export function Td({
-  children,
-  align = "left",
-  className,
-  colSpan,
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right";
-  className?: string;
-  colSpan?: number;
-}) {
-  return (
-    <td
-      colSpan={colSpan}
-      className={cn("px-3 py-2.5 align-top text-slate-700", align === "right" && "text-right tabular-nums", className)}
-    >
-      {children}
-    </td>
-  );
-}
 
 /**
  * Short contextual guidance next to a term. Written in this platform's own

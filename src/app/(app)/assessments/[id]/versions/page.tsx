@@ -105,7 +105,7 @@ export default async function VersionsPage({ params }: { params: Promise<{ id: s
                   <Td align="right">
                     <Link
                       href={`/assessments/${id}/versions/${version.id}`}
-                      className="text-xs font-medium text-blue-700 hover:text-blue-800"
+                      className="text-xs font-medium text-brand-700 hover:text-brand-800"
                     >
                       Open
                     </Link>
@@ -123,7 +123,7 @@ export default async function VersionsPage({ params }: { params: Promise<{ id: s
             {revisions.map((revision) => (
               <tr key={revision.id}>
                 <Td className="font-mono text-xs">
-                  <Link href={`/assessments/${revision.id}`} className="text-blue-700 hover:text-blue-800">
+                  <Link href={`/assessments/${revision.id}`} className="text-brand-700 hover:text-brand-800">
                     {revision.reference}
                   </Link>
                 </Td>

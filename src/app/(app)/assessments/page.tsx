@@ -64,7 +64,7 @@ export default async function AssessmentsPage() {
                 }
                 action={
                   productVersions.length === 0 ? (
-                    <Link href="/products" className="text-sm font-medium text-blue-700 hover:text-blue-800">
+                    <Link href="/products" className="text-sm font-medium text-brand-700 hover:text-brand-800">
                       Go to products →
                     </Link>
                   ) : null
@@ -90,7 +90,7 @@ export default async function AssessmentsPage() {
                 return (
                   <tr key={assessment.id} className="hover:bg-slate-50">
                     <Td className="font-mono text-xs">
-                      <Link href={`/assessments/${assessment.id}`} className="text-blue-700 hover:text-blue-800">
+                      <Link href={`/assessments/${assessment.id}`} className="text-brand-700 hover:text-brand-800">
                         {assessment.reference}
                       </Link>
                     </Td>
@@ -101,7 +101,7 @@ export default async function AssessmentsPage() {
                       </span>
                     </Td>
                     <Td>
-                      <Link href={`/products/${assessment.productVersion.productId}`} className="hover:text-blue-700">
+                      <Link href={`/products/${assessment.productVersion.productId}`} className="hover:text-brand-700">
                         {assessment.productVersion.product.name}
                       </Link>
                       <span className="mt-0.5 block text-xs text-slate-500">{assessment.productVersion.versionLabel}</span>

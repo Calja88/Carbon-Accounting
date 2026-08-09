@@ -24,7 +24,7 @@ export function PeriodSelector({
           name="from"
           type="month"
           defaultValue={startMonth}
-          className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
         />
       </div>
       <div>
@@ -36,7 +36,7 @@ export function PeriodSelector({
           name="to"
           type="month"
           defaultValue={endMonth}
-          className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+          className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
         />
       </div>
       <Button type="submit" variant="secondary">
