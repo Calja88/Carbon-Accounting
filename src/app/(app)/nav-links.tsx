@@ -13,6 +13,7 @@ import {
   FileBarChart,
   FileScan,
   HelpCircle,
+  History,
   LayoutDashboard,
   Package,
   Truck,
@@ -28,6 +29,7 @@ interface NavItem {
 const BASE_ITEMS: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/entry", label: "Data entry", icon: ClipboardList },
+  { href: "/activity-data", label: "Activity Data", icon: History },
   { href: "/documents", label: "Documents", icon: FileScan },
   { href: "/reports", label: "Reports", icon: FileBarChart },
   // Product-level assessment sits alongside the corporate inventory rather
