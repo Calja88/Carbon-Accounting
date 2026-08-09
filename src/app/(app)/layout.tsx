@@ -13,7 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <Providers>
-      <AppShell session={session} isAdmin={isAdmin} aiAvailability={aiAvailability}>
+      <AppShell session={session} isAdmin={isAdmin} aiAvailability={aiAvailability} historicalDataEnabled>
         {children}
       </AppShell>
     </Providers>

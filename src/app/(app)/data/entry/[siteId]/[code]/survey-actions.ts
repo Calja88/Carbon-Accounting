@@ -61,7 +61,7 @@ export async function submitSurveyAction(_prevState: SurveyFormState, formData: 
       responses,
     });
 
-    revalidatePath(`/entry/${data.siteId}`);
+    revalidatePath(`/data/entry/${data.siteId}`);
     revalidatePath("/");
 
     return { error: null, success: true };

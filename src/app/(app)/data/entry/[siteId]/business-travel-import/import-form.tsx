@@ -63,7 +63,7 @@ export function ExpenseInImportForm({ site }: { site: { id: string; name: string
             </p>
           )}
           <div className="mt-4 flex flex-wrap gap-4">
-            <Link href={`/entry/${site.id}`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
+            <Link href={`/data/entry/${site.id}`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
               ← Back to {site.name}
             </Link>
             <Link href="/" className="text-sm font-medium text-brand-700 hover:text-brand-800">

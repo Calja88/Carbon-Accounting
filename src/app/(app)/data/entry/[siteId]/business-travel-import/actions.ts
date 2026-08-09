@@ -176,7 +176,7 @@ export async function commitExpenseInAction(
     else if (calculations.length === 0) awaitingFactorCount++;
   }
 
-  revalidatePath(`/entry/${siteId}`);
+  revalidatePath(`/data/entry/${siteId}`);
   revalidatePath("/");
 
   return {

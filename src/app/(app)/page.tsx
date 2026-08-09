@@ -95,7 +95,7 @@ export default async function DashboardPage({
               <p className="font-medium">No calculated emissions in this period yet.</p>
               <p className="mt-1 text-amber-800">
                 Figures appear here once activity data is entered and matched to an emission factor.{" "}
-                <Link href="/entry" className="font-medium underline">
+                <Link href="/data/entry" className="font-medium underline">
                   Enter activity data
                 </Link>{" "}
                 to get started, or widen the period above.
@@ -277,7 +277,7 @@ export default async function DashboardPage({
               Outstanding submissions for the current reporting period, by site.
             </p>
           </div>
-          <Link href="/entry" className="flex shrink-0 items-center gap-1 text-sm font-medium text-brand-700 hover:text-brand-800">
+          <Link href="/data/entry" className="flex shrink-0 items-center gap-1 text-sm font-medium text-brand-700 hover:text-brand-800">
             Enter data
             <ArrowRight className="h-3.5 w-3.5" />
           </Link>
@@ -324,7 +324,7 @@ export default async function DashboardPage({
                       )}
                     </>
                   )}
-                  <Link href={`/entry/${site.id}`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
+                  <Link href={`/data/entry/${site.id}`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
                     Open
                   </Link>
                 </div>

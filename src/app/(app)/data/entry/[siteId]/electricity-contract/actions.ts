@@ -42,7 +42,7 @@ export async function submitContractAction(
       enteredByUserId: session.user.id,
     });
 
-    revalidatePath(`/entry/${data.siteId}`);
+    revalidatePath(`/data/entry/${data.siteId}`);
     return { error: null, success: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Something went wrong.", success: false };

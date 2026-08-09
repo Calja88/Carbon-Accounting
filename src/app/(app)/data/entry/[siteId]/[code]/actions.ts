@@ -68,7 +68,7 @@ export async function submitEntryAction(
       notes: data.notes || undefined,
     });
 
-    revalidatePath(`/entry/${data.siteId}`);
+    revalidatePath(`/data/entry/${data.siteId}`);
     revalidatePath("/");
 
     return {

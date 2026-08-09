@@ -33,7 +33,7 @@ export interface NavGroup {
 }
 
 export function buildNavGroups(opts: { isAdmin: boolean; historicalDataEnabled: boolean }): NavGroup[] {
-  const dataItems: NavItem[] = [{ href: "/entry", label: "Enter data", icon: "enterData" }];
+  const dataItems: NavItem[] = [{ href: "/data/entry", label: "Enter data", icon: "enterData" }];
   if (opts.historicalDataEnabled) {
     dataItems.push({ href: "/data/entries", label: "Historical data", icon: "historicalData" });
   }
