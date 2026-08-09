@@ -54,8 +54,8 @@ export function buildNavGroups(opts: { isAdmin: boolean; historicalDataEnabled: 
     {
       label: "Factors & datasets",
       items: [
-        { href: "/admin/factors", label: "Emission factors", icon: "factors" },
-        { href: "/methodologies", label: "Methodology register", icon: "methodology" },
+        { href: "/factors", label: "Emission factors", icon: "factors" },
+        { href: "/methodology", label: "Methodology register", icon: "methodology" },
       ],
     },
   ];

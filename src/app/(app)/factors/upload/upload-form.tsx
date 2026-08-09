@@ -48,11 +48,11 @@ export function UploadForm({ existingSets }: { existingSets: { id: string; name:
           )}
           <div className="mt-4 flex gap-3">
             {state.createdSetId && (
-              <Link href={`/admin/factors/${state.createdSetId}`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
+              <Link href={`/factors/${state.createdSetId}`} className="text-sm font-medium text-brand-700 hover:text-brand-800">
                 View this set →
               </Link>
             )}
-            <Link href="/admin/factors" className="text-sm font-medium text-brand-700 hover:text-brand-800">
+            <Link href="/factors" className="text-sm font-medium text-brand-700 hover:text-brand-800">
               All factor sets
             </Link>
           </div>

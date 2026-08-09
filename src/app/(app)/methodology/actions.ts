@@ -144,7 +144,7 @@ export async function saveMethodologyAction(
     after: values,
   });
 
-  revalidatePath("/methodologies");
+  revalidatePath("/methodology");
   return {
     error: null,
     success: true,

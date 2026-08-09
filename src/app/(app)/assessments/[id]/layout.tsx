@@ -42,20 +42,29 @@ export default async function AssessmentLayout({
   const [inventoryCount, assumptionCount, exclusionCount, evidenceCount, scenarioCount] = counts;
   const totals = run ? runTotals(run) : null;
 
+  // Grouped for the tab bar's two-row layout at >=1024px and the <select>
+  // picker below it — same 13 destinations, same relative order, only
+  // grouping headers added (see docs/ui-overhaul-plan.md §5/§14 Phase 7).
   const navItems = [
-    { segment: "", label: "Overview" },
-    { segment: "goal-scope", label: "Goal & scope" },
-    { segment: "model", label: "Lifecycle model" },
-    { segment: "inventory", label: "Inventory & BOM", badge: inventoryCount, badgeTone: "neutral" as const },
-    { segment: "results", label: "Results" },
-    { segment: "data-quality", label: "Data quality" },
-    { segment: "scenarios", label: "Scenarios", badge: scenarioCount, badgeTone: "neutral" as const },
-    { segment: "registers", label: "Assumptions & exclusions", badge: assumptionCount + exclusionCount, badgeTone: "neutral" as const },
-    { segment: "evidence", label: "Evidence", badge: evidenceCount, badgeTone: "neutral" as const },
-    { segment: "review", label: "Review", badge: validation.errorCount, badgeTone: "danger" as const },
-    { segment: "versions", label: "Versions" },
-    { segment: "audit", label: "Audit trail" },
-    { segment: "report", label: "Report" },
+    { segment: "", label: "Overview", group: null },
+    { segment: "goal-scope", label: "Goal & scope", group: "Setup" },
+    { segment: "model", label: "Lifecycle model", group: "Setup" },
+    { segment: "inventory", label: "Inventory & BOM", badge: inventoryCount, badgeTone: "neutral" as const, group: "Setup" },
+    { segment: "results", label: "Results", group: "Analysis" },
+    { segment: "data-quality", label: "Data quality", group: "Analysis" },
+    { segment: "scenarios", label: "Scenarios", badge: scenarioCount, badgeTone: "neutral" as const, group: "Analysis" },
+    {
+      segment: "registers",
+      label: "Assumptions & exclusions",
+      badge: assumptionCount + exclusionCount,
+      badgeTone: "neutral" as const,
+      group: "Governance",
+    },
+    { segment: "evidence", label: "Evidence", badge: evidenceCount, badgeTone: "neutral" as const, group: "Governance" },
+    { segment: "review", label: "Review", badge: validation.errorCount, badgeTone: "danger" as const, group: "Governance" },
+    { segment: "versions", label: "Versions", group: "Governance" },
+    { segment: "audit", label: "Audit trail", group: "Governance" },
+    { segment: "report", label: "Report", group: "Output" },
   ];
 
   return (

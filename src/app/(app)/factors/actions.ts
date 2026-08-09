@@ -112,7 +112,7 @@ export async function uploadFactorSetAction(
       rows: valid,
     });
 
-    revalidatePath("/admin/factors");
+    revalidatePath("/factors");
 
     return {
       error: null,
