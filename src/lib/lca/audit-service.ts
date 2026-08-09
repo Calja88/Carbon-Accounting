@@ -36,7 +36,11 @@ export type LcaAuditEntityType =
   | "verification"
   | "supplier"
   | "supplier_pcf"
-  | "corporate_link";
+  | "corporate_link"
+  // --- LCI/PCF governance import (src/lib/lci-import-service.ts) ---
+  | "lci_source"
+  | "emission_factor_set"
+  | "emission_factor_import_rejected_row";
 
 export interface RecordAuditInput {
   assessmentId?: string | null;
