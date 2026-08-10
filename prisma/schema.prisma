@@ -44,6 +44,17 @@ enum MembershipAccessMode {
   RESTRICTED
 }
 
+// --- Phase 1 RBAC (T11): configurable roles/permissions per organisation. ---
+
+enum RoleTemplateKey {
+  SUSTAINABILITY_LEAD
+  EMS_CONTRIBUTOR
+  SITE_MANAGER
+  AUDITOR
+  FINANCE_READ_ONLY
+  ORGANISATION_ADMINISTRATOR
+}
+
 enum ConsolidationApproach {
   OPERATIONAL_CONTROL
 }
@@ -128,7 +139,9 @@ model Organisation {
   updatedAt           DateTime           @updatedAt
 
   entities    Entity[]
+  sites       Site[]
   memberships OrganisationMembership[]
+  roles       RoleDefinition[]
 
   @@index([status])
 }
@@ -147,12 +160,111 @@ model OrganisationMembership {
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
-  organisation Organisation @relation(fields: [organisationId], references: [id])
-  user         User         @relation(fields: [userId], references: [id])
+  organisation Organisation     @relation(fields: [organisationId], references: [id])
+  user         User             @relation(fields: [userId], references: [id])
+  roles        MembershipRole[]
+  entityScopes MembershipEntityScope[]
+  siteScopes   MembershipSiteScope[]
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
   @@index([userId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1 RBAC (T11): permission catalogue and configurable role templates.
+//
+// PermissionDefinition rows are a global, immutable catalogue (codes are
+// stable API identifiers and are never reused). RoleDefinition/RolePermission
+// are organisation-owned: system templates are cloned into each Organisation
+// at provisioning time (T12/T13) rather than referenced from a shared mutable
+// role, so editing one organisation's "Sustainability Lead" role can never
+// change another organisation's grants.
+// ---------------------------------------------------------------------------
+
+model PermissionDefinition {
+  code        String   @id
+  domain      String
+  description String
+  isSensitive Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  rolePermissions RolePermission[]
+
+  @@index([domain])
+}
+
+model RoleDefinition {
+  id             String           @id @default(cuid())
+  organisationId String
+  name           String
+  description    String?
+  templateKey    RoleTemplateKey?
+  isSystemSeeded Boolean          @default(false)
+  isActive       Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organisation Organisation     @relation(fields: [organisationId], references: [id])
+  permissions  RolePermission[]
+  memberships  MembershipRole[]
+
+  @@unique([organisationId, name])
+  @@unique([organisationId, id])
+  @@unique([organisationId, templateKey])
+  @@index([organisationId, isActive])
+}
+
+model RolePermission {
+  organisationId  String
+  roleId          String
+  permissionCode  String
+  grantedAt       DateTime @default(now())
+  grantedByUserId String?
+
+  role       RoleDefinition       @relation(fields: [organisationId, roleId], references: [organisationId, id])
+  permission PermissionDefinition @relation(fields: [permissionCode], references: [code])
+
+  @@id([roleId, permissionCode])
+  @@index([organisationId, permissionCode])
+}
+
+model MembershipRole {
+  organisationId   String
+  membershipId     String
+  roleId           String
+  assignedAt       DateTime @default(now())
+  assignedByUserId String?
+
+  membership OrganisationMembership @relation(fields: [organisationId, membershipId], references: [organisationId, id])
+  role       RoleDefinition         @relation(fields: [organisationId, roleId], references: [organisationId, id])
+
+  @@id([membershipId, roleId])
+  @@index([organisationId, roleId])
+}
+
+model MembershipEntityScope {
+  organisationId String
+  membershipId   String
+  entityId       String
+
+  membership OrganisationMembership @relation(fields: [organisationId, membershipId], references: [organisationId, id])
+  entity     Entity                 @relation(fields: [organisationId, entityId], references: [organisationId, id])
+
+  @@id([membershipId, entityId])
+  @@index([organisationId, entityId])
+}
+
+model MembershipSiteScope {
+  organisationId String
+  membershipId   String
+  siteId         String
+
+  membership OrganisationMembership @relation(fields: [organisationId, membershipId], references: [organisationId, id])
+  site       Site                   @relation(fields: [organisationId, siteId], references: [organisationId, id])
+
+  @@id([membershipId, siteId])
+  @@index([organisationId, siteId])
 }
 
 model Entity {
@@ -171,17 +283,29 @@ model Entity {
   lcaAssessments      LcaAssessment[]
   supplierPcfs        LcaSupplierPcf[]
 
+  // Phase 1 RBAC (T11): membership entity-scope grants
+  membershipScopes MembershipEntityScope[]
+
+  @@unique([organisationId, id])
   @@index([organisationId])
 }
 
 model Site {
-  id        String   @id @default(cuid())
-  entityId  String
-  entity    Entity   @relation(fields: [entityId], references: [id])
-  name      String
-  address   String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
+  id String @id @default(cuid())
+  // Phase 1 tenancy (T11 add-on): nullable, expand-only, mirroring Entity's
+  // T10 column. Spec §3 called for this on Site as part of T10 but the
+  // merged T10 migration only added it to Entity; MembershipSiteScope below
+  // needs a same-organisation composite FK to Site, so it is added here
+  // rather than duplicating T10's migration. No backfill or required-ness
+  // change: same deferred-to-T1A contract as Entity.organisationId.
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  entityId       String
+  entity         Entity        @relation(fields: [entityId], references: [id])
+  name           String
+  address        String?
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
 
   activityEntries  ActivityEntry[]
   energyContracts  SiteEnergyContract[]
@@ -194,7 +318,12 @@ model Site {
   // AI layer / evidence documents
   sourceDocuments SourceDocument[]
 
+  // Phase 1 RBAC (T11): membership site-scope grants
+  membershipScopes MembershipSiteScope[]
+
+  @@unique([organisationId, id])
   @@unique([entityId, name])
+  @@index([organisationId])
 }
 
 model User {

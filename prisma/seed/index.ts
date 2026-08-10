@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { FACTOR_SET, FACTORS } from "./emission-factors";
 import { ACTIVITY_DATA_POINTS } from "./activity-data-points";
 import { seedLca } from "./lca";
+import { seedPermissionCatalogue } from "./permissions";
 
 const prisma = new PrismaClient();
 
@@ -183,6 +184,9 @@ async function main() {
 
   console.log("Seeding product LCA methodology profile and placeholder life-cycle factors...");
   await seedLca(prisma);
+
+  console.log("Seeding RBAC permission catalogue...");
+  await seedPermissionCatalogue(prisma);
 
   console.log("Seed complete.");
 }
