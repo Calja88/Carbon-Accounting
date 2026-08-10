@@ -3,6 +3,7 @@ import Link from "next/link";
 import { auth } from "@/auth";
 import { getAiAvailability } from "@/lib/ai";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { hasPermission } from "@/lib/rbac/authorize";
 import { AssistantPanel } from "@/components/ai/assistant-panel";
 import { Providers } from "./providers";
 import { SignOutButton } from "./sign-out-button";
@@ -84,7 +85,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         </div>
         <div className="mx-auto max-w-6xl px-4 pb-2">
-          <NavLinks isAdmin={isAdmin} />
+          <NavLinks
+            isAdmin={isAdmin}
+            canManageOrganisation={organisation !== null && hasPermission(organisation, "organisation.membership.manage")}
+          />
         </div>
       </header>
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">{children}</main>

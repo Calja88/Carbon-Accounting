@@ -196,6 +196,12 @@ model OrganisationMembership {
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
+  // Phase 1 tenancy (T19): stubbed invitation-token lifecycle — no email is
+  // ever sent; the admin UI surfaces the plaintext token as a copyable link
+  // once, at issue/resend time, and only its SHA-256 hash is persisted.
+  inviteTokenHash      String?
+  inviteTokenExpiresAt DateTime?
+
   organisation Organisation            @relation(fields: [organisationId], references: [id])
   user         User                    @relation(fields: [userId], references: [id])
   roles        MembershipRole[]
@@ -204,6 +210,7 @@ model OrganisationMembership {
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
+  @@unique([inviteTokenHash])
   @@index([userId, status])
 }
 

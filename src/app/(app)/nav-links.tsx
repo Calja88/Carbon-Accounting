@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
   Package,
   Truck,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -42,6 +43,8 @@ const ADMIN_ITEMS: NavItem[] = [
   { href: "/admin/ai", label: "AI settings", icon: Bot },
 ];
 
+const ORGANISATION_ITEMS: NavItem[] = [{ href: "/admin/organisation/members", label: "Members & roles", icon: Users }];
+
 /** Reachable but not everyday — kept out of the main row so it stays readable. */
 const MORE_ITEMS: NavItem[] = [
   { href: "/suppliers", label: "Suppliers & supplier PCFs", icon: Truck },
@@ -54,10 +57,17 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function NavLinks({ isAdmin }: { isAdmin: boolean }) {
+export function NavLinks({ isAdmin, canManageOrganisation = false }: { isAdmin: boolean; canManageOrganisation?: boolean }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
-  const items = isAdmin ? [...BASE_ITEMS, ...ADMIN_ITEMS] : BASE_ITEMS;
+  const items = [
+    ...BASE_ITEMS,
+    ...(isAdmin ? ADMIN_ITEMS : []),
+    // Gated on this organisation's own current permission grant
+    // (organisation.membership.manage), not the legacy JWT role — an
+    // organisation admin's authority is scoped to their own tenant.
+    ...(canManageOrganisation ? ORGANISATION_ITEMS : []),
+  ];
   const moreActive = MORE_ITEMS.some((item) => isActive(pathname, item.href));
 
   return (
