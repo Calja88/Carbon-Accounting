@@ -24,6 +24,26 @@ enum Role {
   ADMIN
 }
 
+// --- Phase 1 tenancy (T10): Organisation is the SaaS tenant above Entity. ---
+
+enum OrganisationStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  REMOVED
+}
+
+enum MembershipAccessMode {
+  ORGANISATION_WIDE
+  RESTRICTED
+}
+
 enum ConsolidationApproach {
   OPERATIONAL_CONTROL
 }
@@ -93,8 +113,52 @@ enum TariffType {
 
 /// Paragon ID, RFID Discovery, Thames Technology — the three operating units
 /// consolidated under operational control (methodology Section 3).
+// Phase 1 tenancy (T10): expand-only — organisationId is nullable until the
+// backfill (T12) and contract migration (T1A) make it required and replace
+// the legacy global-unique constraints below.
+model Organisation {
+  id                  String             @id @default(cuid())
+  name                String
+  slug                String             @unique
+  status              OrganisationStatus @default(ACTIVE)
+  timezone            String             @default("Europe/London")
+  locale              String             @default("en-GB")
+  defaultJurisdiction String             @default("GB-UKM")
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  entities    Entity[]
+  memberships OrganisationMembership[]
+
+  @@index([status])
+}
+
+model OrganisationMembership {
+  id             String               @id @default(cuid())
+  organisationId String
+  userId         String
+  status         MembershipStatus     @default(INVITED)
+  accessMode     MembershipAccessMode @default(ORGANISATION_WIDE)
+  invitedAt      DateTime             @default(now())
+  activatedAt    DateTime?
+  suspendedAt    DateTime?
+  removedAt      DateTime?
+  lastAccessedAt DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@unique([organisationId, userId])
+  @@unique([organisationId, id])
+  @@index([userId, status])
+}
+
 model Entity {
   id                    String                @id @default(cuid())
+  organisationId        String?
+  organisation          Organisation?         @relation(fields: [organisationId], references: [id])
   name                  String                @unique
   consolidationApproach ConsolidationApproach @default(OPERATIONAL_CONTROL)
   createdAt             DateTime              @default(now())
@@ -106,6 +170,8 @@ model Entity {
   methodologyProfiles LcaMethodologyProfile[]
   lcaAssessments      LcaAssessment[]
   supplierPcfs        LcaSupplierPcf[]
+
+  @@index([organisationId])
 }
 
 model Site {
@@ -136,8 +202,13 @@ model User {
   name         String
   email        String   @unique
   passwordHash String
+  /// @deprecated Legacy single-tenant role. Superseded by
+  /// OrganisationMembership + RBAC (Phase 1); kept for the dual-read/dual-write
+  /// compatibility window. Do not use for new authorisation decisions.
   role         Role
   createdAt    DateTime @default(now())
+
+  memberships OrganisationMembership[]
 
   enteredEntries     ActivityEntry[]      @relation("EnteredBy")
   enteredContracts   SiteEnergyContract[] @relation("ContractEnteredBy")
