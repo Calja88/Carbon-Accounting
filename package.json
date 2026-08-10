@@ -4,13 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "node scripts/resolve-failed-migration.mjs && prisma migrate deploy && next build",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate",
     "db:seed": "tsx prisma/seed/index.ts",
     "db:seed:lca-methodology": "tsx prisma/seed/lca-methodology-only.ts",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "node scripts/resolve-failed-migration.mjs && prisma migrate deploy",
     "test": "vitest run"
   },
   "dependencies": {
