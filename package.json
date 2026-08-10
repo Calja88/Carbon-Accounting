@@ -11,7 +11,8 @@
     "db:seed": "tsx prisma/seed/index.ts",
     "db:seed:lca-methodology": "tsx prisma/seed/lca-methodology-only.ts",
     "db:migrate": "prisma migrate dev",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:unscoped-prisma": "node scripts/check-unscoped-prisma.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
