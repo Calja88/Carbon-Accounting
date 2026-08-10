@@ -16,6 +16,7 @@ import { prisma } from "@/lib/prisma";
 import { buildAnalyticsSnapshot } from "@/lib/analytics-service";
 import { formatRangeLabel } from "@/lib/report-period";
 import { AiActor } from "./authorization";
+import type { OrganisationContext } from "@/lib/organisation/context";
 
 function t(kg: number): string {
   return `${(kg / 1000).toFixed(2)} tCO2e`;
@@ -89,8 +90,19 @@ export interface CarbonContext {
  * it is read by a model, and labelled prose survives truncation far better
  * than a nested object does.
  */
-export async function buildCarbonContext(actor: AiActor, options: CarbonContextOptions): Promise<CarbonContext> {
-  const analytics = await buildAnalyticsSnapshot(options.periodStart, options.periodEnd);
+export async function buildCarbonContext(
+  organisation: OrganisationContext,
+  actor: AiActor,
+  options: CarbonContextOptions,
+): Promise<CarbonContext> {
+  // T16 (carbon domain tenant refactor) only — buildAnalyticsSnapshot now
+  // requires an OrganisationContext to scope its queries, resolved by the
+  // caller (a request/route handler) and passed straight through so this
+  // module stays free of session/auth imports. The AI layer's own
+  // actor-based authorization (AiActor, siteIds filtering below) is
+  // untouched here; organisation-scoping AI context/authorization itself is
+  // T18's job, not this task's.
+  const analytics = await buildAnalyticsSnapshot(organisation, options.periodStart, options.periodEnd);
   const periodLabel = formatRangeLabel(options.periodStart, options.periodEnd);
 
   // Authorization filter — applied to the aggregation output, never left to

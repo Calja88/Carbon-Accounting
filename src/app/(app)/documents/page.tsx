@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AiUnavailableNotice } from "@/components/ai/ai-disclosure";
 import { UploadForm } from "./upload-form";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 
 const STATUS_TONES: Record<string, "neutral" | "info" | "success" | "warning" | "danger"> = {
   UPLOADED: "neutral",
@@ -29,8 +30,16 @@ export default async function DocumentsPage() {
   const actor = await resolveAiActor();
   if (!actor) redirect("/login");
 
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
+
   const [documents, sites, availability, config] = await Promise.all([
-    listDocuments(actor.siteIds),
+    listDocuments(context),
     prisma.site.findMany({
       where: { isActive: true, id: { in: actor.siteIds } },
       include: { entity: true },

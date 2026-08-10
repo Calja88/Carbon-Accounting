@@ -1,9 +1,13 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AlertTriangle, ArrowRight, CheckCircle2, Clock, FlagTriangleRight } from "lucide-react";
-import { prisma } from "@/lib/prisma";
 import { getSiteQuantityStatus } from "@/lib/entry-status";
 import { buildAnalyticsSnapshot, buildDelta } from "@/lib/analytics-service";
 import { formatRangeLabel, resolveMonthRange } from "@/lib/report-period";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { accessibleSiteFilter, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
+import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ENTITY_LOGOS } from "@/lib/entity-logos";
@@ -21,19 +25,28 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ from?: string; to?: string }>;
 }) {
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
+
   const { from, to } = await searchParams;
   const range = resolveMonthRange(from, to);
-  const analytics = await buildAnalyticsSnapshot(range.periodStart, range.periodEnd);
+  const analytics = await buildAnalyticsSnapshot(context, range.periodStart, range.periodEnd);
 
+  const tenantCtx = toTenantRepositoryContext(context);
   const sites = await prisma.site.findMany({
-    where: { isActive: true },
+    where: tenantWhere(tenantCtx, { isActive: true, ...accessibleSiteFilter(context) }),
     include: { entity: true },
     orderBy: [{ entity: { name: "asc" } }, { name: "asc" }],
   });
 
   const siteSummaries = await Promise.all(
     sites.map(async (site) => {
-      const statuses = await getSiteQuantityStatus(site.id);
+      const statuses = await getSiteQuantityStatus(context, site.id);
       return {
         site,
         missing: statuses.filter((s) => s.status === "missing").length,

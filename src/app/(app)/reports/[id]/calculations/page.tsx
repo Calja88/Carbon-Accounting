@@ -5,6 +5,9 @@ import { prisma } from "@/lib/prisma";
 import { resolveAiActor } from "@/lib/ai";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { accessibleActivityEntryFilter, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 /**
  * Every calculation that went into one report snapshot, each linking to its
@@ -17,8 +20,17 @@ export default async function ReportCalculationsPage({ params }: { params: Promi
   const actor = await resolveAiActor();
   if (!actor) redirect("/login");
 
-  const snapshot = await prisma.reportSnapshot.findUnique({
-    where: { id },
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
+  const ctx = toTenantRepositoryContext(context);
+
+  const snapshot = await prisma.reportSnapshot.findFirst({
+    where: tenantWhere(ctx, { id }),
     select: { id: true, periodStart: true, periodEnd: true },
   });
   if (!snapshot) notFound();
@@ -28,7 +40,9 @@ export default async function ReportCalculationsPage({ params }: { params: Promi
       reportSnapshotId: id,
       // Scope filter applied here, not after — a calculation outside the
       // caller's scope is never listed, even inside a snapshot they can open.
-      calculation: { activityEntry: { siteId: { in: actor.siteIds } } },
+      calculation: tenantWhere(ctx, {
+        activityEntry: { siteId: { in: actor.siteIds }, ...accessibleActivityEntryFilter(context) },
+      }),
     },
     include: {
       calculation: {

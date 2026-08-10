@@ -143,6 +143,15 @@ model Organisation {
   memberships OrganisationMembership[]
   roles       RoleDefinition[]
 
+  // Phase 1 tenancy (T16): carbon-domain roots, nullable/expand-only until
+  // the T1A contract migration — see each model's own comment.
+  siteEnergyContracts SiteEnergyContract[]
+  activityEntries     ActivityEntry[]
+  commutingSurveys    CommutingSurvey[]
+  calculations        Calculation[]
+  reportSnapshots     ReportSnapshot[]
+  sourceDocuments     SourceDocument[]
+
   @@index([status])
 }
 
@@ -160,8 +169,8 @@ model OrganisationMembership {
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
-  organisation Organisation     @relation(fields: [organisationId], references: [id])
-  user         User             @relation(fields: [userId], references: [id])
+  organisation Organisation            @relation(fields: [organisationId], references: [id])
+  user         User                    @relation(fields: [userId], references: [id])
   roles        MembershipRole[]
   entityScopes MembershipEntityScope[]
   siteScopes   MembershipSiteScope[]
@@ -291,7 +300,7 @@ model Entity {
 }
 
 model Site {
-  id String @id @default(cuid())
+  id             String        @id @default(cuid())
   // Phase 1 tenancy (T11 add-on): nullable, expand-only, mirroring Entity's
   // T10 column. Spec §3 called for this on Site as part of T10 but the
   // merged T10 migration only added it to Entity; MembershipSiteScope below
@@ -501,23 +510,37 @@ model EmissionFactor {
 /// Supplier/tariff/REGO metadata for a site's electricity, needed for the
 /// Scope 2 market-based calculation (data map rows S2-02 / S2-03).
 model SiteEnergyContract {
-  id              String     @id @default(cuid())
+  id              String        @id @default(cuid())
+  // Phase 1 tenancy (T16): nullable, expand-only — same deferred-to-T1A
+  // contract as Entity/Site.organisationId (see Entity's T10 comment).
+  // Nested-parent-substitution (foreign Site ID) is guarded at the
+  // repository layer (assertSiteOwnership), not by a composite FK, because
+  // Site.organisationId is itself still nullable at this phase.
+  organisationId  String?
+  organisation    Organisation? @relation(fields: [organisationId], references: [id])
   siteId          String
-  site            Site       @relation(fields: [siteId], references: [id])
+  site            Site          @relation(fields: [siteId], references: [id])
   effectiveFrom   DateTime
   effectiveTo     DateTime?
   supplierName    String
   tariffType      TariffType
-  regoBacked      Boolean    @default(false)
-  regoVolumeKwh   Decimal?   @db.Decimal(18, 3)
+  regoBacked      Boolean       @default(false)
+  regoVolumeKwh   Decimal?      @db.Decimal(18, 3)
   source          String?
   enteredByUserId String
-  enteredBy       User       @relation("ContractEnteredBy", fields: [enteredByUserId], references: [id])
-  enteredAt       DateTime   @default(now())
+  enteredBy       User          @relation("ContractEnteredBy", fields: [enteredByUserId], references: [id])
+  enteredAt       DateTime      @default(now())
+
+  @@index([organisationId])
 }
 
 model ActivityEntry {
   id                  String            @id @default(cuid())
+  // Phase 1 tenancy (T16): nullable, expand-only — same deferred-to-T1A
+  // contract as Entity/Site.organisationId. Guarded against nested-parent
+  // substitution (foreign Site ID) at the repository layer.
+  organisationId      String?
+  organisation        Organisation?     @relation(fields: [organisationId], references: [id])
   activityDataPointId String
   activityDataPoint   ActivityDataPoint @relation(fields: [activityDataPointId], references: [id])
   siteId              String
@@ -574,6 +597,7 @@ model ActivityEntry {
 
   @@index([activityDataPointId, siteId, periodStart])
   @@index([sourceDocumentId])
+  @@index([organisationId])
 }
 
 /// Cat 7 employee commuting (data map row S3-07) — "survey-based initially
@@ -584,9 +608,12 @@ model ActivityEntry {
 /// resolved, reusing the existing calculation + audit-trail pipeline
 /// rather than a bespoke one.
 model CommutingSurvey {
-  id                    String   @id @default(cuid())
+  id                    String        @id @default(cuid())
+  // Phase 1 tenancy (T16): nullable, expand-only — see ActivityEntry's comment.
+  organisationId        String?
+  organisation          Organisation? @relation(fields: [organisationId], references: [id])
   siteId                String
-  site                  Site     @relation(fields: [siteId], references: [id])
+  site                  Site          @relation(fields: [siteId], references: [id])
   periodStart           DateTime
   periodEnd             DateTime
   headcount             Int
@@ -594,12 +621,13 @@ model CommutingSurvey {
   /// commuting-frequency figure (see README assumptions).
   commutingDaysInPeriod Int
   enteredByUserId       String
-  enteredBy             User     @relation("SurveyEnteredBy", fields: [enteredByUserId], references: [id])
-  enteredAt             DateTime @default(now())
+  enteredBy             User          @relation("SurveyEnteredBy", fields: [enteredByUserId], references: [id])
+  enteredAt             DateTime      @default(now())
 
   responses CommutingSurveyResponse[]
 
   @@index([siteId, periodStart])
+  @@index([organisationId])
 }
 
 model CommutingSurveyResponse {
@@ -625,6 +653,12 @@ model CommutingSurveyResponse {
 /// self-contained even if the EmissionFactor catalog changes later.
 model Calculation {
   id              String        @id @default(cuid())
+  // Phase 1 tenancy (T16): nullable, expand-only — denormalised from the
+  // parent ActivityEntry at write time (spec §4: "recommended for
+  // export/RLS"). Guarded against a foreign-tenant ActivityEntry ID at the
+  // repository layer, same as Site/Entry substitution checks.
+  organisationId  String?
+  organisation    Organisation? @relation(fields: [organisationId], references: [id])
   activityEntryId String
   activityEntry   ActivityEntry @relation(fields: [activityEntryId], references: [id])
 
@@ -671,6 +705,7 @@ model Calculation {
   reportLinks ReportSnapshotCalculation[]
 
   @@index([activityEntryId])
+  @@index([organisationId])
 }
 
 // ---------------------------------------------------------------------------
@@ -678,17 +713,25 @@ model Calculation {
 // ---------------------------------------------------------------------------
 
 model ReportSnapshot {
-  id                String   @id @default(cuid())
-  version           Int      @default(autoincrement())
+  id                String        @id @default(cuid())
+  // Phase 1 tenancy (T16): nullable, expand-only. An issued snapshot's
+  // payload is immutable (spec §4: "cannot mix tenants") — set once at
+  // generation from the resolved OrganisationContext, never backfilled by
+  // inspecting the frozen payload.
+  organisationId    String?
+  organisation      Organisation? @relation(fields: [organisationId], references: [id])
+  version           Int           @default(autoincrement())
   periodStart       DateTime
   periodEnd         DateTime
   generatedByUserId String
-  generatedBy       User     @relation("GeneratedBy", fields: [generatedByUserId], references: [id])
-  generatedAt       DateTime @default(now())
+  generatedBy       User          @relation("GeneratedBy", fields: [generatedByUserId], references: [id])
+  generatedAt       DateTime      @default(now())
 
   payload Json // frozen computed report: totals, breakdowns, narrative, DQ summary
 
   calculationLinks ReportSnapshotCalculation[]
+
+  @@index([organisationId])
 }
 
 model ReportSnapshotCalculation {
@@ -2002,14 +2045,18 @@ enum DocumentStatus {
 /// code (AI_MAX_DOCUMENT_BYTES). Document text is always treated as
 /// untrusted content when it reaches a model.
 model SourceDocument {
-  id       String @id @default(cuid())
-  filename String
-  mimeType String
-  byteSize Int
+  id             String        @id @default(cuid())
+  // Phase 1 tenancy (T16): nullable, expand-only — same deferred-to-T1A
+  // contract as Entity/Site.organisationId.
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  filename       String
+  mimeType       String
+  byteSize       Int
   /// Content hash — lets a re-upload of the same file be recognised rather
   /// than silently duplicated, and pins the exact bytes an extraction ran on.
-  sha256   String
-  content  Bytes
+  sha256         String
+  content        Bytes
 
   kind   SourceDocumentKind @default(UNKNOWN)
   status DocumentStatus     @default(UPLOADED)
@@ -2028,6 +2075,7 @@ model SourceDocument {
 
   @@index([siteId, uploadedAt])
   @@index([sha256])
+  @@index([organisationId])
 }
 
 /// One AI extraction attempt against a document. `payload` is a validated

@@ -5,6 +5,7 @@
  */
 
 import { createTenantRepositoryContext, type TenantRepositoryContext } from "@/lib/repositories/context";
+import type { OrganisationContext } from "@/lib/organisation/context";
 
 export const ORG_A = "org-aster-demo";
 export const ORG_B = "org-birch-demo";
@@ -40,3 +41,55 @@ export const siteASubstitutedEntity = { ...siteA, entityId: ENTITY_B };
 
 export const activityEntryA = { id: "entry-a-1", organisationId: ORG_A, siteId: SITE_A, kwh: 100 };
 export const activityEntryB = { id: "entry-b-1", organisationId: ORG_B, siteId: SITE_B, kwh: 200 };
+
+/**
+ * Request-level `OrganisationContext` fixtures (T13 shape), for tests of the
+ * T16 carbon repository/service layer that also need permission/scope
+ * checks, not just the narrower `TenantRepositoryContext` above.
+ */
+export function makeOrganisationContext(
+  organisationId: string,
+  overrides: Partial<Omit<OrganisationContext, "organisationId">> = {},
+): OrganisationContext {
+  return {
+    userId: overrides.userId ?? `user-${organisationId}`,
+    membershipId: overrides.membershipId ?? `membership-${organisationId}`,
+    organisationId,
+    organisationSlug: overrides.organisationSlug ?? organisationId,
+    permissions: overrides.permissions ?? new Set(),
+    access: overrides.access ?? { mode: "ORGANISATION_WIDE", entityIds: new Set(), siteIds: new Set() },
+    correlationId: overrides.correlationId ?? `correlation-${organisationId}`,
+  };
+}
+
+/** ORGANISATION_WIDE members of Organisation A/B — every permission granted, for tests that aren't about permission denial itself. */
+export const orgContextA = makeOrganisationContext(ORG_A, {
+  permissions: new Set([
+    "carbon.view",
+    "carbon.entry.create",
+    "carbon.entry.review",
+    "carbon.entry.approve",
+    "carbon.contract.manage",
+    "carbon.document.manage",
+    "carbon.report.generate",
+    "carbon.report.export",
+  ]) as unknown as OrganisationContext["permissions"],
+});
+export const orgContextB = makeOrganisationContext(ORG_B, {
+  permissions: new Set([
+    "carbon.view",
+    "carbon.entry.create",
+    "carbon.entry.review",
+    "carbon.entry.approve",
+    "carbon.contract.manage",
+    "carbon.document.manage",
+    "carbon.report.generate",
+    "carbon.report.export",
+  ]) as unknown as OrganisationContext["permissions"],
+});
+
+/** A RESTRICTED member of Organisation A scoped to Site A only (no Entity-wide grant), for the "Site A1 scope, Entity-wide aggregate contains A1 only" adversarial case. */
+export const restrictedOrgContextA = makeOrganisationContext(ORG_A, {
+  permissions: orgContextA.permissions,
+  access: { mode: "RESTRICTED", entityIds: new Set(), siteIds: new Set([SITE_A]) },
+});

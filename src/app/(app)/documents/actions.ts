@@ -12,6 +12,7 @@ import {
   rejectExtraction,
   uploadDocument,
 } from "@/lib/documents-service";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 
 /**
  * Server actions for the evidence-document workflow.
@@ -39,6 +40,14 @@ export async function uploadDocumentAction(
   const actor = await resolveAiActor();
   if (!actor) return { error: "You must be signed in.", documentId: null };
 
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) return { error: "You must be signed in.", documentId: null };
+    throw err;
+  }
+
   const parsed = uploadSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "Invalid input.", documentId: null };
 
@@ -57,7 +66,7 @@ export async function uploadDocumentAction(
         ? (parsed.data.kind as SourceDocumentKind)
         : SourceDocumentKind.UNKNOWN;
 
-    const document = await uploadDocument({
+    const document = await uploadDocument(context, {
       filename: file.name,
       mimeType: file.type,
       bytes: await file.arrayBuffer(),
@@ -143,6 +152,16 @@ export async function acceptExtractionAction(
   const actor = await resolveAiActor();
   if (!actor) return { error: "You must be signed in.", success: false, flagged: false, awaitingFactor: false };
 
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) {
+      return { error: "You must be signed in.", success: false, flagged: false, awaitingFactor: false };
+    }
+    throw err;
+  }
+
   const parsed = acceptSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return {
@@ -158,7 +177,7 @@ export async function acceptExtractionAction(
     await assertDocumentInScope(actor, data.documentId);
     assertSiteInScope(actor, data.siteId);
 
-    const created = await acceptExtractionAsEntry({
+    const created = await acceptExtractionAsEntry(context, {
       extractionId: data.extractionId,
       dataPointCode: data.dataPointCode,
       siteId: data.siteId,
@@ -191,24 +210,34 @@ export async function acceptExtractionAction(
 export async function rejectExtractionAction(formData: FormData): Promise<void> {
   const actor = await resolveAiActor();
   if (!actor) return;
+  const context = await requireOrganisationContext().catch((err) => {
+    if (err instanceof OrganisationAccessError) return null;
+    throw err;
+  });
+  if (!context) return;
 
   const documentId = String(formData.get("documentId") ?? "");
   const extractionId = String(formData.get("extractionId") ?? "");
   if (!documentId || !extractionId) return;
 
   await assertDocumentInScope(actor, documentId);
-  await rejectExtraction(extractionId, actor.userId);
+  await rejectExtraction(context, extractionId, actor.userId);
   revalidatePath(`/documents/${documentId}`);
 }
 
 export async function markDocumentAcceptedAction(formData: FormData): Promise<void> {
   const actor = await resolveAiActor();
   if (!actor) return;
+  const context = await requireOrganisationContext().catch((err) => {
+    if (err instanceof OrganisationAccessError) return null;
+    throw err;
+  });
+  if (!context) return;
 
   const documentId = String(formData.get("documentId") ?? "");
   if (!documentId) return;
 
   await assertDocumentInScope(actor, documentId);
-  await markDocumentAccepted(documentId);
+  await markDocumentAccepted(context, documentId);
   revalidatePath(`/documents/${documentId}`);
 }

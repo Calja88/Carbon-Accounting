@@ -5,6 +5,7 @@ import { getAiAvailability, resolveAiActor } from "@/lib/ai";
 import { isSiteInScope } from "@/lib/ai/authorization";
 import { prisma } from "@/lib/prisma";
 import { explainCalculation } from "@/lib/explain-calculation";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { OriginBadge } from "@/components/ai/ai-disclosure";
@@ -35,13 +36,21 @@ export default async function CalculationDetailPage({ params }: { params: Promis
   const actor = await resolveAiActor();
   if (!actor) redirect("/login");
 
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
+
   const owner = await prisma.calculation.findUnique({
     where: { id },
     select: { activityEntry: { select: { siteId: true } } },
   });
   if (!owner || !isSiteInScope(actor, owner.activityEntry.siteId)) notFound();
 
-  const [explanation, availability] = await Promise.all([explainCalculation(id), getAiAvailability()]);
+  const [explanation, availability] = await Promise.all([explainCalculation(context, id), getAiAvailability()]);
   if (!explanation) notFound();
 
   const e = explanation;

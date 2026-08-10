@@ -10,6 +10,7 @@ import { buildProposals } from "@/lib/document-proposals";
 import type { DocumentExtractionResult } from "@/lib/ai/schemas";
 import { documentExtractionResultSchema } from "@/lib/ai/schemas";
 import { ReviewScreen } from "./review-screen";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 
 export default async function DocumentReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -24,8 +25,16 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
     throw err;
   }
 
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
+
   const [document, sites, availability, config] = await Promise.all([
-    getDocumentWithExtractions(id),
+    getDocumentWithExtractions(context, id),
     prisma.site.findMany({
       where: { isActive: true, id: { in: actor.siteIds } },
       include: { entity: true },

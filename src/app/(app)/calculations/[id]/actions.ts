@@ -4,6 +4,7 @@ import { AiUnavailableError, carbonAI, resolveAiActor } from "@/lib/ai";
 import { assertSiteInScope } from "@/lib/ai/authorization";
 import { prisma } from "@/lib/prisma";
 import { explainCalculation } from "@/lib/explain-calculation";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 
 export interface ExplainState {
   error: string | null;
@@ -25,6 +26,14 @@ export async function explainInPlainEnglishAction(_prev: ExplainState, formData:
   const actor = await resolveAiActor();
   if (!actor) return { ...initial, error: "You must be signed in." };
 
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) return { ...initial, error: "You must be signed in." };
+    throw err;
+  }
+
   const calculationId = String(formData.get("calculationId") ?? "");
   if (!calculationId) return { ...initial, error: "Missing calculation." };
 
@@ -40,7 +49,7 @@ export async function explainInPlainEnglishAction(_prev: ExplainState, formData:
     return { ...initial, error: "That calculation isn't available to you." };
   }
 
-  const explanation = await explainCalculation(calculationId);
+  const explanation = await explainCalculation(context, calculationId);
   if (!explanation) return { ...initial, error: "That calculation doesn't exist." };
 
   const audience = formData.get("audience") === "internal" ? "internal" : "non-technical";

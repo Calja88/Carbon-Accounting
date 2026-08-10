@@ -1,22 +1,40 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getSiteContractStatus } from "@/lib/entry-status";
 import { resolvePrompt } from "@/lib/prompts";
 import { ContractForm } from "./contract-form";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { requireSiteInScope } from "@/lib/repositories/carbon-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 
 export default async function ElectricityContractPage({ params }: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await params;
 
-  const [site, supplierDp, regoDp, contract] = await Promise.all([
-    prisma.site.findUnique({ where: { id: siteId } }),
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
+
+  let site;
+  try {
+    site = await requireSiteInScope(context, siteId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) notFound();
+    throw err;
+  }
+
+  const [supplierDp, regoDp, contract] = await Promise.all([
     prisma.activityDataPoint.findUnique({ where: { code: "S2-02" } }),
     prisma.activityDataPoint.findUnique({ where: { code: "S2-03" } }),
-    getSiteContractStatus(siteId),
+    getSiteContractStatus(context, siteId),
   ]);
 
-  if (!site || !supplierDp || !regoDp) notFound();
+  if (!supplierDp || !regoDp) notFound();
 
   const tokenValues = { siteName: site.name, periodStart: new Date(), frequency: supplierDp.frequency };
 

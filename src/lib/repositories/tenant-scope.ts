@@ -28,7 +28,12 @@ export class TenantOwnershipError extends Error {
 }
 
 interface OrganisationOwned {
-  organisationId: string;
+  // Nullable: T10/T16 add organisationId to existing tables as an
+  // expand-only, not-yet-backfilled column (PHASE1_TENANCY_RBAC_SPEC.md
+  // §9). A null value can never equal a real ctx.organisationId, so it is
+  // correctly denied by `assertOwned` below rather than requiring every
+  // caller to narrow the type first.
+  organisationId: string | null;
 }
 
 /** Merges the context's organisation into a `where` clause. Always call this when building the query, rather than filtering after the fact. */

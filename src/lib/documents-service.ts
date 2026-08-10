@@ -21,6 +21,15 @@ import { DataOrigin, DocumentStatus, Prisma, SourceDocumentKind } from "@prisma/
 import { prisma } from "@/lib/prisma";
 import { createActivityEntryWithCalculations } from "@/lib/entries-service";
 import { resolvePeriod } from "@/lib/period";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import {
+  accessibleSiteFilter,
+  findTenantDocumentExtraction,
+  findTenantSourceDocument,
+  requireSiteInScope,
+  toTenantRepositoryContext,
+} from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 /** Formats the upload accepts. Kept narrow on purpose — see SECURITY notes in the README. */
 export const ACCEPTED_DOCUMENT_MIME_TYPES = new Set([
@@ -52,9 +61,11 @@ export interface UploadDocumentInput {
  * Stores an uploaded document. The declared MIME type is checked against an
  * allow-list rather than trusted, the size is capped, and the original
  * filename is normalised — a browser-supplied name is untrusted input and is
- * never used as a path.
+ * never used as a path. When a Site is given, it must belong to the caller's
+ * Organisation (and membership scope) — checked here, not assumed from the
+ * form.
  */
-export async function uploadDocument(input: UploadDocumentInput) {
+export async function uploadDocument(context: OrganisationContext, input: UploadDocumentInput) {
   const buffer = Buffer.from(input.bytes);
 
   if (buffer.byteLength === 0) {
@@ -70,12 +81,16 @@ export async function uploadDocument(input: UploadDocumentInput) {
       `"${input.mimeType}" files aren't accepted. Upload a PDF, PNG, JPEG, WebP, plain text or CSV file.`,
     );
   }
+  if (input.siteId) {
+    await requireSiteInScope(context, input.siteId);
+  }
 
   const safeName = input.filename.replace(/[/\\]/g, "_").slice(0, 200) || "document";
   const sha256 = createHash("sha256").update(buffer).digest("hex");
 
   return prisma.sourceDocument.create({
     data: {
+      organisationId: context.organisationId,
       filename: safeName,
       mimeType: input.mimeType,
       byteSize: buffer.byteLength,
@@ -91,9 +106,10 @@ export async function uploadDocument(input: UploadDocumentInput) {
   });
 }
 
-export async function listDocuments(siteIds: string[], limit = 50) {
+export async function listDocuments(context: OrganisationContext, limit = 50) {
+  const ctx = toTenantRepositoryContext(context);
   return prisma.sourceDocument.findMany({
-    where: { OR: [{ siteId: null }, { siteId: { in: siteIds } }] },
+    where: tenantWhere(ctx, { OR: [{ siteId: null }, { site: accessibleSiteFilter(context) }] }),
     orderBy: { uploadedAt: "desc" },
     take: limit,
     select: {
@@ -111,9 +127,10 @@ export async function listDocuments(siteIds: string[], limit = 50) {
   });
 }
 
-export async function getDocumentWithExtractions(documentId: string) {
-  return prisma.sourceDocument.findUnique({
-    where: { id: documentId },
+export async function getDocumentWithExtractions(context: OrganisationContext, documentId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  return prisma.sourceDocument.findFirst({
+    where: tenantWhere(ctx, { id: documentId }),
     select: {
       id: true,
       filename: true,
@@ -153,9 +170,10 @@ export async function getDocumentWithExtractions(documentId: string) {
 }
 
 /** Raw bytes, for the review screen's document viewer. Authorize before calling. */
-export async function getDocumentContent(documentId: string) {
-  return prisma.sourceDocument.findUnique({
-    where: { id: documentId },
+export async function getDocumentContent(context: OrganisationContext, documentId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  return prisma.sourceDocument.findFirst({
+    where: tenantWhere(ctx, { id: documentId }),
     select: { filename: true, mimeType: true, content: true },
   });
 }
@@ -180,12 +198,22 @@ export interface AcceptExtractionInput {
  * Creates an ActivityEntry from a reviewed extraction and runs the normal
  * calculation pipeline. Returns the entry plus whatever the pipeline decided
  * about it (flagged, awaiting a factor, or calculated).
+ *
+ * The extraction and site lookups below deliberately produce the identical
+ * "doesn't exist"/"no longer exists" message whether the record is truly
+ * missing or belongs to another Organisation — PHASE1_TENANCY_RBAC_SPEC.md
+ * §8: "not-found and not-authorised responses are indistinguishable at
+ * public boundaries."
  */
-export async function acceptExtractionAsEntry(input: AcceptExtractionInput) {
-  const extraction = await prisma.documentExtraction.findUnique({
-    where: { id: input.extractionId },
-    select: { id: true, documentId: true },
-  });
+export async function acceptExtractionAsEntry(context: OrganisationContext, input: AcceptExtractionInput) {
+  const ctx = toTenantRepositoryContext(context);
+
+  let extraction;
+  try {
+    extraction = await findTenantDocumentExtraction(ctx, input.extractionId);
+  } catch {
+    extraction = null;
+  }
   if (!extraction) throw new DocumentValidationError("That extraction no longer exists.");
 
   const dataPoint = await prisma.activityDataPoint.findUnique({ where: { code: input.dataPointCode } });
@@ -199,12 +227,17 @@ export async function acceptExtractionAsEntry(input: AcceptExtractionInput) {
     throw new DocumentValidationError("Enter a quantity greater than zero before accepting.");
   }
 
-  const site = await prisma.site.findUnique({ where: { id: input.siteId }, select: { id: true } });
+  let site;
+  try {
+    site = await requireSiteInScope(context, input.siteId);
+  } catch {
+    site = null;
+  }
   if (!site) throw new DocumentValidationError("That site doesn't exist.");
 
   const { periodStart, periodEnd } = resolvePeriod(dataPoint.frequency, input.periodInput);
 
-  const created = await createActivityEntryWithCalculations({
+  const created = await createActivityEntryWithCalculations(ctx, {
     activityDataPointId: dataPoint.id,
     siteId: input.siteId,
     periodStart,
@@ -220,7 +253,7 @@ export async function acceptExtractionAsEntry(input: AcceptExtractionInput) {
   // Provenance is recorded after creation so the existing entry pipeline
   // keeps its single, well-tested signature.
   await prisma.activityEntry.update({
-    where: { id: created.entry.id },
+    where: { id: created.entry.id, organisationId: ctx.organisationId },
     data: {
       dataOrigin: DataOrigin.AI_EXTRACTED,
       sourceDocumentId: extraction.documentId,
@@ -242,7 +275,11 @@ export async function acceptExtractionAsEntry(input: AcceptExtractionInput) {
 }
 
 /** Records a reviewer rejecting an extraction outright. */
-export async function rejectExtraction(extractionId: string, userId: string) {
+export async function rejectExtraction(context: OrganisationContext, extractionId: string, userId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const owned = await findTenantDocumentExtraction(ctx, extractionId);
+  if (!owned) throw new DocumentValidationError("That extraction no longer exists.");
+
   const extraction = await prisma.documentExtraction.update({
     where: { id: extractionId },
     data: { reviewedByUserId: userId, reviewedAt: new Date() },
@@ -250,15 +287,19 @@ export async function rejectExtraction(extractionId: string, userId: string) {
   });
 
   await prisma.sourceDocument.update({
-    where: { id: extraction.documentId },
+    where: { id: extraction.documentId, organisationId: ctx.organisationId },
     data: { status: DocumentStatus.REJECTED },
   });
 }
 
 /** Marks a document fully dealt with once its entries have been created. */
-export async function markDocumentAccepted(documentId: string) {
+export async function markDocumentAccepted(context: OrganisationContext, documentId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const owned = await findTenantSourceDocument(ctx, documentId);
+  if (!owned) throw new DocumentValidationError("That document no longer exists.");
+
   await prisma.sourceDocument.update({
-    where: { id: documentId },
+    where: { id: documentId, organisationId: ctx.organisationId },
     data: { status: DocumentStatus.ACCEPTED },
   });
 }
