@@ -94,3 +94,51 @@ describe("selectMarketBasis", () => {
     expect(selectMarketBasis({ regoBacked: false, tariffType: "GREEN" })).toBe("MARKET_BASED");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression invariant C-01: the factor value/source/vintage/unit snapshotted
+// onto a Calculation is fixed at calculation time — replacing the catalogue
+// factor afterwards (a new EmissionFactorSet import) must never alter a
+// result already computed and persisted.
+// ---------------------------------------------------------------------------
+
+describe("factor snapshot immutability (invariant C-01)", () => {
+  it("keeps a previously computed result's snapshot unchanged after the source factor is replaced", () => {
+    const originalFactor = factor({ co2eFactor: 0.18293, factorSetName: "DEFRA 2024", vintageYear: 2024 });
+    const originalResult = calculateEmission(1000, "kWh", originalFactor);
+
+    // Simulate a catalogue re-import: a new EmissionFactorSet with a
+    // different value/source/vintage replaces the one used above. The
+    // already-computed result must not be affected by this — snapshotted
+    // fields are values copied at calculation time, not a live reference.
+    const replacementFactor = factor({
+      id: "factor-1",
+      co2eFactor: 0.4,
+      factorSetName: "DEFRA 2026",
+      vintageYear: 2026,
+    });
+    calculateEmission(1000, "kWh", replacementFactor);
+
+    expect(originalResult.factorValueSnapshot).toBe(0.18293);
+    expect(originalResult.factorVintageSnapshot).toBe("2024");
+    expect(originalResult.factorSourceSnapshot).toContain("DEFRA 2024");
+    expect(originalResult.resultKgCo2e).toBeCloseTo(182.93, 5);
+  });
+
+  it("is unaffected even when the caller mutates the same FactorRow object in place after the call", () => {
+    const mutableFactor = factor({ co2eFactor: 1.5, factorSetName: "DEFRA 2024", vintageYear: 2024 });
+    const result = calculateEmission(10, "kWh", mutableFactor);
+
+    // Mutating the object post-hoc must not reach back into the already
+    // returned snapshot — proves the snapshot fields are copies, not
+    // references into the (mutable) catalogue row.
+    mutableFactor.co2eFactor = 99;
+    mutableFactor.factorSetName = "DEFRA 2026";
+    mutableFactor.vintageYear = 2026;
+
+    expect(result.factorValueSnapshot).toBe(1.5);
+    expect(result.factorVintageSnapshot).toBe("2024");
+    expect(result.factorSourceSnapshot).toContain("DEFRA 2024");
+    expect(result.resultKgCo2e).toBeCloseTo(15, 5);
+  });
+});

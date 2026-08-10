@@ -1102,3 +1102,66 @@ describe("combined scenarios", () => {
     expect(summed).toBeCloseTo(output.totals.model.fossil.toNumber(), 10);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression invariant L-01: the engine is pure — running it twice against
+// the same frozen snapshot must return identical exact totals and rows.
+// ---------------------------------------------------------------------------
+
+describe("determinism (invariant L-01)", () => {
+  it("returns identical exact totals and rows across repeated runs of the same snapshot", () => {
+    const input = assessment({
+      processes: [
+        process({
+          allocationMethod: LcaAllocationMethod.MASS,
+          outputs: [
+            {
+              id: "o1",
+              name: "Assessed product",
+              isAssessedProduct: true,
+              massValue: D(300),
+              massUnit: "kg",
+              physicalValue: null,
+              physicalUnit: null,
+              economicValue: null,
+              economicCurrency: null,
+              manualPercent: null,
+            },
+            {
+              id: "o2",
+              name: "By-product",
+              isAssessedProduct: false,
+              massValue: D(100),
+              massUnit: "kg",
+              physicalValue: null,
+              physicalUnit: null,
+              economicValue: null,
+              economicCurrency: null,
+              manualPercent: null,
+            },
+          ],
+        }),
+      ],
+      items: [
+        item({ id: "a", quantity: D("0.1"), factor: factor(1, "kg") }),
+        item({ id: "b", quantity: D("0.2"), factor: factor(1, "kg") }),
+      ],
+    });
+
+    const first = calculateAssessment(input);
+    const second = calculateAssessment(input);
+
+    for (const output of [second]) {
+      expect(output.rows).toHaveLength(first.rows.length);
+      output.rows.forEach((row, i) => {
+        expect(row.allocatedKgCo2e.toString()).toBe(first.rows[i].allocatedKgCo2e.toString());
+        expect(row.grossKgCo2e.toString()).toBe(first.rows[i].grossKgCo2e.toString());
+      });
+      expect(output.totals.headlineModelKgCo2e.toString()).toBe(first.totals.headlineModelKgCo2e.toString());
+      expect(output.totals.headlinePerFunctionalUnitKgCo2e.toString()).toBe(
+        first.totals.headlinePerFunctionalUnitKgCo2e.toString(),
+      );
+      expect(output.diagnostics).toEqual(first.diagnostics);
+    }
+  });
+});
