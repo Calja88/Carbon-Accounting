@@ -217,6 +217,7 @@ export async function assistLca(
     maxOutputTokens: 1400,
     audit: {
       userId: actor.userId,
+      organisationId: actor.organisationId,
       entityId: assessment.entityId,
       relatedType: "LCA_ASSESSMENT",
       relatedId: assessment.id,
@@ -263,6 +264,7 @@ export async function reviewLcaProject(actor: AiActor, assessmentId: string): Pr
     messages: [{ role: "user", content: "Review this assessment and tell me what is missing, weak or inconsistent." }],
     audit: {
       userId: actor.userId,
+      organisationId: actor.organisationId,
       entityId: assessment.entityId,
       relatedType: "LCA_ASSESSMENT",
       relatedId: assessment.id,
@@ -306,6 +308,7 @@ export async function interpretScenario(
     messages: [{ role: "user", content: "Interpret this scenario result." }],
     audit: {
       userId: actor.userId,
+      organisationId: actor.organisationId,
       entityId: assessment.entityId,
       relatedType: "LCA_ASSESSMENT",
       relatedId: assessment.id,

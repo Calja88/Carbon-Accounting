@@ -1,14 +1,19 @@
 /**
  * Persistence for the model catalogue. The catalogue is a *cache* of the
- * provider's live metadata, held on the singleton AiSettings row so the admin
- * UI and the router both read exactly the same snapshot.
+ * provider's live metadata, held on the platform-global `AiModelCatalog` row
+ * (Phase 1 tenancy, T18 — split out of the old singleton `AiSettings` row,
+ * which is now per-Organisation) so the admin UI and the router in every
+ * tenant read exactly the same snapshot: model pricing/capability metadata
+ * is not tenant data.
  */
 
 import { prisma } from "@/lib/prisma";
-import { AI_SETTINGS_SINGLETON_ID, ensureAiSettingsRow } from "./config";
+import { ensureAiSettingsRow } from "./config";
 import { buildCatalogSnapshot, CatalogSnapshot, EMPTY_CATALOG, parseCatalog } from "./catalog";
 import { getAiProvider } from "./provider-registry";
 import { AiModelInfo } from "./types";
+
+const AI_MODEL_CATALOG_ID = "platform";
 
 interface CachedSnapshot {
   snapshot: CatalogSnapshot;
@@ -32,8 +37,8 @@ export async function loadCatalog(): Promise<CatalogSnapshot> {
   if (cache && cache.expiresAt > Date.now()) return cache.snapshot;
 
   try {
-    const row = await prisma.aiSettings.findUnique({
-      where: { id: AI_SETTINGS_SINGLETON_ID },
+    const row = await prisma.aiModelCatalog.findUnique({
+      where: { id: AI_MODEL_CATALOG_ID },
       select: { catalogJson: true, catalogRefreshedAt: true },
     });
     const models = row?.catalogJson ? (row.catalogJson as unknown as AiModelInfo[]) : [];
@@ -63,9 +68,14 @@ export async function refreshModelCatalog(): Promise<CatalogRefreshResult> {
   const models = await provider.listModels();
   const refreshedAt = new Date();
 
-  await prisma.aiSettings.update({
-    where: { id: AI_SETTINGS_SINGLETON_ID },
-    data: {
+  await prisma.aiModelCatalog.upsert({
+    where: { id: AI_MODEL_CATALOG_ID },
+    update: {
+      catalogJson: JSON.parse(JSON.stringify(models)),
+      catalogRefreshedAt: refreshedAt,
+    },
+    create: {
+      id: AI_MODEL_CATALOG_ID,
       catalogJson: JSON.parse(JSON.stringify(models)),
       catalogRefreshedAt: refreshedAt,
     },
@@ -94,17 +104,24 @@ let initPromise: Promise<void> | null = null;
 let lastInitAttempt = 0;
 
 /**
- * Idempotent self-initialisation: if a key is configured, makes sure the
- * settings row exists (safe defaults — free-only, auto-accept off — derived
- * from `defaultAiConfig()`, and never overwritten once an admin has saved
- * real settings) and that the model catalogue is present and not stale.
+ * Idempotent self-initialisation: if a key is configured, makes sure this
+ * Organisation's settings row exists (safe defaults — free-only, auto-accept
+ * off — derived from `defaultAiConfig()`, and never overwritten once an
+ * admin has saved real settings) and that the platform-wide model catalogue
+ * is present and not stale.
  *
- * Safe to call on every request: an in-flight call is reused, and both
- * success and failure are throttled by `INIT_COOLDOWN_MS` so this never
- * becomes a fetch-per-request. No-ops entirely with no API key.
+ * Safe to call on every request, for every Organisation: the per-Organisation
+ * settings check is a cheap conditional-create with no network call, and the
+ * platform catalogue refresh — an in-flight call is reused, both success and
+ * failure throttled by `INIT_COOLDOWN_MS` — happens at most once across every
+ * tenant in that window, never once per Organisation. No-ops entirely with no
+ * API key.
  */
-export async function ensureAiInitialized(): Promise<void> {
+export async function ensureAiInitialized(organisationId: string): Promise<void> {
   if (!process.env.OPENROUTER_API_KEY?.trim()) return;
+
+  await ensureAiSettingsRow(organisationId).catch(() => {});
+
   if (initPromise) return initPromise;
 
   const now = Date.now();
@@ -113,10 +130,8 @@ export async function ensureAiInitialized(): Promise<void> {
 
   initPromise = (async () => {
     try {
-      await ensureAiSettingsRow();
-
-      const row = await prisma.aiSettings.findUnique({
-        where: { id: AI_SETTINGS_SINGLETON_ID },
+      const row = await prisma.aiModelCatalog.findUnique({
+        where: { id: AI_MODEL_CATALOG_ID },
         select: { catalogRefreshedAt: true },
       });
       const stale = !row?.catalogRefreshedAt || Date.now() - row.catalogRefreshedAt.getTime() > CATALOG_STALE_MS;

@@ -56,6 +56,7 @@ export async function explainCalculationInPlainEnglish(
     messages: [{ role: "user", content: "Explain how this figure was arrived at." }],
     audit: {
       userId: actor.userId,
+      organisationId: actor.organisationId,
       relatedType: "CALCULATION",
       relatedId: explanation.calculationId,
     },

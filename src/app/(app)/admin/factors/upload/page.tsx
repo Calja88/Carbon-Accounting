@@ -1,15 +1,22 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { requireAdminSession } from "@/lib/admin";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
 import { listFactorSets } from "@/lib/factor-sets-service";
 import { UploadForm } from "./upload-form";
 
 export default async function AdminFactorsUploadPage() {
-  const session = await requireAdminSession();
-  if (!session) redirect("/");
+  let context;
+  try {
+    context = await requireOrganisationContext();
+    requirePermission(context, "carbon.factor.manage");
+  } catch (err) {
+    if (err instanceof OrganisationAccessError || err instanceof PermissionDeniedError) redirect("/");
+    throw err;
+  }
 
-  const existingSets = await listFactorSets();
+  const existingSets = await listFactorSets(context);
 
   return (
     <div className="max-w-2xl">

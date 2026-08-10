@@ -89,6 +89,8 @@ function actor(overrides: Partial<AiActor> = {}): AiActor {
     name: "Test User",
     role: Role.SUSTAINABILITY_LEAD,
     isAdmin: false,
+    organisationId: "org-aster-demo",
+    correlationId: "correlation-1",
     entityIds: ["entity-a"],
     siteIds: ["site-a1", "site-a2"],
     ...overrides,

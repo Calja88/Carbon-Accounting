@@ -93,6 +93,16 @@ enum FactorBasis {
   RESIDUAL_MIX
 }
 
+/// Phase 1 tenancy (T18) — PHASE1_TENANCY_RBAC_SPEC.md §4: official/global
+/// reference sets are PLATFORM (visible to every tenant, mutable only by a
+/// platform-operator control plane, not implemented here); supplier-specific
+/// and customer-created sets are ORGANISATION (visible/mutable only to their
+/// owner). Never inferred from a nullable column — always this explicit flag.
+enum FactorVisibility {
+  PLATFORM
+  ORGANISATION
+}
+
 /// Which of the methodology Section 7 sources a factor set came from —
 /// lets the platform hold more than one live source per category and
 /// resolve between them (OFFICIAL primary, EEIO fallback for Cat 1/2,
@@ -161,6 +171,13 @@ model Organisation {
   lcaSupplierPcfs         LcaSupplierPcf[]
   lcaEvidence             LcaEvidence[]
   lcaAssessmentVersions   LcaAssessmentVersion[]
+
+  // Phase 1 tenancy (T18): AI layer and factor administration, nullable/
+  // expand-only until the T1A contract migration — see each model's own comment.
+  aiSettings      AiSettings?
+  aiInteractions  AiInteraction[]
+  aiSuggestions   AiSuggestion[]
+  ownedFactorSets EmissionFactorSet[]
 
   @@index([status])
 }
@@ -474,7 +491,18 @@ model EmissionFactorSet {
   importedBy       User?            @relation("FactorSetImportedBy", fields: [importedByUserId], references: [id])
   createdAt        DateTime         @default(now())
 
+  /// Phase 1 tenancy (T18): PLATFORM for official/global reference sets
+  /// (visible to every tenant); ORGANISATION for a supplier-specific or
+  /// customer-created set (visible/mutable only to `ownerOrganisationId`).
+  /// Assigned from the importing request's OrganisationContext, never from
+  /// form input.
+  visibility          FactorVisibility @default(PLATFORM)
+  ownerOrganisationId String?
+  ownerOrganisation   Organisation?    @relation(fields: [ownerOrganisationId], references: [id])
+
   factors EmissionFactor[]
+
+  @@index([visibility, ownerOrganisationId])
 }
 
 model EmissionFactor {
@@ -1939,13 +1967,23 @@ enum DataOrigin {
   DERIVED
 }
 
-/// Single-row application configuration for the AI layer (`id` is always
-/// "singleton"). Environment variables provide the safe defaults; this table
-/// lets an administrator change model routing and safety settings without a
-/// code change or redeploy. No API key is ever stored here — the key is read
-/// from OPENROUTER_API_KEY server-side only.
+/// Per-Organisation AI configuration (Phase 1 tenancy, T18 —
+/// PHASE1_TENANCY_RBAC_SPEC.md §4: "Replace singleton with one settings root
+/// per Organisation"). Environment variables provide the safe defaults; this
+/// table lets an organisation's own administrator change model routing and
+/// safety settings for their tenant only, without a code change or redeploy.
+/// No API key is ever stored here — the key is read from OPENROUTER_API_KEY
+/// server-side only, shared across every tenant.
+///
+/// `organisationId` is nullable/expand-only, the same deferred-to-contract
+/// contract as every other Phase 1 tenancy column: a pre-tenancy row (`id`
+/// literally `"singleton"`, `organisationId` null) may still exist from
+/// before this migration and is no longer read by application code, which
+/// always resolves a settings row by `organisationId`.
 model AiSettings {
-  id                   String         @id @default("singleton")
+  id                   String         @id @default(cuid())
+  organisationId       String?        @unique
+  organisation         Organisation?  @relation(fields: [organisationId], references: [id])
   aiEnabled            Boolean        @default(true)
   openRouterEnabled    Boolean        @default(true)
   /// When true the router will only ever call a model whose OpenRouter
@@ -1964,17 +2002,25 @@ model AiSettings {
   requestsPerMinute    Int            @default(12)
   requestsPerDay       Int            @default(300)
 
-  /// Cached copy of OpenRouter's live model catalogue (GET /api/v1/models),
-  /// so free/paid classification and capability checks use the provider's own
-  /// current metadata rather than a hand-maintained list in source.
-  catalogJson        Json?
-  catalogRefreshedAt DateTime?
-
   updatedByUserId String?
   updatedBy       User?    @relation("AiSettingsUpdatedBy", fields: [updatedByUserId], references: [id])
   updatedAt       DateTime @updatedAt
 
   taskModels AiTaskModel[]
+}
+
+/// Platform-global cache of the provider's live model catalogue (GET
+/// /api/v1/models) — shared by every tenant, distinct from the
+/// per-Organisation `AiSettings` above (Phase 1 tenancy, T18: "Separate
+/// platform model catalogue from organisation settings"). Free/paid
+/// classification and capability checks use this provider metadata rather
+/// than a hand-maintained list in source. Single row, `id` always
+/// `"platform"`.
+model AiModelCatalog {
+  id                 String    @id @default("platform")
+  catalogJson        Json?
+  catalogRefreshedAt DateTime?
+  updatedAt          DateTime  @updatedAt
 }
 
 /// Per-task model assignment, editable by an administrator in the UI.
@@ -2008,6 +2054,11 @@ model AiInteraction {
   userId String?
   user   User?   @relation("AiInteractionUser", fields: [userId], references: [id])
 
+  // Phase 1 tenancy (T18): nullable, expand-only — same deferred-to-contract
+  // contract as SourceDocument.organisationId (T16).
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+
   entityId    String?
   siteId      String?
   relatedType String?
@@ -2033,6 +2084,7 @@ model AiInteraction {
   suggestions AiSuggestion[]
 
   @@index([createdAt])
+  @@index([organisationId, createdAt])
   @@index([userId, createdAt])
   @@index([task, createdAt])
   @@index([status, createdAt])
@@ -2050,6 +2102,10 @@ model AiSuggestion {
   targetType String
   targetId   String?
   status     AiSuggestionStatus @default(PENDING)
+
+  // Phase 1 tenancy (T18): nullable, expand-only, same contract as AiInteraction.organisationId.
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
 
   confidence       Decimal? @db.Decimal(4, 3)
   requiresReview   Boolean  @default(true)
@@ -2074,6 +2130,7 @@ model AiSuggestion {
 
   @@index([targetType, targetId])
   @@index([status, createdAt])
+  @@index([organisationId, createdAt])
 }
 
 // ---------------------------------------------------------------------------

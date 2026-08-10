@@ -26,6 +26,8 @@ export interface AiAuditContext {
   task: AiTaskType;
   feature: string;
   userId: string | null;
+  /** Phase 1 tenancy (T18): the Organisation this call was made within — always the caller's AiActor.organisationId. */
+  organisationId: string;
   entityId?: string | null;
   siteId?: string | null;
   relatedType?: string | null;
@@ -79,6 +81,7 @@ export async function recordAiInteraction(
         usedFallback: record.usedFallback,
         attempts: record.attempts,
         userId: record.userId,
+        organisationId: record.organisationId,
         entityId: record.entityId ?? null,
         siteId: record.siteId ?? null,
         relatedType: record.relatedType ?? null,
@@ -127,10 +130,14 @@ export interface AiUsageSummary {
   reportedCostTodayUsd: number | null;
 }
 
-/** Powers the admin usage panel. Counts only — no prompt or output content. */
-export async function getAiUsageSummary(sinceHours = 24): Promise<AiUsageSummary> {
+/**
+ * Powers the admin usage panel, scoped to one Organisation (Phase 1 tenancy,
+ * T18) — an organisation administrator sees only their own tenant's AI usage,
+ * never the platform's aggregate. Counts only — no prompt or output content.
+ */
+export async function getAiUsageSummary(organisationId: string, sinceHours = 24): Promise<AiUsageSummary> {
   const since = new Date(Date.now() - sinceHours * 60 * 60 * 1000);
-  const where = { createdAt: { gte: since } };
+  const where = { organisationId, createdAt: { gte: since } };
 
   const [total, failures, fallbacks, byFeature, byModel, byStatus, costAgg] = await Promise.all([
     prisma.aiInteraction.count({ where }),

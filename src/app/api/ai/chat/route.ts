@@ -32,7 +32,17 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const actor = await resolveAiActor();
+  let organisation;
+  try {
+    organisation = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) {
+      return NextResponse.json({ error: { reason: "UNAUTHENTICATED", message: "Sign in to use the assistant." } }, { status: 401 });
+    }
+    throw err;
+  }
+
+  const actor = await resolveAiActor(organisation);
   if (!actor) {
     return NextResponse.json({ error: { reason: "UNAUTHENTICATED", message: "Sign in to use the assistant." } }, { status: 401 });
   }
@@ -70,16 +80,6 @@ export async function POST(request: NextRequest) {
         usedFallback: result.meta.usedFallback,
         periodLabel: null,
       });
-    }
-
-    let organisation;
-    try {
-      organisation = await requireOrganisationContext();
-    } catch (err) {
-      if (err instanceof OrganisationAccessError) {
-        return NextResponse.json({ error: { reason: "UNAUTHENTICATED", message: "Sign in to use the assistant." } }, { status: 401 });
-      }
-      throw err;
     }
 
     const range = resolveMonthRange(body.from, body.to);

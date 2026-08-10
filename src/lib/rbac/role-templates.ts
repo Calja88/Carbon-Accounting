@@ -26,9 +26,20 @@
  *  - "Findings only" (Incidents/NC/CAPA for Auditor): no matching code;
  *    left ungranted.
  *  - The `ai.*` domain and the platform `audit.view`/`audit.export` domain
- *    are not covered by the spec §6 table at all. `ai.*` is left ungranted
- *    for every template (deny-by-default pending a dedicated AI-governance
- *    decision). `audit.view` (the platform's own RBAC/change audit trail,
+ *    are not covered by the spec §6 table at all. T11 left `ai.*` ungranted
+ *    for every template pending a dedicated AI-governance decision; T18 (the
+ *    task that first makes AI actually organisation-scoped and enforces
+ *    these codes at runtime) makes that decision explicit rather than
+ *    leaving every template permanently locked out of AI once enforcement
+ *    exists: `ai.use` is granted to every template, preserving the AI
+ *    layer's pre-T18 behaviour where any signed-in member could use it
+ *    (scope was previously enforced only by Entity/Site, never by a
+ *    permission code); `ai.settings.manage` and `ai.audit.view` are granted
+ *    only to Sustainability Lead and Organisation Administrator, mirroring
+ *    the "admin status does not imply platform-global access" rule — this is
+ *    still an organisation-scoped grant, not platform admin. Flagged as an
+ *    owner decision in the T18 report; revisit if product wants finer-grained
+ *    AI governance later. `audit.view` (the platform's own RBAC/change audit trail,
  *    distinct from the EMS audit programme) is given to Sustainability Lead
  *    and Organisation Administrator only, as the two oversight roles;
  *    `audit.export` is withheld from every template as sensitive.
@@ -99,6 +110,9 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       "ems.management_review.manage",
       "ems.management_review.approve",
       "audit.view",
+      "ai.use",
+      "ai.settings.manage",
+      "ai.audit.view",
     ],
   },
   {
@@ -118,6 +132,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       ...EMS_OBJECTIVES_MANAGE,
       ...EMS_INCIDENT_WORK,
       "ems.competence.view",
+      "ai.use",
     ],
   },
   {
@@ -138,6 +153,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       ...EMS_OBJECTIVES_MANAGE,
       ...EMS_INCIDENT_WORK,
       "ems.competence.view",
+      "ai.use",
     ],
   },
   {
@@ -149,6 +165,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       ...CARBON_REPORT_VIEW,
       "ems.view",
       "ems.audit.perform",
+      "ai.use",
     ],
   },
   {
@@ -159,6 +176,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       "carbon.view",
       ...CARBON_REPORT_FULL,
       "ems.view",
+      "ai.use",
     ],
   },
   {
@@ -173,6 +191,9 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       ...LCA_EDIT_FULL,
       "ems.view",
       "audit.view",
+      "ai.use",
+      "ai.settings.manage",
+      "ai.audit.view",
     ],
   },
 ];

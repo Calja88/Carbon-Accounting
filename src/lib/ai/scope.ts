@@ -19,6 +19,19 @@ export interface AiActor {
   name: string;
   role: Role;
   isAdmin: boolean;
+  /**
+   * The Organisation this actor is currently acting within (Phase 1 tenancy,
+   * T18). Every AI query that reads or writes tenant-owned data — documents,
+   * factor sets, interaction/suggestion audit rows, LCA assessments — must
+   * scope on this id in the query itself, not filter afterwards. `entityIds`/
+   * `siteIds` below are already resolved within this one Organisation; they
+   * are never a substitute for checking `organisationId` directly on a
+   * record fetched by id, because an entity/site id alone does not prove
+   * which tenant it belongs to.
+   */
+  organisationId: string;
+  /** Carried from the resolved OrganisationContext for audit/log tracing. */
+  correlationId: string;
   /** Entities this actor may read. Every AI context query filters on it. */
   entityIds: string[];
   /** Sites this actor may read. */

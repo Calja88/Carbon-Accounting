@@ -27,9 +27,6 @@ const STATUS_TONES: Record<string, "neutral" | "info" | "success" | "warning" | 
 };
 
 export default async function DocumentsPage() {
-  const actor = await resolveAiActor();
-  if (!actor) redirect("/login");
-
   let context;
   try {
     context = await requireOrganisationContext();
@@ -38,6 +35,9 @@ export default async function DocumentsPage() {
     throw err;
   }
 
+  const actor = await resolveAiActor(context);
+  if (!actor) redirect("/login");
+
   const [documents, sites, availability, config] = await Promise.all([
     listDocuments(context),
     prisma.site.findMany({
@@ -45,8 +45,8 @@ export default async function DocumentsPage() {
       include: { entity: true },
       orderBy: [{ entity: { name: "asc" } }, { name: "asc" }],
     }),
-    getAiAvailability(),
-    getAiConfig(),
+    getAiAvailability(context.organisationId),
+    getAiConfig(context.organisationId),
   ]);
 
   const kinds = Object.values(SourceDocumentKind).map((k) => ({ value: k, label: DOCUMENT_KIND_LABELS[k] }));

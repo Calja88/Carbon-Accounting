@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { requireAdminSession } from "@/lib/admin";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
 import { AI_TASK_LABELS, AI_TASK_TYPES } from "@/lib/ai";
 import { defaultAiConfig, ensureAiSettingsRow } from "@/lib/ai/config";
 import { ensureAiInitialized, loadCatalog } from "@/lib/ai/catalog-store";
@@ -10,15 +11,22 @@ import { Badge } from "@/components/ui/badge";
 import { AiSettingsForm } from "./settings-form";
 
 export default async function AdminAiPage() {
-  const session = await requireAdminSession();
-  if (!session) redirect("/");
+  let context;
+  try {
+    context = await requireOrganisationContext();
+    requirePermission(context, "ai.settings.manage");
+  } catch (err) {
+    if (err instanceof OrganisationAccessError || err instanceof PermissionDeniedError) redirect("/");
+    throw err;
+  }
 
   // This page is monitoring/override, not an installation step: AI already
-  // self-initialises (settings row + catalogue) the first time it's used
-  // anywhere in the app. This just makes sure that's happened before we read it.
-  await ensureAiInitialized();
-  const settings = await ensureAiSettingsRow();
-  const [catalog, usage] = await Promise.all([loadCatalog(), getAiUsageSummary(24)]);
+  // self-initialises (this Organisation's settings row + the platform-wide
+  // catalogue) the first time it's used anywhere in the app. This just makes
+  // sure that's happened before we read it.
+  await ensureAiInitialized(context.organisationId);
+  const settings = await ensureAiSettingsRow(context.organisationId);
+  const [catalog, usage] = await Promise.all([loadCatalog(), getAiUsageSummary(context.organisationId, 24)]);
 
   const defaults = defaultAiConfig();
   const byTask = new Map(settings.taskModels.map((tm) => [tm.task, tm]));

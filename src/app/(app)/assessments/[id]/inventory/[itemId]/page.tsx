@@ -59,8 +59,8 @@ export default async function InventoryItemPage({ params }: { params: Promise<{ 
 
   const [run, factorOptions, recycledOptions, supplierPcfs, processes, suppliers, corporateEntries, sites] = await Promise.all([
     getLatestRun(id),
-    searchFactors({ itemType: item.itemType, compatibleWithUnit: item.unit }),
-    searchFactors({ category: "lca_material_recycled", compatibleWithUnit: item.unit }),
+    searchFactors(context.organisationId, { itemType: item.itemType, compatibleWithUnit: item.unit }),
+    searchFactors(context.organisationId, { category: "lca_material_recycled", compatibleWithUnit: item.unit }),
     supplierPcfsForItem(context, item.assessment.entityId, item.unit),
     prisma.lcaProcess.findMany({ where: { assessmentId: id }, orderBy: [{ sortOrder: "asc" }] }),
     prisma.supplier.findMany({ where: { entityId: item.assessment.entityId }, orderBy: { name: "asc" } }),
@@ -73,8 +73,8 @@ export default async function InventoryItemPage({ params }: { params: Promise<{ 
   ]);
 
   const [freightFactors, eolFactors] = await Promise.all([
-    searchFactors({ itemType: "TRANSPORT" }),
-    searchFactors({ itemType: "END_OF_LIFE", compatibleWithUnit: item.unit }),
+    searchFactors(context.organisationId, { itemType: "TRANSPORT" }),
+    searchFactors(context.organisationId, { itemType: "END_OF_LIFE", compatibleWithUnit: item.unit }),
   ]);
 
   const results = (run?.results ?? []).filter((r) => r.inventoryItemId === itemId);

@@ -17,9 +17,6 @@ import { tenantWhere } from "@/lib/repositories/tenant-scope";
 export default async function ReportCalculationsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const actor = await resolveAiActor();
-  if (!actor) redirect("/login");
-
   let context;
   try {
     context = await requireOrganisationContext();
@@ -27,6 +24,10 @@ export default async function ReportCalculationsPage({ params }: { params: Promi
     if (err instanceof OrganisationAccessError) redirect("/login");
     throw err;
   }
+
+  const actor = await resolveAiActor(context);
+  if (!actor) redirect("/login");
+
   const ctx = toTenantRepositoryContext(context);
 
   const snapshot = await prisma.reportSnapshot.findFirst({

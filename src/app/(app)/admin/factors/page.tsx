@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Database, ArrowRight, Download, Upload } from "lucide-react";
-import { requireAdminSession } from "@/lib/admin";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
 import { listFactorSets } from "@/lib/factor-sets-service";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,10 +15,16 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
 };
 
 export default async function AdminFactorsPage() {
-  const session = await requireAdminSession();
-  if (!session) redirect("/");
+  let context;
+  try {
+    context = await requireOrganisationContext();
+    requirePermission(context, "carbon.factor.view");
+  } catch (err) {
+    if (err instanceof OrganisationAccessError || err instanceof PermissionDeniedError) redirect("/");
+    throw err;
+  }
 
-  const sets = await listFactorSets();
+  const sets = await listFactorSets(context);
 
   return (
     <div className="space-y-8">

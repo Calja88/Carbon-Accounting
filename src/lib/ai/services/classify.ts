@@ -150,6 +150,7 @@ export async function classifyEmission(
     ],
     audit: {
       userId: actor.userId,
+      organisationId: actor.organisationId,
       siteId: input.siteId ?? null,
       relatedType: "CLASSIFICATION",
       relatedId: null,

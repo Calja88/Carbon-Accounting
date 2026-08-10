@@ -15,21 +15,21 @@ import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organ
 export default async function DocumentReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const actor = await resolveAiActor();
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
+
+  const actor = await resolveAiActor(context);
   if (!actor) redirect("/login");
 
   try {
     await assertDocumentInScope(actor, id);
   } catch (err) {
     if (err instanceof AiAuthorizationError) notFound();
-    throw err;
-  }
-
-  let context;
-  try {
-    context = await requireOrganisationContext();
-  } catch (err) {
-    if (err instanceof OrganisationAccessError) redirect("/login");
     throw err;
   }
 
@@ -40,8 +40,8 @@ export default async function DocumentReviewPage({ params }: { params: Promise<{
       include: { entity: true },
       orderBy: [{ entity: { name: "asc" } }, { name: "asc" }],
     }),
-    getAiAvailability(),
-    getAiConfig(),
+    getAiAvailability(context.organisationId),
+    getAiConfig(context.organisationId),
   ]);
 
   if (!document) notFound();

@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { auth } from "@/auth";
 import { getAiAvailability } from "@/lib/ai";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { AssistantPanel } from "@/components/ai/assistant-panel";
 import { Providers } from "./providers";
 import { SignOutButton } from "./sign-out-button";
@@ -30,7 +31,18 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   // Resolved on the server so the assistant opens already knowing whether it
   // can answer — the platform never offers an AI affordance that will fail.
-  const aiAvailability = await getAiAvailability();
+  // Phase 1 tenancy (T18): AI availability is per-Organisation, so this needs
+  // a resolved OrganisationContext first. A visitor with no active
+  // membership yet (mid-onboarding, or between organisations) simply sees
+  // the assistant as unavailable, same as being signed out — this layout
+  // renders for both states and must not throw for either.
+  const organisation = await requireOrganisationContext().catch((err) => {
+    if (err instanceof OrganisationAccessError) return null;
+    throw err;
+  });
+  const aiAvailability = organisation
+    ? await getAiAvailability(organisation.organisationId)
+    : { available: false, reason: null, message: null };
 
   return (
     <Providers>

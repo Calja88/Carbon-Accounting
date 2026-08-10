@@ -23,9 +23,6 @@ const initial: ExplainState = { error: null, aiUnavailable: false, text: null, m
  * calculation, so there is nothing for it to get arithmetically wrong.
  */
 export async function explainInPlainEnglishAction(_prev: ExplainState, formData: FormData): Promise<ExplainState> {
-  const actor = await resolveAiActor();
-  if (!actor) return { ...initial, error: "You must be signed in." };
-
   let context;
   try {
     context = await requireOrganisationContext();
@@ -33,6 +30,9 @@ export async function explainInPlainEnglishAction(_prev: ExplainState, formData:
     if (err instanceof OrganisationAccessError) return { ...initial, error: "You must be signed in." };
     throw err;
   }
+
+  const actor = await resolveAiActor(context);
+  if (!actor) return { ...initial, error: "You must be signed in." };
 
   const calculationId = String(formData.get("calculationId") ?? "");
   if (!calculationId) return { ...initial, error: "Missing calculation." };

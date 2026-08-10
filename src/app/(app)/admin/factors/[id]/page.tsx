@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { requireAdminSession } from "@/lib/admin";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
 import { getFactorSetDetail, getFactorSetCategoryCounts, getFactorSetCategoryRows } from "@/lib/factor-sets-service";
 import { factorCategoryLabel } from "@/lib/factor-categories";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,16 +15,22 @@ export default async function AdminFactorSetDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ category?: string }>;
 }) {
-  const session = await requireAdminSession();
-  if (!session) redirect("/");
+  let context;
+  try {
+    context = await requireOrganisationContext();
+    requirePermission(context, "carbon.factor.view");
+  } catch (err) {
+    if (err instanceof OrganisationAccessError || err instanceof PermissionDeniedError) redirect("/");
+    throw err;
+  }
 
   const { id } = await params;
   const { category } = await searchParams;
-  const set = await getFactorSetDetail(id);
+  const set = await getFactorSetDetail(context, id);
   if (!set) notFound();
 
-  const categoryCounts = await getFactorSetCategoryCounts(id);
-  const rows = category ? await getFactorSetCategoryRows(id, category) : null;
+  const categoryCounts = await getFactorSetCategoryCounts(context, id);
+  const rows = category ? await getFactorSetCategoryRows(context, id, category) : null;
 
   return (
     <div className="max-w-3xl">

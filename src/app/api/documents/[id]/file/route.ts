@@ -15,7 +15,15 @@ import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organ
  * crafted upload name can't inject a header.
  */
 export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const actor = await resolveAiActor();
+  let orgContext;
+  try {
+    orgContext = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) return new NextResponse("Sign in first.", { status: 401 });
+    throw err;
+  }
+
+  const actor = await resolveAiActor(orgContext);
   if (!actor) return new NextResponse("Sign in first.", { status: 401 });
 
   const { id } = await context.params;
@@ -24,14 +32,6 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     await assertDocumentInScope(actor, id);
   } catch (err) {
     if (err instanceof AiAuthorizationError) return new NextResponse(err.message, { status: 403 });
-    throw err;
-  }
-
-  let orgContext;
-  try {
-    orgContext = await requireOrganisationContext();
-  } catch (err) {
-    if (err instanceof OrganisationAccessError) return new NextResponse("Sign in first.", { status: 401 });
     throw err;
   }
 

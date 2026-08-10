@@ -99,6 +99,7 @@ export async function askCarbonAssistant(
     requirements: { prefersStructuredOutputs: true },
     audit: {
       userId: actor.userId,
+      organisationId: actor.organisationId,
       siteId: input.siteId ?? null,
       relatedType: "CARBON_CHAT",
       relatedId: null,

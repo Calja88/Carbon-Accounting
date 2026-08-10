@@ -1,14 +1,21 @@
 /**
  * AI configuration: safe defaults from the environment, overridden by
- * database settings an administrator can change in the UI without a code
- * change or redeploy (`/admin/ai`).
+ * per-Organisation database settings an organisation's own administrator can
+ * change in the UI without a code change or redeploy (`/admin/ai`).
+ *
+ * Phase 1 tenancy (T18): `AiSettings` is one row per Organisation, not a
+ * single global row — PHASE1_TENANCY_RBAC_SPEC.md §4 ("Replace singleton
+ * with one settings root per Organisation"). Every function here takes the
+ * caller's `organisationId` and resolves/creates that Organisation's own
+ * row; it never falls back to another tenant's settings.
  *
  * The OpenRouter API key is *not* part of this. It is read once, server-side,
  * inside the provider (src/lib/ai/providers/openrouter.ts) straight from
  * `process.env.OPENROUTER_API_KEY`. It is never stored in the database, never
  * returned from an endpoint, never logged, and never reaches the client
  * bundle — nothing in this file or anywhere under `src/lib/ai` puts it into a
- * value that crosses a server/client boundary.
+ * value that crosses a server/client boundary. It is shared across every
+ * tenant, same as the model catalogue (see catalog-store.ts).
  */
 
 import { AiLoggingLevel, AiTaskType } from "@prisma/client";
@@ -145,39 +152,41 @@ export function defaultAiConfig(): AiRuntimeConfig {
   };
 }
 
-export const AI_SETTINGS_SINGLETON_ID = "singleton";
-
 interface CachedConfig {
   value: AiRuntimeConfig;
   expiresAt: number;
 }
 
-// Short-lived process cache so a chat turn that makes several AI calls
-// doesn't re-read settings each time. Deliberately tiny: an admin change
-// takes effect within seconds, and `invalidateAiConfigCache()` makes it
-// immediate in the process that saved it.
+// Short-lived process cache, keyed per Organisation, so a chat turn that
+// makes several AI calls doesn't re-read settings each time. Deliberately
+// tiny: an admin change takes effect within seconds, and
+// `invalidateAiConfigCache()` makes it immediate in the process that saved
+// it. A single admin action can only invalidate its own organisation's
+// entry — never another tenant's cached config.
 const CONFIG_CACHE_TTL_MS = 15_000;
-let cache: CachedConfig | null = null;
+const cache = new Map<string, CachedConfig>();
 
-export function invalidateAiConfigCache(): void {
-  cache = null;
+export function invalidateAiConfigCache(organisationId: string): void {
+  cache.delete(organisationId);
 }
 
 /**
- * Effective configuration: environment defaults, then database overrides.
- * A database that is unreachable or has no settings row yet is not an error
+ * Effective configuration for one Organisation: environment defaults, then
+ * that Organisation's own database overrides. A database that is
+ * unreachable, or an Organisation with no settings row yet, is not an error
  * — the environment defaults stand, so AI keeps working (or keeps being
  * safely off) either way.
  */
-export async function getAiConfig(): Promise<AiRuntimeConfig> {
-  if (cache && cache.expiresAt > Date.now()) return cache.value;
+export async function getAiConfig(organisationId: string): Promise<AiRuntimeConfig> {
+  const cached = cache.get(organisationId);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
 
   const base = defaultAiConfig();
   let value = base;
 
   try {
     const row = await prisma.aiSettings.findUnique({
-      where: { id: AI_SETTINGS_SINGLETON_ID },
+      where: { organisationId },
       include: { taskModels: true },
     });
 
@@ -207,14 +216,14 @@ export async function getAiConfig(): Promise<AiRuntimeConfig> {
     // Settings are an enhancement, not a dependency — fall back to env.
   }
 
-  cache = { value, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS };
+  cache.set(organisationId, { value, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
   return value;
 }
 
-/** Creates the settings row on first use so the admin UI has something to edit. */
-export async function ensureAiSettingsRow() {
+/** Creates this Organisation's settings row on first use so the admin UI has something to edit. */
+export async function ensureAiSettingsRow(organisationId: string) {
   const existing = await prisma.aiSettings.findUnique({
-    where: { id: AI_SETTINGS_SINGLETON_ID },
+    where: { organisationId },
     include: { taskModels: true },
   });
   if (existing) return existing;
@@ -222,7 +231,7 @@ export async function ensureAiSettingsRow() {
   const defaults = defaultAiConfig();
   return prisma.aiSettings.create({
     data: {
-      id: AI_SETTINGS_SINGLETON_ID,
+      organisationId,
       aiEnabled: defaults.aiEnabled,
       openRouterEnabled: defaults.openRouterEnabled,
       freeOnly: defaults.freeOnly,

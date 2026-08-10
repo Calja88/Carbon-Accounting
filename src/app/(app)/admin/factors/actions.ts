@@ -2,7 +2,8 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { requireAdminSession } from "@/lib/admin";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
 import { parseFactorFile, validateFactorRows, RowIssue } from "@/lib/factor-import";
 import { commitFactorImport } from "@/lib/factor-sets-service";
 import { FactorSourceType } from "@prisma/client";
@@ -44,9 +45,18 @@ export async function uploadFactorSetAction(
   _prevState: UploadFactorSetState,
   formData: FormData,
 ): Promise<UploadFactorSetState> {
-  const session = await requireAdminSession();
-  if (!session) {
-    return { error: "Admins only.", success: false, ...initialLikeState };
+  let context;
+  try {
+    context = await requireOrganisationContext();
+    requirePermission(context, "carbon.factor.manage");
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) {
+      return { error: "You must be signed in.", success: false, ...initialLikeState };
+    }
+    if (err instanceof PermissionDeniedError) {
+      return { error: "You don't have permission to manage emission factors.", success: false, ...initialLikeState };
+    }
+    throw err;
   }
 
   const parsed = schema.safeParse(Object.fromEntries(formData));
@@ -96,7 +106,7 @@ export async function uploadFactorSetAction(
   }
 
   try {
-    const { factorSet, backfill } = await commitFactorImport({
+    const { factorSet, backfill } = await commitFactorImport(context, {
       name: data.name,
       publisher: data.publisher,
       sourceType: data.sourceType as FactorSourceType,
@@ -107,7 +117,7 @@ export async function uploadFactorSetAction(
       sourceUrl: data.sourceUrl || null,
       notes: data.notes || null,
       sourceFileName: file.name,
-      importedByUserId: session.user.id,
+      importedByUserId: context.userId,
       supersedesSetId: data.supersedesSetId || null,
       rows: valid,
     });

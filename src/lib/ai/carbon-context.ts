@@ -95,13 +95,11 @@ export async function buildCarbonContext(
   actor: AiActor,
   options: CarbonContextOptions,
 ): Promise<CarbonContext> {
-  // T16 (carbon domain tenant refactor) only — buildAnalyticsSnapshot now
-  // requires an OrganisationContext to scope its queries, resolved by the
-  // caller (a request/route handler) and passed straight through so this
-  // module stays free of session/auth imports. The AI layer's own
-  // actor-based authorization (AiActor, siteIds filtering below) is
-  // untouched here; organisation-scoping AI context/authorization itself is
-  // T18's job, not this task's.
+  // buildAnalyticsSnapshot (T16) requires an OrganisationContext to scope its
+  // queries, resolved by the caller and passed straight through so this
+  // module stays free of session/auth imports. `actor` (T18) is itself
+  // already resolved within that same Organisation — see authorization.ts —
+  // so the siteIds filtering below is tenant-safe as well as scope-safe.
   const analytics = await buildAnalyticsSnapshot(organisation, options.periodStart, options.periodEnd);
   const periodLabel = formatRangeLabel(options.periodStart, options.periodEnd);
 
@@ -186,6 +184,9 @@ export async function buildCarbonContext(
     where: {
       effectiveFrom: { lte: options.periodEnd },
       OR: [{ effectiveTo: null }, { effectiveTo: { gte: options.periodStart } }],
+      // Phase 1 tenancy (T18): platform sets plus this organisation's own —
+      // never another tenant's supplier-specific/customer-created set.
+      AND: [{ OR: [{ visibility: "PLATFORM" }, { visibility: "ORGANISATION", ownerOrganisationId: organisation.organisationId }] }],
     },
     select: { name: true, publisher: true, sourceType: true, vintageYear: true, isPlaceholder: true, sourceUrl: true },
     orderBy: { effectiveFrom: "desc" },
