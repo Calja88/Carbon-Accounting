@@ -6,7 +6,11 @@ import { redirect } from "next/navigation";
 import { LcaProductStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { recordAuditEvent } from "@/lib/lca/audit-service";
-import { canEditLcaData, getLcaActor } from "@/lib/lca/permissions";
+import { canEditLcaData, getLcaContext } from "@/lib/lca/permissions";
+import { assertEntityAccess } from "@/lib/rbac/authorize";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { requireProductInScope } from "@/lib/repositories/lca-repository";
+import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import type { ProductFormState } from "@/lib/lca/form-state";
 
 
@@ -23,9 +27,9 @@ export async function createProductAction(
   _prev: ProductFormState,
   formData: FormData,
 ): Promise<ProductFormState> {
-  const actor = await getLcaActor();
-  if (!canEditLcaData(actor)) {
-    return { error: "Your role does not allow creating products.", success: false };
+  const context = await getLcaContext();
+  if (!canEditLcaData(context)) {
+    return { error: "Your permissions do not allow creating products.", success: false };
   }
 
   const parsed = productSchema.safeParse(Object.fromEntries(formData));
@@ -33,6 +37,11 @@ export async function createProductAction(
     return { error: parsed.error.issues[0]?.message ?? "Check the form and try again.", success: false };
   }
   const data = parsed.data;
+
+  assertEntityAccess(context!, data.entityId);
+  const ctx = toTenantRepositoryContext(context!);
+  const entity = await prisma.entity.findFirst({ where: tenantWhere(ctx, { id: data.entityId }) });
+  if (!entity) throw new TenantOwnershipError();
 
   const duplicate = await prisma.product.findFirst({
     where: { entityId: data.entityId, sku: data.sku },
@@ -44,6 +53,7 @@ export async function createProductAction(
   const product = await prisma.product.create({
     data: {
       entityId: data.entityId,
+      organisationId: context!.organisationId,
       name: data.name,
       sku: data.sku,
       description: data.description || null,
@@ -56,7 +66,7 @@ export async function createProductAction(
     entityType: "product",
     entityId: product.id,
     action: "created",
-    actorUserId: actor?.id,
+    actorUserId: context!.userId,
     summary: `Product "${product.name}" (${product.sku}) created with first version "${data.firstVersionLabel}".`,
     after: { name: product.name, sku: product.sku, category: product.category },
   });
@@ -79,9 +89,9 @@ export async function updateProductAction(
   _prev: ProductFormState,
   formData: FormData,
 ): Promise<ProductFormState> {
-  const actor = await getLcaActor();
-  if (!canEditLcaData(actor)) {
-    return { error: "Your role does not allow editing products.", success: false };
+  const context = await getLcaContext();
+  if (!canEditLcaData(context)) {
+    return { error: "Your permissions do not allow editing products.", success: false };
   }
 
   const parsed = updateProductSchema.safeParse(Object.fromEntries(formData));
@@ -90,8 +100,13 @@ export async function updateProductAction(
   }
   const data = parsed.data;
 
-  const before = await prisma.product.findUnique({ where: { id: data.productId } });
-  if (!before) return { error: "That product no longer exists.", success: false };
+  let before;
+  try {
+    before = await requireProductInScope(context!, data.productId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return { error: "That product no longer exists.", success: false };
+    throw err;
+  }
 
   const updated = await prisma.product.update({
     where: { id: data.productId },
@@ -109,7 +124,7 @@ export async function updateProductAction(
     entityType: "product",
     entityId: updated.id,
     action: "updated",
-    actorUserId: actor?.id,
+    actorUserId: context!.userId,
     summary: `Product "${updated.name}" updated${before.status !== updated.status ? `, status now ${updated.status.toLowerCase()}` : ""}.`,
     before: { name: before.name, sku: before.sku, status: before.status },
     after: { name: updated.name, sku: updated.sku, status: updated.status },
@@ -130,9 +145,9 @@ export async function createProductVersionAction(
   _prev: ProductFormState,
   formData: FormData,
 ): Promise<ProductFormState> {
-  const actor = await getLcaActor();
-  if (!canEditLcaData(actor)) {
-    return { error: "Your role does not allow adding product versions.", success: false };
+  const context = await getLcaContext();
+  if (!canEditLcaData(context)) {
+    return { error: "Your permissions do not allow adding product versions.", success: false };
   }
 
   const parsed = versionSchema.safeParse(Object.fromEntries(formData));
@@ -140,6 +155,13 @@ export async function createProductVersionAction(
     return { error: parsed.error.issues[0]?.message ?? "Check the form and try again.", success: false };
   }
   const data = parsed.data;
+
+  try {
+    await requireProductInScope(context!, data.productId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return { error: "That product no longer exists.", success: false };
+    throw err;
+  }
 
   const existing = await prisma.productVersion.findFirst({
     where: { productId: data.productId, versionLabel: data.versionLabel },
@@ -161,7 +183,7 @@ export async function createProductVersionAction(
     entityType: "product_version",
     entityId: version.id,
     action: "created",
-    actorUserId: actor?.id,
+    actorUserId: context!.userId,
     summary: `Product version "${version.versionLabel}" created. A design change usually means a new assessment rather than an edit to an existing one.`,
     after: { versionLabel: version.versionLabel },
   });
@@ -184,9 +206,9 @@ export async function addManufacturingLocationAction(
   _prev: ProductFormState,
   formData: FormData,
 ): Promise<ProductFormState> {
-  const actor = await getLcaActor();
-  if (!canEditLcaData(actor)) {
-    return { error: "Your role does not allow editing products.", success: false };
+  const context = await getLcaContext();
+  if (!canEditLcaData(context)) {
+    return { error: "Your permissions do not allow editing products.", success: false };
   }
 
   const parsed = locationSchema.safeParse(Object.fromEntries(formData));
@@ -194,6 +216,16 @@ export async function addManufacturingLocationAction(
     return { error: parsed.error.issues[0]?.message ?? "Check the form and try again.", success: false };
   }
   const data = parsed.data;
+
+  const product = await requireProductInScope(context!, data.productId);
+  const productVersion = await prisma.productVersion.findUnique({ where: { id: data.productVersionId } });
+  if (!productVersion || productVersion.productId !== product.id) throw new TenantOwnershipError();
+
+  if (data.siteId) {
+    const ctx = toTenantRepositoryContext(context!);
+    const site = await prisma.site.findFirst({ where: tenantWhere(ctx, { id: data.siteId }) });
+    if (!site) throw new TenantOwnershipError();
+  }
 
   const location = await prisma.productManufacturingLocation.create({
     data: {
@@ -210,7 +242,7 @@ export async function addManufacturingLocationAction(
     entityType: "product_version",
     entityId: data.productVersionId,
     action: "updated",
-    actorUserId: actor?.id,
+    actorUserId: context!.userId,
     summary: `Manufacturing location "${location.name}" added${data.siteId ? ", linked to an internal site so its corporate energy records can be cited" : ""}.`,
     after: { name: location.name, country: location.country, siteId: location.siteId },
   });
@@ -220,15 +252,19 @@ export async function addManufacturingLocationAction(
 }
 
 export async function deleteManufacturingLocationAction(formData: FormData): Promise<void> {
-  const actor = await getLcaActor();
-  if (!canEditLcaData(actor)) return;
+  const context = await getLcaContext();
+  if (!canEditLcaData(context)) return;
 
   const locationId = String(formData.get("locationId") ?? "");
   const productId = String(formData.get("productId") ?? "");
   if (!locationId) return;
 
-  const location = await prisma.productManufacturingLocation.findUnique({ where: { id: locationId } });
-  if (!location) return;
+  await requireProductInScope(context!, productId);
+  const location = await prisma.productManufacturingLocation.findUnique({
+    where: { id: locationId },
+    include: { productVersion: true },
+  });
+  if (!location || location.productVersion.productId !== productId) return;
 
   await prisma.productManufacturingLocation.delete({ where: { id: locationId } });
 
@@ -236,7 +272,7 @@ export async function deleteManufacturingLocationAction(formData: FormData): Pro
     entityType: "product_version",
     entityId: location.productVersionId,
     action: "updated",
-    actorUserId: actor?.id,
+    actorUserId: context!.userId,
     summary: `Manufacturing location "${location.name}" removed.`,
     before: { name: location.name },
   });

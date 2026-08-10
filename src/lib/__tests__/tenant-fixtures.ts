@@ -93,3 +93,61 @@ export const restrictedOrgContextA = makeOrganisationContext(ORG_A, {
   permissions: orgContextA.permissions,
   access: { mode: "RESTRICTED", entityIds: new Set(), siteIds: new Set([SITE_A]) },
 });
+
+/**
+ * LCA-domain (T17) fixtures — same synthetic Aster/Birch tenants, extended
+ * with the product/supplier/assessment/evidence/version rows the LCA
+ * adversarial tests (detail/export/version/evidence paths) exercise.
+ */
+export const lcaOrgContextA = makeOrganisationContext(ORG_A, {
+  permissions: new Set([
+    "lca.view",
+    "lca.product.manage",
+    "lca.assessment.edit",
+    "lca.assessment.calculate",
+    "lca.assessment.approve",
+    "lca.version.issue",
+    "lca.verification.record",
+    "lca.methodology.manage",
+    "lca.supplier.manage",
+    "lca.evidence.manage",
+    "lca.export",
+  ]) as unknown as OrganisationContext["permissions"],
+});
+export const lcaOrgContextB = makeOrganisationContext(ORG_B, {
+  permissions: lcaOrgContextA.permissions,
+});
+
+export const PRODUCT_A = "product-aster-widget";
+export const PRODUCT_B = "product-birch-widget";
+export const SUPPLIER_A = "supplier-aster-co";
+export const SUPPLIER_B = "supplier-birch-co";
+export const ASSESSMENT_A = "assessment-aster-1";
+export const ASSESSMENT_B = "assessment-birch-1";
+export const EVIDENCE_A = "evidence-aster-1";
+export const EVIDENCE_B = "evidence-birch-1";
+export const VERSION_A = "version-aster-1";
+export const VERSION_B = "version-birch-1";
+export const SUPPLIER_PCF_A = "supplier-pcf-aster-1";
+export const SUPPLIER_PCF_B = "supplier-pcf-birch-1";
+
+export const productA = { id: PRODUCT_A, organisationId: ORG_A, entityId: ENTITY_A, name: "Aster Widget" };
+export const productB = { id: PRODUCT_B, organisationId: ORG_B, entityId: ENTITY_B, name: "Birch Widget" };
+
+export const supplierA = { id: SUPPLIER_A, organisationId: ORG_A, entityId: ENTITY_A, name: "Aster Co" };
+export const supplierB = { id: SUPPLIER_B, organisationId: ORG_B, entityId: ENTITY_B, name: "Birch Co" };
+
+export const assessmentA = { id: ASSESSMENT_A, organisationId: ORG_A, entityId: ENTITY_A, reference: "A-001", status: "DRAFT" };
+export const assessmentB = { id: ASSESSMENT_B, organisationId: ORG_B, entityId: ENTITY_B, reference: "B-001", status: "DRAFT" };
+
+export const evidenceA = { id: EVIDENCE_A, organisationId: ORG_A, assessmentId: ASSESSMENT_A, title: "A evidence" };
+export const evidenceB = { id: EVIDENCE_B, organisationId: ORG_B, assessmentId: ASSESSMENT_B, title: "B evidence" };
+
+export const assessmentVersionA = { id: VERSION_A, organisationId: ORG_A, assessmentId: ASSESSMENT_A, version: 1 };
+export const assessmentVersionB = { id: VERSION_B, organisationId: ORG_B, assessmentId: ASSESSMENT_B, version: 1 };
+
+export const supplierPcfA = { id: SUPPLIER_PCF_A, organisationId: ORG_A, entityId: ENTITY_A, supplierId: SUPPLIER_A, productName: "Aster part" };
+export const supplierPcfB = { id: SUPPLIER_PCF_B, organisationId: ORG_B, entityId: ENTITY_B, supplierId: SUPPLIER_B, productName: "Birch part" };
+
+/** A synthetic Evidence A record whose assessmentId was substituted for Assessment B's, simulating "B evidence attached to A assessment" / nested-parent substitution the other way. */
+export const evidenceASubstitutedAssessment = { ...evidenceA, assessmentId: ASSESSMENT_B };

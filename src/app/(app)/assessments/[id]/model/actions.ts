@@ -10,17 +10,25 @@ import {
   upsertProcess,
   upsertProcessOutput,
 } from "@/lib/lca/model-service";
-import { checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
+import { checkCanEditAssessment, getLcaContext, type OrganisationContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import type { AssessmentFormState } from "@/lib/lca/form-state";
 
 
-async function guard(assessmentId: string) {
-  const actor = await getLcaActor();
-  const assessment = await prisma.lcaAssessment.findUnique({ where: { id: assessmentId } });
-  if (!assessment) return { error: "That assessment no longer exists.", actor: null };
-  const permission = checkCanEditAssessment(actor, assessment.status);
-  if (!permission.ok) return { error: permission.reason, actor: null };
-  return { error: null, actor: actor! };
+async function guard(assessmentId: string): Promise<{ error: string; orgContext: null } | { error: null; orgContext: OrganisationContext }> {
+  const orgContext = await getLcaContext();
+  if (!orgContext) return { error: "You must be signed in.", orgContext: null };
+  let assessment;
+  try {
+    assessment = await requireAssessmentInScope(orgContext, assessmentId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return { error: "That assessment no longer exists.", orgContext: null };
+    throw err;
+  }
+  const permission = checkCanEditAssessment(orgContext, assessment.status);
+  if (!permission.ok) return { error: permission.reason, orgContext: null };
+  return { error: null, orgContext };
 }
 
 const processSchema = z.object({
@@ -80,7 +88,7 @@ export async function saveProcessAction(
     }
   }
 
-  await upsertProcess({
+  await upsertProcess(check.orgContext!, {
     id: data.processId || null,
     assessmentId: data.assessmentId,
     parentProcessId: data.parentProcessId || null,
@@ -94,7 +102,7 @@ export async function saveProcessAction(
     allocationBasisDescription: data.allocationBasisDescription,
     geography: data.geography,
     notes: data.notes,
-    actorUserId: check.actor!.id,
+    actorUserId: check.orgContext!.userId,
   });
 
   revalidatePath(`/assessments/${data.assessmentId}`, "layout");
@@ -121,7 +129,7 @@ export async function deleteProcessAction(formData: FormData): Promise<void> {
   const check = await guard(assessmentId);
   if (check.error || !processId) return;
 
-  await deleteProcess(processId, check.actor!.id);
+  await deleteProcess(check.orgContext!, processId, check.orgContext!.userId);
   revalidatePath(`/assessments/${assessmentId}`, "layout");
 }
 
@@ -153,7 +161,7 @@ export async function saveProcessOutputAction(
   const check = await guard(data.assessmentId);
   if (check.error) return { error: check.error, success: false };
 
-  await upsertProcessOutput({
+  await upsertProcessOutput(check.orgContext!, {
     id: data.outputId || null,
     processId: data.processId,
     assessmentId: data.assessmentId,
@@ -166,7 +174,7 @@ export async function saveProcessOutputAction(
     economicValue: data.economicValue,
     economicCurrency: data.economicCurrency,
     notes: data.notes,
-    actorUserId: check.actor!.id,
+    actorUserId: check.orgContext!.userId,
   });
 
   revalidatePath(`/assessments/${data.assessmentId}`, "layout");
@@ -179,6 +187,6 @@ export async function deleteProcessOutputAction(formData: FormData): Promise<voi
   const check = await guard(assessmentId);
   if (check.error || !outputId) return;
 
-  await deleteProcessOutput(outputId, assessmentId, check.actor!.id);
+  await deleteProcessOutput(check.orgContext!, outputId, assessmentId, check.orgContext!.userId);
   revalidatePath(`/assessments/${assessmentId}`, "layout");
 }

@@ -152,6 +152,16 @@ model Organisation {
   reportSnapshots     ReportSnapshot[]
   sourceDocuments     SourceDocument[]
 
+  // Phase 1 tenancy (T17): LCA-domain roots, nullable/expand-only until the
+  // T1A contract migration — see each model's own comment.
+  lcaSuppliers            Supplier[]
+  lcaProducts             Product[]
+  lcaMethodologyProfiles  LcaMethodologyProfile[]
+  lcaAssessments          LcaAssessment[]
+  lcaSupplierPcfs         LcaSupplierPcf[]
+  lcaEvidence             LcaEvidence[]
+  lcaAssessmentVersions   LcaAssessmentVersion[]
+
   @@index([status])
 }
 
@@ -971,40 +981,51 @@ enum LcaCorporateLinkType {
 /// so a supplier-specific corporate factor set and a product-level supplier
 /// PCF can be recognised as the same counterparty.
 model Supplier {
-  id         String   @id @default(cuid())
-  entityId   String
-  entity     Entity   @relation(fields: [entityId], references: [id])
-  name       String
-  identifier String? // internal supplier code, DUNS, VAT number...
-  country    String?
-  contact    String?
-  notes      String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id       String @id @default(cuid())
+  entityId String
+  entity   Entity @relation(fields: [entityId], references: [id])
+  // Phase 1 tenancy (T17): nullable, expand-only, same deferred-to-T1A
+  // contract as the carbon-domain roots added in T16. Denormalised from the
+  // owning Entity at write time; the tenant repository asserts it against
+  // ctx.organisationId rather than trusting a client-supplied value.
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  name           String
+  identifier     String? // internal supplier code, DUNS, VAT number...
+  country        String?
+  contact        String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   productPcfs    LcaSupplierPcf[]
   inventoryItems LcaInventoryItem[]
 
   @@unique([entityId, name])
+  @@index([organisationId])
 }
 
 model Product {
-  id          String           @id @default(cuid())
-  entityId    String
-  entity      Entity           @relation(fields: [entityId], references: [id])
-  name        String
-  sku         String
-  description String?
-  category    String?
-  status      LcaProductStatus @default(ACTIVE)
-  notes       String?
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  id       String @id @default(cuid())
+  entityId String
+  entity   Entity @relation(fields: [entityId], references: [id])
+  // Phase 1 tenancy (T17): nullable, expand-only — see Supplier.organisationId.
+  organisationId String?
+  organisation   Organisation?    @relation(fields: [organisationId], references: [id])
+  name           String
+  sku            String
+  description    String?
+  category       String?
+  status         LcaProductStatus @default(ACTIVE)
+  notes          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   versions ProductVersion[]
 
   @@unique([entityId, sku])
   @@index([entityId])
+  @@index([organisationId])
 }
 
 model ProductVersion {
@@ -1047,6 +1068,13 @@ model LcaMethodologyProfile {
   id       String  @id @default(cuid())
   entityId String?
   entity   Entity? @relation(fields: [entityId], references: [id])
+  // Phase 1 tenancy (T17): nullable, expand-only — see Supplier.organisationId.
+  // Null stays possible even after backfill for a genuinely platform-shared
+  // profile (entityId is already optional for the same reason); the LCA
+  // repository's visibility resolver treats null organisationId here as
+  // platform-shared, never as "belongs to no one so anyone may edit it".
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
 
   name    String
   version String
@@ -1084,6 +1112,7 @@ model LcaMethodologyProfile {
   assessments LcaAssessment[]
 
   @@unique([name, version])
+  @@index([organisationId])
 }
 
 // ---------------------------------------------------------------------------
@@ -1096,6 +1125,13 @@ model LcaAssessment {
   entity           Entity         @relation(fields: [entityId], references: [id])
   productVersionId String
   productVersion   ProductVersion @relation(fields: [productVersionId], references: [id])
+  // Phase 1 tenancy (T17): nullable, expand-only — see Supplier.organisationId.
+  // This is the externally addressable root every LCA detail page, export
+  // route and evidence/version lookup starts from, so it gets a direct
+  // column rather than relying solely on the Entity join (spec §4: "Add
+  // direct organisation ID to externally addressable/exportable roots").
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
 
   reference String
   title     String
@@ -1189,6 +1225,7 @@ model LcaAssessment {
   @@unique([entityId, reference])
   @@index([entityId, status])
   @@index([productVersionId])
+  @@index([organisationId, status])
 }
 
 /// A unit process in the lifecycle model. Self-referencing so a stage can be
@@ -1443,6 +1480,14 @@ model LcaSupplierPcf {
   entity     Entity   @relation(fields: [entityId], references: [id])
   supplierId String
   supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  // Phase 1 tenancy (T17): nullable, expand-only — see Supplier.organisationId.
+  // Distinguishes this tenant-owned supplier PCF register from the
+  // platform-shared EmissionFactor library (spec T17 acceptance: "shared/
+  // global factors are explicitly distinguished from tenant-owned supplier
+  // factors") — a supplier PCF is never resolved into another organisation's
+  // inventory item even though EmissionFactorSet itself stays platform-global.
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
 
   productName       String
   productIdentifier String?
@@ -1492,6 +1537,7 @@ model LcaSupplierPcf {
 
   @@index([entityId])
   @@index([supplierId])
+  @@index([organisationId])
 }
 
 // ---------------------------------------------------------------------------
@@ -1582,6 +1628,13 @@ model LcaEvidence {
   id           String        @id @default(cuid())
   assessmentId String
   assessment   LcaAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  // Phase 1 tenancy (T17): nullable, expand-only — see Supplier.organisationId.
+  // Evidence has its own externally addressable download route
+  // (/api/lca/evidence/[id]), so — like ReportSnapshot/Calculation in T16 —
+  // it gets a direct column rather than requiring every lookup to join
+  // through assessment -> entity -> organisation first.
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
 
   title       String
   description String?
@@ -1620,6 +1673,7 @@ model LcaEvidence {
   blob LcaEvidenceBlob?
 
   @@index([assessmentId])
+  @@index([organisationId])
 }
 
 /// Bytes for evidence held by the built-in database storage provider, kept in
@@ -1745,6 +1799,14 @@ model LcaAssessmentVersion {
   id           String        @id @default(cuid())
   assessmentId String
   assessment   LcaAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  // Phase 1 tenancy (T17): nullable, expand-only — see Supplier.organisationId.
+  // Spec §4: "No report snapshot, LCA issued version, document, export, AI
+  // context, or job payload may combine more than one Organisation" — an
+  // issued version is immutable and frozen, so it gets the same direct
+  // column as ReportSnapshot in T16 rather than relying only on the parent
+  // assessment join.
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
 
   version        Int
   label          String?
@@ -1763,6 +1825,7 @@ model LcaAssessmentVersion {
   createdAt DateTime @default(now())
 
   @@unique([assessmentId, version])
+  @@index([organisationId])
 }
 
 model LcaVerification {

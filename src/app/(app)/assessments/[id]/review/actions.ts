@@ -4,7 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { LcaAssuranceType } from "@prisma/client";
 import { recordVerification, deleteVerification } from "@/lib/lca/registers-service";
-import { checkCanApprove, getLcaActor } from "@/lib/lca/permissions";
+import { checkCanApprove, getLcaContext } from "@/lib/lca/permissions";
 import type { AssessmentFormState } from "@/lib/lca/form-state";
 
 
@@ -30,8 +30,8 @@ export async function recordVerificationAction(
   _prev: AssessmentFormState,
   formData: FormData,
 ): Promise<AssessmentFormState> {
-  const actor = await getLcaActor();
-  const permission = checkCanApprove(actor);
+  const context = await getLcaContext();
+  const permission = checkCanApprove(context);
   if (!permission.ok) return { error: permission.reason, success: false };
 
   const parsed = verificationSchema.safeParse(Object.fromEntries(formData));
@@ -47,7 +47,7 @@ export async function recordVerificationAction(
     return { error: "The statement link must be an http or https URL.", success: false };
   }
 
-  await recordVerification({
+  await recordVerification(context!, {
     assessmentId: data.assessmentId,
     organisation: data.organisation,
     verifierName: data.verifierName,
@@ -58,7 +58,7 @@ export async function recordVerificationAction(
     statementUrl: data.statementUrl,
     conclusion: data.conclusion,
     notes: data.notes,
-    actorUserId: actor!.id,
+    actorUserId: context!.userId,
   });
 
   revalidatePath(`/assessments/${data.assessmentId}`, "layout");
@@ -68,10 +68,10 @@ export async function recordVerificationAction(
 export async function deleteVerificationAction(formData: FormData): Promise<void> {
   const assessmentId = String(formData.get("assessmentId") ?? "");
   const verificationId = String(formData.get("verificationId") ?? "");
-  const actor = await getLcaActor();
-  const permission = checkCanApprove(actor);
+  const context = await getLcaContext();
+  const permission = checkCanApprove(context);
   if (!permission.ok || !verificationId) return;
 
-  await deleteVerification(verificationId, actor!.id);
+  await deleteVerification(context!, verificationId, context!.userId);
   revalidatePath(`/assessments/${assessmentId}`, "layout");
 }

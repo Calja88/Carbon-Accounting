@@ -18,6 +18,9 @@ import {
   type InventoryImportContext,
   type PreparedInventoryRow,
 } from "./inventory-import";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 
 export async function buildImportContext(assessmentId: string): Promise<InventoryImportContext> {
   const assessment = await prisma.lcaAssessment.findUniqueOrThrow({
@@ -119,7 +122,26 @@ function toItemData(row: PreparedInventoryRow) {
   } satisfies Omit<Prisma.LcaInventoryItemUncheckedCreateInput, "assessmentId" | "processId">;
 }
 
-export async function commitInventoryImport(input: CommitImportInput): Promise<CommitImportOutcome> {
+export async function commitInventoryImport(context: OrganisationContext, input: CommitImportInput): Promise<CommitImportOutcome> {
+  await requireAssessmentInScope(context, input.assessmentId);
+
+  // The preview step matches processId/duplicateOfItemId against a
+  // tenant-scoped candidate list (buildImportContext), but the commit step
+  // receives the client-submitted rows wholesale — a tampered row could
+  // otherwise point a "duplicateStrategy: update" at any inventory item's
+  // id, or a process at another assessment's id. Every id used in a write
+  // below is re-verified against this assessment right here.
+  const [validProcessIds, validDuplicateIds] = await Promise.all([
+    prisma.lcaProcess.findMany({ where: { assessmentId: input.assessmentId }, select: { id: true } }),
+    prisma.lcaInventoryItem.findMany({ where: { assessmentId: input.assessmentId }, select: { id: true } }),
+  ]);
+  const processIds = new Set(validProcessIds.map((p) => p.id));
+  const duplicateIds = new Set(validDuplicateIds.map((i) => i.id));
+  for (const row of input.rows) {
+    if (!processIds.has(row.processId)) throw new TenantOwnershipError();
+    if (row.duplicateOfItemId && !duplicateIds.has(row.duplicateOfItemId)) throw new TenantOwnershipError();
+  }
+
   let created = 0;
   let updated = 0;
   let skipped = 0;

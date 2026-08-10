@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { listSuppliers, listSupplierPcfs, pcfPerUnit } from "@/lib/lca/supplier-service";
-import { canManageSuppliers, getLcaActor } from "@/lib/lca/permissions";
+import { canManageSuppliers, getLcaContext } from "@/lib/lca/permissions";
+import { redirect } from "next/navigation";
 import { BOUNDARY_LABELS, PCF_VERIFICATION_LABELS } from "@/lib/lca/labels";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, EmptyState, Notice, PageHeading, SectionCard, Td } from "@/components/lca/ui";
@@ -9,14 +10,16 @@ import { CreateSupplierForm, PactImportForm, SupplierPcfForm } from "./supplier-
 export const dynamic = "force-dynamic";
 
 export default async function SuppliersPage() {
-  const [suppliers, pcfs, entities, actor] = await Promise.all([
-    listSuppliers(),
-    listSupplierPcfs(),
-    prisma.entity.findMany({ orderBy: { name: "asc" } }),
-    getLcaActor(),
+  const context = await getLcaContext();
+  if (!context) redirect("/login");
+
+  const [suppliers, pcfs, entities] = await Promise.all([
+    listSuppliers(context),
+    listSupplierPcfs(context),
+    prisma.entity.findMany({ where: { organisationId: context.organisationId }, orderBy: { name: "asc" } }),
   ]);
 
-  const canEdit = canManageSuppliers(actor);
+  const canEdit = canManageSuppliers(context);
 
   // Where a product-side supplier matches a corporate supplier-specific factor
   // set or corporate activity entries, surface it — without merging any figures.

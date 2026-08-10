@@ -25,18 +25,26 @@ import {
 } from "@/lib/lca/model-service";
 import { createCorporateLink, deleteCorporateLink } from "@/lib/lca/registers-service";
 import { applySupplierPcfToItem } from "@/lib/lca/supplier-service";
-import { checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
+import { checkCanEditAssessment, getLcaContext, type OrganisationContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import { areUnitsCompatible, findUnit } from "@/lib/lca/units";
 import type { AssessmentFormState } from "@/lib/lca/form-state";
 
 
-async function guard(assessmentId: string) {
-  const actor = await getLcaActor();
-  const assessment = await prisma.lcaAssessment.findUnique({ where: { id: assessmentId } });
-  if (!assessment) return { error: "That assessment no longer exists.", actor: null };
-  const permission = checkCanEditAssessment(actor, assessment.status);
-  if (!permission.ok) return { error: permission.reason, actor: null };
-  return { error: null, actor: actor! };
+async function guard(assessmentId: string): Promise<{ error: string; orgContext: null } | { error: null; orgContext: OrganisationContext }> {
+  const orgContext = await getLcaContext();
+  if (!orgContext) return { error: "You must be signed in.", orgContext: null };
+  let assessment;
+  try {
+    assessment = await requireAssessmentInScope(orgContext, assessmentId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return { error: "That assessment no longer exists.", orgContext: null };
+    throw err;
+  }
+  const permission = checkCanEditAssessment(orgContext, assessment.status);
+  if (!permission.ok) return { error: permission.reason, orgContext: null };
+  return { error: null, orgContext };
 }
 
 function optionalScore(value: FormDataEntryValue | null): number | null {
@@ -109,7 +117,7 @@ export async function saveInventoryItemAction(
     return { error: "An excluded line needs a reason — an undocumented exclusion is indistinguishable from an omission.", success: false };
   }
 
-  const item = await upsertInventoryItem({
+  const item = await upsertInventoryItem(check.orgContext!, {
     id: data.itemId || null,
     assessmentId: data.assessmentId,
     processId: data.processId,
@@ -145,7 +153,7 @@ export async function saveInventoryItemAction(
     isExcluded: data.isExcluded === "on",
     exclusionReason: data.exclusionReason,
     notes: data.notes,
-    actorUserId: check.actor!.id,
+    actorUserId: check.orgContext!.userId,
   });
 
   revalidatePath(`/assessments/${data.assessmentId}`, "layout");
@@ -158,7 +166,7 @@ export async function deleteInventoryItemAction(formData: FormData): Promise<voi
   const check = await guard(assessmentId);
   if (check.error || !itemId) return;
 
-  await deleteInventoryItem(itemId, check.actor!.id);
+  await deleteInventoryItem(check.orgContext!, itemId, check.orgContext!.userId);
   revalidatePath(`/assessments/${assessmentId}`, "layout");
 }
 
@@ -197,7 +205,9 @@ export async function assignFactorAction(
   const check = await guard(data.assessmentId);
   if (check.error) return { error: check.error, success: false };
 
-  const item = await prisma.lcaInventoryItem.findUnique({ where: { id: data.inventoryItemId } });
+  const item = await prisma.lcaInventoryItem.findFirst({
+    where: { id: data.inventoryItemId, assessmentId: data.assessmentId },
+  });
   if (!item) return { error: "That inventory line no longer exists.", success: false };
 
   if (data.mode === LcaFactorSelectionMode.LIBRARY_FACTOR) {
@@ -214,7 +224,7 @@ export async function assignFactorAction(
 
   if (data.mode === LcaFactorSelectionMode.SUPPLIER_PCF) {
     if (!data.supplierPcfId) return { error: "Choose a supplier PCF.", success: false };
-    await applySupplierPcfToItem(data.inventoryItemId, data.supplierPcfId, check.actor!.id);
+    await applySupplierPcfToItem(check.orgContext!, data.inventoryItemId, data.supplierPcfId, check.orgContext!.userId);
     revalidatePath(`/assessments/${data.assessmentId}`, "layout");
     return { error: null, success: true, message: "Supplier PCF applied in place of the generic factor." };
   }
@@ -237,7 +247,7 @@ export async function assignFactorAction(
     }
   }
 
-  await assignFactor({
+  await assignFactor(check.orgContext!, {
     inventoryItemId: data.inventoryItemId,
     assessmentId: data.assessmentId,
     mode: data.mode,
@@ -252,7 +262,7 @@ export async function assignFactorAction(
     manualFactorYear: data.manualFactorYear ? Number(data.manualFactorYear) : null,
     manualFactorGwpBasis: data.manualFactorGwpBasis,
     manualFactorRationale: data.manualFactorRationale,
-    actorUserId: check.actor!.id,
+    actorUserId: check.orgContext!.userId,
   });
 
   revalidatePath(`/assessments/${data.assessmentId}`, "layout");
@@ -312,7 +322,7 @@ export async function saveTransportLegAction(
 
   const existingCount = await prisma.lcaTransportLeg.count({ where: { inventoryItemId: data.inventoryItemId } });
 
-  await upsertTransportLeg({
+  await upsertTransportLeg(check.orgContext!, {
     id: data.legId || null,
     inventoryItemId: data.inventoryItemId,
     assessmentId: data.assessmentId,
@@ -333,7 +343,7 @@ export async function saveTransportLegAction(
     manualFactorSource: data.manualFactorSource,
     assumptions: data.assumptions,
     notes: data.notes,
-    actorUserId: check.actor!.id,
+    actorUserId: check.orgContext!.userId,
   });
 
   revalidatePath(`/assessments/${data.assessmentId}`, "layout");
@@ -346,7 +356,7 @@ export async function deleteTransportLegAction(formData: FormData): Promise<void
   const check = await guard(assessmentId);
   if (check.error || !legId) return;
 
-  await deleteTransportLeg(legId, assessmentId, check.actor!.id);
+  await deleteTransportLeg(check.orgContext!, legId, assessmentId, check.orgContext!.userId);
   revalidatePath(`/assessments/${assessmentId}`, "layout");
 }
 
@@ -397,7 +407,7 @@ export async function saveEndOfLifeRouteAction(
     return { error: "Choose an end-of-life factor from the library, or enter a sourced one.", success: false };
   }
 
-  await upsertEndOfLifeRoute({
+  await upsertEndOfLifeRoute(check.orgContext!, {
     id: data.routeId || null,
     inventoryItemId: data.inventoryItemId,
     assessmentId: data.assessmentId,
@@ -414,7 +424,7 @@ export async function saveEndOfLifeRouteAction(
     avoidedFactorSource: data.avoidedFactorSource,
     recoveryAssumptions: data.recoveryAssumptions,
     notes: data.notes,
-    actorUserId: check.actor!.id,
+    actorUserId: check.orgContext!.userId,
   });
 
   // The 100% check belongs to the validation engine rather than this form: a
@@ -440,7 +450,7 @@ export async function deleteEndOfLifeRouteAction(formData: FormData): Promise<vo
   const check = await guard(assessmentId);
   if (check.error || !routeId) return;
 
-  await deleteEndOfLifeRoute(routeId, assessmentId, check.actor!.id);
+  await deleteEndOfLifeRoute(check.orgContext!, routeId, assessmentId, check.orgContext!.userId);
   revalidatePath(`/assessments/${assessmentId}`, "layout");
 }
 
@@ -481,7 +491,7 @@ export async function createCorporateLinkAction(
     return { error: "Record how the attribution share was arrived at — that reasoning is what a reviewer checks.", success: false };
   }
 
-  await createCorporateLink({
+  await createCorporateLink(check.orgContext!, {
     assessmentId: data.assessmentId,
     inventoryItemId: data.inventoryItemId,
     linkType: data.linkType,
@@ -491,7 +501,7 @@ export async function createCorporateLinkAction(
     allocationPercent: data.allocationPercent,
     allocationBasis: data.allocationBasis,
     notes: data.notes,
-    actorUserId: check.actor!.id,
+    actorUserId: check.orgContext!.userId,
   });
 
   revalidatePath(`/assessments/${data.assessmentId}`, "layout");
@@ -508,6 +518,6 @@ export async function deleteCorporateLinkAction(formData: FormData): Promise<voi
   const check = await guard(assessmentId);
   if (check.error || !linkId) return;
 
-  await deleteCorporateLink(linkId, assessmentId, check.actor!.id);
+  await deleteCorporateLink(check.orgContext!, linkId, assessmentId, check.orgContext!.userId);
   revalidatePath(`/assessments/${assessmentId}`, "layout");
 }

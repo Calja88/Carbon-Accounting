@@ -12,7 +12,11 @@ import {
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { recordAuditEvent } from "@/lib/lca/audit-service";
-import { canManageMethodology, getLcaActor } from "@/lib/lca/permissions";
+import { canManageMethodology, getLcaContext } from "@/lib/lca/permissions";
+import { assertEntityAccess } from "@/lib/rbac/authorize";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { assertMethodologyProfileMutable, findVisibleMethodologyProfile } from "@/lib/repositories/lca-repository";
+import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import type { MethodologyFormState } from "@/lib/lca/form-state";
 
 
@@ -58,9 +62,9 @@ export async function saveMethodologyAction(
   _prev: MethodologyFormState,
   formData: FormData,
 ): Promise<MethodologyFormState> {
-  const actor = await getLcaActor();
-  if (!canManageMethodology(actor)) {
-    return { error: "Only a sustainability lead or an administrator can change methodology profiles.", success: false };
+  const context = await getLcaContext();
+  if (!canManageMethodology(context)) {
+    return { error: "Your permissions do not allow changing methodology profiles.", success: false };
   }
 
   const parsed = schema.safeParse(Object.fromEntries(formData));
@@ -111,6 +115,18 @@ export async function saveMethodologyAction(
     isDefault: data.isDefault === "on",
   };
 
+  if (data.entityId) assertEntityAccess(context!, data.entityId);
+
+  const ctx = toTenantRepositoryContext(context!);
+  if (data.entityId) {
+    const entity = await prisma.entity.findFirst({ where: tenantWhere(ctx, { id: data.entityId }) });
+    if (!entity) throw new TenantOwnershipError();
+  }
+  if (data.profileId) {
+    const existing = await findVisibleMethodologyProfile(ctx, data.profileId);
+    assertMethodologyProfileMutable(ctx, existing);
+  }
+
   const duplicate = await prisma.lcaMethodologyProfile.findFirst({
     where: { name: values.name, version: values.version, ...(data.profileId ? { NOT: { id: data.profileId } } : {}) },
   });
@@ -120,11 +136,11 @@ export async function saveMethodologyAction(
 
   const profile = data.profileId
     ? await prisma.lcaMethodologyProfile.update({ where: { id: data.profileId }, data: values })
-    : await prisma.lcaMethodologyProfile.create({ data: values });
+    : await prisma.lcaMethodologyProfile.create({ data: { ...values, organisationId: context!.organisationId } });
 
   if (values.isDefault) {
     await prisma.lcaMethodologyProfile.updateMany({
-      where: { id: { not: profile.id }, isDefault: true },
+      where: { id: { not: profile.id }, isDefault: true, organisationId: context!.organisationId },
       data: { isDefault: false },
     });
   }
@@ -137,7 +153,7 @@ export async function saveMethodologyAction(
     entityType: "methodology",
     entityId: profile.id,
     action: data.profileId ? "updated" : "created",
-    actorUserId: actor?.id,
+    actorUserId: context!.userId,
     summary: data.profileId
       ? `Methodology profile "${profile.name} ${profile.version}" updated. ${affected} assessment(s) read this profile; drafts among them pick the change up on their next calculation, and issued versions keep the methodology frozen into them.`
       : `Methodology profile "${profile.name} ${profile.version}" created.`,

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { LcaAssuranceType, LcaBoundary, LcaPcfVerificationStatus } from "@prisma/client";
 import { createSupplier, createSupplierPcf, importPactDocument } from "@/lib/lca/supplier-service";
-import { canManageSuppliers, getLcaActor } from "@/lib/lca/permissions";
+import { canManageSuppliers, getLcaContext } from "@/lib/lca/permissions";
 import { findUnit } from "@/lib/lca/units";
 import type { SupplierFormState } from "@/lib/lca/form-state";
 
@@ -22,15 +22,15 @@ export async function createSupplierAction(
   _prev: SupplierFormState,
   formData: FormData,
 ): Promise<SupplierFormState> {
-  const actor = await getLcaActor();
-  if (!canManageSuppliers(actor)) return { error: "Your role does not allow adding suppliers.", success: false };
+  const context = await getLcaContext();
+  if (!canManageSuppliers(context)) return { error: "Your permissions do not allow adding suppliers.", success: false };
 
   const parsed = supplierSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Check the form and try again.", success: false };
   }
 
-  await createSupplier({ ...parsed.data, actorUserId: actor!.id });
+  await createSupplier(context!, { ...parsed.data, actorUserId: context!.userId });
   revalidatePath("/suppliers");
   return { error: null, success: true, message: "Supplier added." };
 }
@@ -74,8 +74,8 @@ export async function createSupplierPcfAction(
   _prev: SupplierFormState,
   formData: FormData,
 ): Promise<SupplierFormState> {
-  const actor = await getLcaActor();
-  if (!canManageSuppliers(actor)) return { error: "Your role does not allow recording supplier footprints.", success: false };
+  const context = await getLcaContext();
+  if (!canManageSuppliers(context)) return { error: "Your permissions do not allow recording supplier footprints.", success: false };
 
   const parsed = pcfSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -99,7 +99,7 @@ export async function createSupplierPcfAction(
     return { error: "A third-party verified footprint needs the verifier's name.", success: false };
   }
 
-  await createSupplierPcf({
+  await createSupplierPcf(context!, {
     entityId: data.entityId,
     supplierId: data.supplierId,
     productName: data.productName,
@@ -129,7 +129,7 @@ export async function createSupplierPcfAction(
     completenessScore: optionalScore(formData.get("completenessScore")),
     reliabilityScore: optionalScore(formData.get("reliabilityScore")),
     notes: data.notes,
-    actorUserId: actor!.id,
+    actorUserId: context!.userId,
   });
 
   revalidatePath("/suppliers");
@@ -140,8 +140,8 @@ export async function importPactDocumentAction(
   _prev: SupplierFormState,
   formData: FormData,
 ): Promise<SupplierFormState> {
-  const actor = await getLcaActor();
-  if (!canManageSuppliers(actor)) return { error: "Your role does not allow importing supplier footprints.", success: false };
+  const context = await getLcaContext();
+  if (!canManageSuppliers(context)) return { error: "Your permissions do not allow importing supplier footprints.", success: false };
 
   const entityId = String(formData.get("entityId") ?? "");
   const supplierId = String(formData.get("supplierId") ?? "") || null;
@@ -164,7 +164,7 @@ export async function importPactDocumentAction(
     return { error: "That is not valid JSON.", success: false };
   }
 
-  const result = await importPactDocument({ entityId, supplierId, document: parsed, actorUserId: actor!.id });
+  const result = await importPactDocument(context!, { entityId, supplierId, document: parsed, actorUserId: context!.userId });
 
   if (!result.ok) {
     return {

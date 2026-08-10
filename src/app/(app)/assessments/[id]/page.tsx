@@ -6,6 +6,10 @@ import { analyseContributions, summariseDataQuality } from "@/lib/lca/analysis";
 import { runValidation } from "@/lib/lca/validation-service";
 import { buildReadinessReport } from "@/lib/lca/readiness-service";
 import { toMethodologyConfig } from "@/lib/lca/methodology";
+import { getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { LIFECYCLE_STAGE_ORDER, BOUNDARY_LABELS, STAGE_LABELS } from "@/lib/lca/labels";
 import { formatKgPrecise } from "@/components/charts/palette";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +20,15 @@ export const dynamic = "force-dynamic";
 
 export default async function AssessmentOverviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const context = await getLcaContext();
+  if (!context) notFound();
+  try {
+    await requireAssessmentInScope(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
+
   const assessment = await loadAssessment(id);
   if (!assessment) notFound();
 

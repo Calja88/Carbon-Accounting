@@ -15,7 +15,9 @@ import {
 import { runCalculation } from "@/lib/lca/calculation-service";
 import { checkStatusTransition } from "@/lib/lca/readiness-service";
 import { recordAuditEvent, diffRecords } from "@/lib/lca/audit-service";
-import { canEditLcaData, checkCanApprove, checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
+import { canEditLcaData, checkCanApprove, checkCanEditAssessment, getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import type { AssessmentFormState } from "@/lib/lca/form-state";
 
 
@@ -27,14 +29,22 @@ function ok(message?: string): AssessmentFormState {
   return { error: null, success: true, message: message ?? null };
 }
 
-/** Loads the assessment and checks the actor may change it. */
+/** Loads the assessment (tenant-scoped) and checks the actor may change it. */
 async function guardEdit(assessmentId: string) {
-  const actor = await getLcaActor();
-  const assessment = await prisma.lcaAssessment.findUnique({ where: { id: assessmentId } });
-  if (!assessment) return { error: "That assessment no longer exists." as const, actor: null, assessment: null };
-  const permission = checkCanEditAssessment(actor, assessment.status);
-  if (!permission.ok) return { error: permission.reason, actor: null, assessment: null };
-  return { error: null, actor: actor!, assessment };
+  const context = await getLcaContext();
+  if (!context) return { error: "You must be signed in." as const, context: null, assessment: null };
+  let assessment;
+  try {
+    assessment = await requireAssessmentInScope(context, assessmentId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) {
+      return { error: "That assessment no longer exists." as const, context: null, assessment: null };
+    }
+    throw err;
+  }
+  const permission = checkCanEditAssessment(context, assessment.status);
+  if (!permission.ok) return { error: permission.reason, context: null, assessment: null };
+  return { error: null, context, assessment };
 }
 
 // ---------------------------------------------------------------------------
@@ -55,8 +65,8 @@ export async function createAssessmentAction(
   _prev: AssessmentFormState,
   formData: FormData,
 ): Promise<AssessmentFormState> {
-  const actor = await getLcaActor();
-  if (!canEditLcaData(actor)) return fail("Your role does not allow creating assessments.");
+  const context = await getLcaContext();
+  if (!canEditLcaData(context)) return fail("Your permissions do not allow creating assessments.");
 
   const parsed = createSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Check the form and try again.");
@@ -67,15 +77,15 @@ export async function createAssessmentAction(
   });
   if (duplicate) return fail(`An assessment with reference "${data.reference}" already exists for this operating unit.`);
 
-  const assessment = await createAssessment({
+  const assessment = await createAssessment(context!, {
     entityId: data.entityId,
     productVersionId: data.productVersionId,
     reference: data.reference,
     title: data.title,
     boundary: data.boundary,
     methodologyProfileId: data.methodologyProfileId || null,
-    ownerUserId: data.ownerUserId || actor?.id || null,
-    actorUserId: actor!.id,
+    ownerUserId: data.ownerUserId || context?.userId || null,
+    actorUserId: context!.userId,
   });
 
   revalidatePath("/assessments");
@@ -188,7 +198,7 @@ export async function saveGoalScopeAction(
     entityType: methodologyChanged ? "methodology" : "assessment",
     entityId: data.assessmentId,
     action: "updated",
-    actorUserId: guard.actor.id,
+    actorUserId: guard.context.userId,
     summary: methodologyChanged
       ? "Methodology profile changed. Every figure in this assessment is calculated under the new profile's rules from the next calculation run."
       : diff.changedFields.length > 0
@@ -210,10 +220,11 @@ export async function runCalculationAction(formData: FormData): Promise<void> {
   const assessmentId = String(formData.get("assessmentId") ?? "");
   if (!assessmentId) return;
 
-  const actor = await getLcaActor();
-  if (!canEditLcaData(actor)) return;
+  const context = await getLcaContext();
+  if (!context || !canEditLcaData(context)) return;
+  await requireAssessmentInScope(context, assessmentId);
 
-  await runCalculation({ assessmentId, actorUserId: actor!.id });
+  await runCalculation({ assessmentId, actorUserId: context.userId });
 
   revalidatePath(`/assessments/${assessmentId}`, "layout");
 }
@@ -230,17 +241,22 @@ export async function changeStatusAction(
   const to = String(formData.get("status") ?? "") as LcaAssessmentStatus;
   const note = String(formData.get("note") ?? "").trim() || null;
 
-  const actor = await getLcaActor();
-  const permission = checkCanApprove(actor);
+  const context = await getLcaContext();
+  const permission = checkCanApprove(context);
   if (!permission.ok) return fail(permission.reason);
 
-  const assessment = await prisma.lcaAssessment.findUnique({ where: { id: assessmentId } });
-  if (!assessment) return fail("That assessment no longer exists.");
+  let assessment;
+  try {
+    assessment = await requireAssessmentInScope(context!, assessmentId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return fail("That assessment no longer exists.");
+    throw err;
+  }
 
   const check = await checkStatusTransition(assessmentId, assessment.status, to);
   if (!check.allowed) return fail(check.reason ?? "That status change is not allowed.");
 
-  await changeStatus(assessmentId, to, actor!.id, note);
+  await changeStatus(context!, assessmentId, to, context!.userId, note);
 
   revalidatePath(`/assessments/${assessmentId}`, "layout");
   return ok(`Status moved to ${to.replace(/_/g, " ").toLowerCase()}.`);
@@ -257,11 +273,11 @@ export async function issueVersionAction(
   const assessmentId = String(formData.get("assessmentId") ?? "");
   const label = String(formData.get("label") ?? "").trim() || null;
 
-  const actor = await getLcaActor();
-  const permission = checkCanApprove(actor);
+  const context = await getLcaContext();
+  const permission = checkCanApprove(context);
   if (!permission.ok) return fail(permission.reason);
 
-  const version = await issueVersion({ assessmentId, label, actorUserId: actor!.id });
+  const version = await issueVersion(context!, { assessmentId, label, actorUserId: context!.userId });
 
   revalidatePath(`/assessments/${assessmentId}`, "layout");
   return ok(`Version ${version.version} issued and frozen. It will not change if the assessment is edited later.`);
@@ -275,26 +291,31 @@ export async function createRevisionAction(
   const reference = String(formData.get("reference") ?? "").trim();
   const title = String(formData.get("title") ?? "").trim();
 
-  const actor = await getLcaActor();
-  const permission = checkCanApprove(actor);
+  const context = await getLcaContext();
+  const permission = checkCanApprove(context);
   if (!permission.ok) return fail(permission.reason);
   if (!reference || !title) return fail("Give the revision a reference and a title.");
 
-  const source = await prisma.lcaAssessment.findUnique({ where: { id: assessmentId } });
-  if (!source) return fail("That assessment no longer exists.");
+  let source;
+  try {
+    source = await requireAssessmentInScope(context!, assessmentId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return fail("That assessment no longer exists.");
+    throw err;
+  }
 
   const duplicate = await prisma.lcaAssessment.findFirst({ where: { entityId: source.entityId, reference } });
   if (duplicate) return fail(`An assessment with reference "${reference}" already exists.`);
 
-  const revision = await cloneAssessment({
+  const revision = await cloneAssessment(context!, {
     sourceAssessmentId: assessmentId,
-    actorUserId: actor!.id,
+    actorUserId: context!.userId,
     reference,
     title,
     kind: "revision",
   });
 
-  await supersedeWithRevision(assessmentId, revision.id, actor!.id);
+  await supersedeWithRevision(context!, assessmentId, revision.id, context!.userId);
 
   revalidatePath("/assessments");
   redirect(`/assessments/${revision.id}`);
@@ -313,19 +334,24 @@ export async function createScenarioAction(
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("scenarioDescription") ?? "").trim() || null;
 
-  const actor = await getLcaActor();
-  if (!canEditLcaData(actor)) return fail("Your role does not allow creating scenarios.");
+  const context = await getLcaContext();
+  if (!canEditLcaData(context)) return fail("Your permissions do not allow creating scenarios.");
   if (!reference || !title) return fail("Give the scenario a reference and a name.");
 
-  const source = await prisma.lcaAssessment.findUnique({ where: { id: assessmentId } });
-  if (!source) return fail("That assessment no longer exists.");
+  let source;
+  try {
+    source = await requireAssessmentInScope(context!, assessmentId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return fail("That assessment no longer exists.");
+    throw err;
+  }
 
   const duplicate = await prisma.lcaAssessment.findFirst({ where: { entityId: source.entityId, reference } });
   if (duplicate) return fail(`An assessment or scenario with reference "${reference}" already exists.`);
 
-  const scenario = await cloneAssessment({
+  const scenario = await cloneAssessment(context!, {
     sourceAssessmentId: assessmentId,
-    actorUserId: actor!.id,
+    actorUserId: context!.userId,
     reference,
     title,
     kind: "scenario",
@@ -334,7 +360,7 @@ export async function createScenarioAction(
 
   // A scenario is only useful once it has a figure to compare, and the copy is
   // identical at this point, so calculate it immediately.
-  await runCalculation({ assessmentId: scenario.id, actorUserId: actor!.id, notes: "Initial run of a newly created scenario." });
+  await runCalculation({ assessmentId: scenario.id, actorUserId: context!.userId, notes: "Initial run of a newly created scenario." });
 
   revalidatePath(`/assessments/${assessmentId}/scenarios`);
   return ok(`Scenario "${title}" created as an independent copy. Editing it cannot change the baseline.`);
@@ -345,9 +371,10 @@ export async function recalculateScenarioAction(formData: FormData): Promise<voi
   const baselineId = String(formData.get("baselineId") ?? "");
   if (!scenarioId) return;
 
-  const actor = await getLcaActor();
-  if (!canEditLcaData(actor)) return;
+  const context = await getLcaContext();
+  if (!context || !canEditLcaData(context)) return;
+  await requireAssessmentInScope(context, scenarioId);
 
-  await runCalculation({ assessmentId: scenarioId, actorUserId: actor!.id });
+  await runCalculation({ assessmentId: scenarioId, actorUserId: context.userId });
   revalidatePath(`/assessments/${baselineId}/scenarios`);
 }

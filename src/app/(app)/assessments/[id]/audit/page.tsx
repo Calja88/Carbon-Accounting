@@ -1,6 +1,10 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { countAuditEvents, listAuditEvents } from "@/lib/lca/audit-service";
+import { getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, EmptyState, Notice, PageHeading, SectionCard, Td } from "@/components/lca/ui";
 
@@ -51,6 +55,15 @@ const ACTION_TONES: Record<string, "success" | "info" | "warning" | "danger" | "
 
 export default async function AuditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const context = await getLcaContext();
+  if (!context) notFound();
+  try {
+    await requireAssessmentInScope(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
+
   const [assessment, events, total] = await Promise.all([
     prisma.lcaAssessment.findUnique({ where: { id } }),
     listAuditEvents(id, 500),

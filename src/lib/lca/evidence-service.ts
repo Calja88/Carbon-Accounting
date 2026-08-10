@@ -16,6 +16,9 @@ import { createHash } from "node:crypto";
 import { LcaEvidenceKind, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { recordAuditEvent } from "./audit-service";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import { findTenantEvidence, requireAssessmentInScope, toTenantRepositoryContext } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 
 /** Guard against a single upload filling the database. */
 export const MAX_EVIDENCE_BYTES = 15 * 1024 * 1024;
@@ -115,7 +118,28 @@ export interface CreateEvidenceInput extends EvidenceTarget {
 
 export class EvidenceError extends Error {}
 
-export async function createEvidence(input: CreateEvidenceInput) {
+export async function createEvidence(context: OrganisationContext, input: CreateEvidenceInput) {
+  const assessment = await requireAssessmentInScope(context, input.assessmentId);
+
+  // Every optional target is a child of the same assessment — a foreign id
+  // here would attach A's evidence metadata to B's process/item/PCF/register
+  // row (PHASE1_ADVERSARIAL_TEST_MATRIX.md §4: "B evidence attached to A
+  // assessment"), so each supplied target is verified before the row exists.
+  const [process, item, supplierPcf, assumption, exclusion, verification] = await Promise.all([
+    input.processId ? prisma.lcaProcess.findUnique({ where: { id: input.processId }, select: { assessmentId: true } }) : null,
+    input.inventoryItemId ? prisma.lcaInventoryItem.findUnique({ where: { id: input.inventoryItemId }, select: { assessmentId: true } }) : null,
+    input.supplierPcfId ? prisma.lcaSupplierPcf.findUnique({ where: { id: input.supplierPcfId }, select: { organisationId: true } }) : null,
+    input.assumptionId ? prisma.lcaAssumption.findUnique({ where: { id: input.assumptionId }, select: { assessmentId: true } }) : null,
+    input.exclusionId ? prisma.lcaExclusion.findUnique({ where: { id: input.exclusionId }, select: { assessmentId: true } }) : null,
+    input.verificationId ? prisma.lcaVerification.findUnique({ where: { id: input.verificationId }, select: { assessmentId: true } }) : null,
+  ]);
+  if (input.processId && process?.assessmentId !== assessment.id) throw new TenantOwnershipError();
+  if (input.inventoryItemId && item?.assessmentId !== assessment.id) throw new TenantOwnershipError();
+  if (input.supplierPcfId && supplierPcf?.organisationId !== assessment.organisationId) throw new TenantOwnershipError();
+  if (input.assumptionId && assumption?.assessmentId !== assessment.id) throw new TenantOwnershipError();
+  if (input.exclusionId && exclusion?.assessmentId !== assessment.id) throw new TenantOwnershipError();
+  if (input.verificationId && verification?.assessmentId !== assessment.id) throw new TenantOwnershipError();
+
   if (!input.externalUrl && !input.file) {
     throw new EvidenceError("Attach a file or record a link — evidence needs one or the other.");
   }
@@ -140,6 +164,7 @@ export async function createEvidence(input: CreateEvidenceInput) {
   const evidence = await prisma.lcaEvidence.create({
     data: {
       assessmentId: input.assessmentId,
+      organisationId: context.organisationId,
       title: input.title,
       description: input.description ?? null,
       kind: input.file ? LcaEvidenceKind.UPLOADED_FILE : LcaEvidenceKind.EXTERNAL_LINK,
@@ -201,8 +226,12 @@ function describeTarget(target: EvidenceTarget): string {
   return ", linked to the assessment";
 }
 
-export async function readEvidenceBytes(evidenceId: string): Promise<{ bytes: Buffer; evidence: NonNullable<Awaited<ReturnType<typeof getEvidence>>> } | null> {
-  const evidence = await getEvidence(evidenceId);
+export async function readEvidenceBytes(
+  context: OrganisationContext,
+  evidenceId: string,
+  expectedAssessmentId?: string,
+): Promise<{ bytes: Buffer; evidence: NonNullable<Awaited<ReturnType<typeof getEvidence>>> } | null> {
+  const evidence = await getEvidence(context, evidenceId, expectedAssessmentId);
   if (!evidence || evidence.kind !== LcaEvidenceKind.UPLOADED_FILE || !evidence.storageKey) return null;
   const provider = providerForKey(evidence.storageProvider) ?? activeEvidenceStorageProvider();
   const bytes = await provider.get(evidence.storageKey);
@@ -210,7 +239,17 @@ export async function readEvidenceBytes(evidenceId: string): Promise<{ bytes: Bu
   return { bytes, evidence };
 }
 
-export async function getEvidence(evidenceId: string) {
+/**
+ * Loads an evidence row's full detail, scoped to the caller's Organisation
+ * and (when `expectedAssessmentId` is supplied, as the evidence download
+ * route and detail page always do) verified to belong to that exact
+ * assessment — the nested-parent-substitution guard named in the T17
+ * acceptance criteria for the evidence path.
+ */
+export async function getEvidence(context: OrganisationContext, evidenceId: string, expectedAssessmentId?: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const scoped = await findTenantEvidence(ctx, evidenceId, expectedAssessmentId);
+  if (!scoped) return null;
   return prisma.lcaEvidence.findUnique({
     where: { id: evidenceId },
     include: {
@@ -243,7 +282,10 @@ export async function listEvidence(assessmentId: string) {
   });
 }
 
-export async function deleteEvidence(evidenceId: string, actorUserId: string) {
+export async function deleteEvidence(context: OrganisationContext, evidenceId: string, actorUserId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const scoped = await findTenantEvidence(ctx, evidenceId);
+  if (!scoped) throw new TenantOwnershipError();
   const evidence = await prisma.lcaEvidence.findUniqueOrThrow({ where: { id: evidenceId } });
   if (evidence.storageKey) {
     const provider = providerForKey(evidence.storageProvider) ?? activeEvidenceStorageProvider();

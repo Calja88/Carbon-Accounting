@@ -1,17 +1,23 @@
 import { NextResponse } from "next/server";
 import { readEvidenceBytes } from "@/lib/lca/evidence-service";
-import { canViewLca, getLcaActor } from "@/lib/lca/permissions";
+import { canViewLca, getLcaContext } from "@/lib/lca/permissions";
 
-/** Downloads an uploaded evidence file from whichever storage provider holds it. */
+/**
+ * Downloads an uploaded evidence file from whichever storage provider holds
+ * it. Tenant-scoped at the initial lookup (readEvidenceBytes -> getEvidence
+ * -> findTenantEvidence) — a foreign-tenant or guessed evidence id returns
+ * the same 404 as a genuinely missing one, per the T17 acceptance criteria
+ * for the evidence export path.
+ */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const actor = await getLcaActor();
-  if (!canViewLca(actor)) {
+  const context = await getLcaContext();
+  if (!canViewLca(context)) {
     return new NextResponse("You must be signed in to download evidence.", { status: 401 });
   }
 
-  const result = await readEvidenceBytes(id);
+  const result = await readEvidenceBytes(context!, id);
   if (!result) {
     return new NextResponse("That evidence file could not be found.", { status: 404 });
   }

@@ -7,7 +7,10 @@ import {
   listEvidence,
   MAX_EVIDENCE_BYTES,
 } from "@/lib/lca/evidence-service";
-import { checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
+import { checkCanEditAssessment, getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable, EmptyState, Notice, PageHeading, SectionCard, Td } from "@/components/lca/ui";
@@ -28,17 +31,25 @@ function targetLabel(evidence: Awaited<ReturnType<typeof listEvidence>>[number])
 
 export default async function EvidencePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [assessment, evidence, processes, items, assumptions, exclusions, verifications, actor] = await Promise.all([
-    prisma.lcaAssessment.findUnique({ where: { id } }),
+  const context = await getLcaContext();
+  if (!context) notFound();
+
+  let assessment;
+  try {
+    assessment = await requireAssessmentInScope(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
+
+  const [evidence, processes, items, assumptions, exclusions, verifications] = await Promise.all([
     listEvidence(id),
     prisma.lcaProcess.findMany({ where: { assessmentId: id }, orderBy: [{ sortOrder: "asc" }], select: { id: true, name: true } }),
     prisma.lcaInventoryItem.findMany({ where: { assessmentId: id }, orderBy: [{ sortOrder: "asc" }], select: { id: true, name: true } }),
     prisma.lcaAssumption.findMany({ where: { assessmentId: id }, select: { id: true, assumption: true } }),
     prisma.lcaExclusion.findMany({ where: { assessmentId: id }, select: { id: true, excludedItem: true } }),
     prisma.lcaVerification.findMany({ where: { assessmentId: id }, select: { id: true, organisation: true, verificationDate: true } }),
-    getLcaActor(),
   ]);
-  if (!assessment) notFound();
 
   const supplierPcfs = await prisma.lcaSupplierPcf.findMany({
     where: { entityId: assessment.entityId },
@@ -46,7 +57,7 @@ export default async function EvidencePage({ params }: { params: Promise<{ id: s
     orderBy: { productName: "asc" },
   });
 
-  const permission = checkCanEditAssessment(actor, assessment.status);
+  const permission = checkCanEditAssessment(context, assessment.status);
   const canEdit = permission.ok;
   const provider = activeEvidenceStorageProvider();
 

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { listMethodologyProfiles } from "@/lib/lca/registers-service";
-import { canManageMethodology, getLcaActor } from "@/lib/lca/permissions";
+import { canManageMethodology, getLcaContext } from "@/lib/lca/permissions";
+import { redirect } from "next/navigation";
 import {
   ALLOCATION_LABELS,
   BIOGENIC_LABELS,
@@ -17,13 +18,15 @@ import { MethodologyForm } from "./methodology-form";
 export const dynamic = "force-dynamic";
 
 export default async function MethodologiesPage() {
-  const [profiles, entities, actor] = await Promise.all([
-    listMethodologyProfiles(),
-    prisma.entity.findMany({ orderBy: { name: "asc" } }),
-    getLcaActor(),
+  const context = await getLcaContext();
+  if (!context) redirect("/login");
+
+  const [profiles, entities] = await Promise.all([
+    listMethodologyProfiles(context),
+    prisma.entity.findMany({ where: { organisationId: context.organisationId }, orderBy: { name: "asc" } }),
   ]);
 
-  const canEdit = canManageMethodology(actor);
+  const canEdit = canManageMethodology(context);
 
   return (
     <div className="space-y-6">

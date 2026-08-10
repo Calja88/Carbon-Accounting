@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getResult } from "@/lib/lca/calculation-service";
+import { getLcaContext } from "@/lib/lca/permissions";
 import { CLASSIFICATION_LABELS, DATA_TYPE_LABELS, FACTOR_BOUNDARY_LABELS, FACTOR_MODE_LABELS, STAGE_LABELS } from "@/lib/lca/labels";
 import { formatKgPrecise } from "@/components/charts/palette";
 import { BackLink, FieldList, Notice, PageHeading, SectionCard } from "@/components/lca/ui";
@@ -20,7 +21,9 @@ export default async function ResultProvenancePage({
   params: Promise<{ id: string; resultId: string }>;
 }) {
   const { id, resultId } = await params;
-  const result = await getResult(resultId);
+  const context = await getLcaContext();
+  if (!context) notFound();
+  const result = await getResult(context, resultId, id);
   if (!result || result.assessmentId !== id) notFound();
 
   const steps = (result.provenance as unknown as ProvenanceStep[]) ?? [];
