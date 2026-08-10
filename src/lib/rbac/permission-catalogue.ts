@@ -107,6 +107,9 @@ export const PERMISSION_CATALOGUE: PermissionCatalogueEntry[] = [
 
 export const PERMISSION_CODES = PERMISSION_CATALOGUE.map((p) => p.code);
 
+/** Stable union of every catalogue code — the type customer-facing permission checks are keyed on. */
+export type PermissionCode = (typeof PERMISSION_CATALOGUE)[number]["code"];
+
 const codeSet = new Set(PERMISSION_CODES);
 
 export function isKnownPermissionCode(code: string): boolean {
