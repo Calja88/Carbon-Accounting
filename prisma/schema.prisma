@@ -134,9 +134,6 @@ enum TariffType {
 
 /// Paragon ID, RFID Discovery, Thames Technology — the three operating units
 /// consolidated under operational control (methodology Section 3).
-// Phase 1 tenancy (T10): expand-only — organisationId is nullable until the
-// backfill (T12) and contract migration (T1A) make it required and replace
-// the legacy global-unique constraints below.
 model Organisation {
   id                  String             @id @default(cuid())
   name                String
@@ -153,8 +150,7 @@ model Organisation {
   memberships OrganisationMembership[]
   roles       RoleDefinition[]
 
-  // Phase 1 tenancy (T16): carbon-domain roots, nullable/expand-only until
-  // the T1A contract migration — see each model's own comment.
+  // Carbon-domain roots (T16).
   siteEnergyContracts SiteEnergyContract[]
   activityEntries     ActivityEntry[]
   commutingSurveys    CommutingSurvey[]
@@ -162,18 +158,19 @@ model Organisation {
   reportSnapshots     ReportSnapshot[]
   sourceDocuments     SourceDocument[]
 
-  // Phase 1 tenancy (T17): LCA-domain roots, nullable/expand-only until the
-  // T1A contract migration — see each model's own comment.
-  lcaSuppliers            Supplier[]
-  lcaProducts             Product[]
-  lcaMethodologyProfiles  LcaMethodologyProfile[]
-  lcaAssessments          LcaAssessment[]
-  lcaSupplierPcfs         LcaSupplierPcf[]
-  lcaEvidence             LcaEvidence[]
-  lcaAssessmentVersions   LcaAssessmentVersion[]
+  // LCA-domain roots (T17). lcaMethodologyProfiles stays nullable/optional —
+  // a methodology profile may be platform-shared (organisationId null) —
+  // unlike every other relation below, which the T1A contract migration
+  // made mandatory.
+  lcaSuppliers           Supplier[]
+  lcaProducts            Product[]
+  lcaMethodologyProfiles LcaMethodologyProfile[]
+  lcaAssessments         LcaAssessment[]
+  lcaSupplierPcfs        LcaSupplierPcf[]
+  lcaEvidence            LcaEvidence[]
+  lcaAssessmentVersions  LcaAssessmentVersion[]
 
-  // Phase 1 tenancy (T18): AI layer and factor administration, nullable/
-  // expand-only until the T1A contract migration — see each model's own comment.
+  // AI layer and factor administration (T18).
   aiSettings      AiSettings?
   aiInteractions  AiInteraction[]
   aiSuggestions   AiSuggestion[]
@@ -312,9 +309,9 @@ model MembershipSiteScope {
 
 model Entity {
   id                    String                @id @default(cuid())
-  organisationId        String?
-  organisation          Organisation?         @relation(fields: [organisationId], references: [id])
-  name                  String                @unique
+  organisationId        String
+  organisation          Organisation          @relation(fields: [organisationId], references: [id])
+  name                  String
   consolidationApproach ConsolidationApproach @default(OPERATIONAL_CONTROL)
   createdAt             DateTime              @default(now())
   sites                 Site[]
@@ -330,25 +327,22 @@ model Entity {
   membershipScopes MembershipEntityScope[]
 
   @@unique([organisationId, id])
+  // T1A contract migration: replaces the legacy global-unique Entity name —
+  // two organisations may now use the same Entity name.
+  @@unique([organisationId, name])
   @@index([organisationId])
 }
 
 model Site {
-  id             String        @id @default(cuid())
-  // Phase 1 tenancy (T11 add-on): nullable, expand-only, mirroring Entity's
-  // T10 column. Spec §3 called for this on Site as part of T10 but the
-  // merged T10 migration only added it to Entity; MembershipSiteScope below
-  // needs a same-organisation composite FK to Site, so it is added here
-  // rather than duplicating T10's migration. No backfill or required-ness
-  // change: same deferred-to-T1A contract as Entity.organisationId.
-  organisationId String?
-  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
   entityId       String
-  entity         Entity        @relation(fields: [entityId], references: [id])
+  entity         Entity       @relation(fields: [entityId], references: [id])
   name           String
   address        String?
-  isActive       Boolean       @default(true)
-  createdAt      DateTime      @default(now())
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
 
   activityEntries  ActivityEntry[]
   energyContracts  SiteEnergyContract[]
@@ -365,7 +359,9 @@ model Site {
   membershipScopes MembershipSiteScope[]
 
   @@unique([organisationId, id])
-  @@unique([entityId, name])
+  // T1A contract migration: replaces the legacy [entityId, name] unique —
+  // now organisation-scoped too, matching Entity's own constraint above.
+  @@unique([organisationId, entityId, name])
   @@index([organisationId])
 }
 
@@ -555,37 +551,29 @@ model EmissionFactor {
 /// Supplier/tariff/REGO metadata for a site's electricity, needed for the
 /// Scope 2 market-based calculation (data map rows S2-02 / S2-03).
 model SiteEnergyContract {
-  id              String        @id @default(cuid())
-  // Phase 1 tenancy (T16): nullable, expand-only — same deferred-to-T1A
-  // contract as Entity/Site.organisationId (see Entity's T10 comment).
-  // Nested-parent-substitution (foreign Site ID) is guarded at the
-  // repository layer (assertSiteOwnership), not by a composite FK, because
-  // Site.organisationId is itself still nullable at this phase.
-  organisationId  String?
-  organisation    Organisation? @relation(fields: [organisationId], references: [id])
+  id              String       @id @default(cuid())
+  organisationId  String
+  organisation    Organisation @relation(fields: [organisationId], references: [id])
   siteId          String
-  site            Site          @relation(fields: [siteId], references: [id])
+  site            Site         @relation(fields: [siteId], references: [id])
   effectiveFrom   DateTime
   effectiveTo     DateTime?
   supplierName    String
   tariffType      TariffType
-  regoBacked      Boolean       @default(false)
-  regoVolumeKwh   Decimal?      @db.Decimal(18, 3)
+  regoBacked      Boolean      @default(false)
+  regoVolumeKwh   Decimal?     @db.Decimal(18, 3)
   source          String?
   enteredByUserId String
-  enteredBy       User          @relation("ContractEnteredBy", fields: [enteredByUserId], references: [id])
-  enteredAt       DateTime      @default(now())
+  enteredBy       User         @relation("ContractEnteredBy", fields: [enteredByUserId], references: [id])
+  enteredAt       DateTime     @default(now())
 
   @@index([organisationId])
 }
 
 model ActivityEntry {
   id                  String            @id @default(cuid())
-  // Phase 1 tenancy (T16): nullable, expand-only — same deferred-to-T1A
-  // contract as Entity/Site.organisationId. Guarded against nested-parent
-  // substitution (foreign Site ID) at the repository layer.
-  organisationId      String?
-  organisation        Organisation?     @relation(fields: [organisationId], references: [id])
+  organisationId      String
+  organisation        Organisation      @relation(fields: [organisationId], references: [id])
   activityDataPointId String
   activityDataPoint   ActivityDataPoint @relation(fields: [activityDataPointId], references: [id])
   siteId              String
@@ -653,12 +641,11 @@ model ActivityEntry {
 /// resolved, reusing the existing calculation + audit-trail pipeline
 /// rather than a bespoke one.
 model CommutingSurvey {
-  id                    String        @id @default(cuid())
-  // Phase 1 tenancy (T16): nullable, expand-only — see ActivityEntry's comment.
-  organisationId        String?
-  organisation          Organisation? @relation(fields: [organisationId], references: [id])
+  id                    String       @id @default(cuid())
+  organisationId        String
+  organisation          Organisation @relation(fields: [organisationId], references: [id])
   siteId                String
-  site                  Site          @relation(fields: [siteId], references: [id])
+  site                  Site         @relation(fields: [siteId], references: [id])
   periodStart           DateTime
   periodEnd             DateTime
   headcount             Int
@@ -666,8 +653,8 @@ model CommutingSurvey {
   /// commuting-frequency figure (see README assumptions).
   commutingDaysInPeriod Int
   enteredByUserId       String
-  enteredBy             User          @relation("SurveyEnteredBy", fields: [enteredByUserId], references: [id])
-  enteredAt             DateTime      @default(now())
+  enteredBy             User         @relation("SurveyEnteredBy", fields: [enteredByUserId], references: [id])
+  enteredAt             DateTime     @default(now())
 
   responses CommutingSurveyResponse[]
 
@@ -698,12 +685,12 @@ model CommutingSurveyResponse {
 /// self-contained even if the EmissionFactor catalog changes later.
 model Calculation {
   id              String        @id @default(cuid())
-  // Phase 1 tenancy (T16): nullable, expand-only — denormalised from the
-  // parent ActivityEntry at write time (spec §4: "recommended for
-  // export/RLS"). Guarded against a foreign-tenant ActivityEntry ID at the
-  // repository layer, same as Site/Entry substitution checks.
-  organisationId  String?
-  organisation    Organisation? @relation(fields: [organisationId], references: [id])
+  // Denormalised from the parent ActivityEntry at write time (spec §4:
+  // "recommended for export/RLS"). Guarded against a foreign-tenant
+  // ActivityEntry ID at the repository layer, same as Site/Entry
+  // substitution checks.
+  organisationId  String
+  organisation    Organisation  @relation(fields: [organisationId], references: [id])
   activityEntryId String
   activityEntry   ActivityEntry @relation(fields: [activityEntryId], references: [id])
 
@@ -758,19 +745,18 @@ model Calculation {
 // ---------------------------------------------------------------------------
 
 model ReportSnapshot {
-  id                String        @id @default(cuid())
-  // Phase 1 tenancy (T16): nullable, expand-only. An issued snapshot's
-  // payload is immutable (spec §4: "cannot mix tenants") — set once at
-  // generation from the resolved OrganisationContext, never backfilled by
-  // inspecting the frozen payload.
-  organisationId    String?
-  organisation      Organisation? @relation(fields: [organisationId], references: [id])
-  version           Int           @default(autoincrement())
+  id                String       @id @default(cuid())
+  // An issued snapshot's payload is immutable (spec §4: "cannot mix
+  // tenants") — set once at generation from the resolved
+  // OrganisationContext, never backfilled by inspecting the frozen payload.
+  organisationId    String
+  organisation      Organisation @relation(fields: [organisationId], references: [id])
+  version           Int          @default(autoincrement())
   periodStart       DateTime
   periodEnd         DateTime
   generatedByUserId String
-  generatedBy       User          @relation("GeneratedBy", fields: [generatedByUserId], references: [id])
-  generatedAt       DateTime      @default(now())
+  generatedBy       User         @relation("GeneratedBy", fields: [generatedByUserId], references: [id])
+  generatedAt       DateTime     @default(now())
 
   payload Json // frozen computed report: totals, breakdowns, narrative, DQ summary
 
@@ -1016,22 +1002,21 @@ enum LcaCorporateLinkType {
 /// so a supplier-specific corporate factor set and a product-level supplier
 /// PCF can be recognised as the same counterparty.
 model Supplier {
-  id       String @id @default(cuid())
-  entityId String
-  entity   Entity @relation(fields: [entityId], references: [id])
-  // Phase 1 tenancy (T17): nullable, expand-only, same deferred-to-T1A
-  // contract as the carbon-domain roots added in T16. Denormalised from the
-  // owning Entity at write time; the tenant repository asserts it against
-  // ctx.organisationId rather than trusting a client-supplied value.
-  organisationId String?
-  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  id             String       @id @default(cuid())
+  entityId       String
+  entity         Entity       @relation(fields: [entityId], references: [id])
+  // Denormalised from the owning Entity at write time; the tenant
+  // repository asserts it against ctx.organisationId rather than trusting a
+  // client-supplied value.
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
   name           String
   identifier     String? // internal supplier code, DUNS, VAT number...
   country        String?
   contact        String?
   notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   productPcfs    LcaSupplierPcf[]
   inventoryItems LcaInventoryItem[]
@@ -1041,12 +1026,11 @@ model Supplier {
 }
 
 model Product {
-  id       String @id @default(cuid())
-  entityId String
-  entity   Entity @relation(fields: [entityId], references: [id])
-  // Phase 1 tenancy (T17): nullable, expand-only — see Supplier.organisationId.
-  organisationId String?
-  organisation   Organisation?    @relation(fields: [organisationId], references: [id])
+  id             String           @id @default(cuid())
+  entityId       String
+  entity         Entity           @relation(fields: [entityId], references: [id])
+  organisationId String
+  organisation   Organisation     @relation(fields: [organisationId], references: [id])
   name           String
   sku            String
   description    String?
@@ -1100,14 +1084,14 @@ model ProductManufacturingLocation {
 // ---------------------------------------------------------------------------
 
 model LcaMethodologyProfile {
-  id       String  @id @default(cuid())
-  entityId String?
-  entity   Entity? @relation(fields: [entityId], references: [id])
-  // Phase 1 tenancy (T17): nullable, expand-only — see Supplier.organisationId.
-  // Null stays possible even after backfill for a genuinely platform-shared
-  // profile (entityId is already optional for the same reason); the LCA
-  // repository's visibility resolver treats null organisationId here as
-  // platform-shared, never as "belongs to no one so anyone may edit it".
+  id             String        @id @default(cuid())
+  entityId       String?
+  entity         Entity?       @relation(fields: [entityId], references: [id])
+  // Deliberately excluded from the T1A contract migration's NOT NULL pass:
+  // null stays possible for a genuinely platform-shared profile (entityId
+  // is already optional for the same reason); the LCA repository's
+  // visibility resolver treats null organisationId here as platform-shared,
+  // never as "belongs to no one so anyone may edit it".
   organisationId String?
   organisation   Organisation? @relation(fields: [organisationId], references: [id])
 
@@ -1160,13 +1144,12 @@ model LcaAssessment {
   entity           Entity         @relation(fields: [entityId], references: [id])
   productVersionId String
   productVersion   ProductVersion @relation(fields: [productVersionId], references: [id])
-  // Phase 1 tenancy (T17): nullable, expand-only — see Supplier.organisationId.
   // This is the externally addressable root every LCA detail page, export
   // route and evidence/version lookup starts from, so it gets a direct
   // column rather than relying solely on the Entity join (spec §4: "Add
   // direct organisation ID to externally addressable/exportable roots").
-  organisationId String?
-  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  organisationId   String
+  organisation     Organisation   @relation(fields: [organisationId], references: [id])
 
   reference String
   title     String
@@ -1510,19 +1493,18 @@ model LcaEndOfLifeRoute {
 // ---------------------------------------------------------------------------
 
 model LcaSupplierPcf {
-  id         String   @id @default(cuid())
-  entityId   String
-  entity     Entity   @relation(fields: [entityId], references: [id])
-  supplierId String
-  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
-  // Phase 1 tenancy (T17): nullable, expand-only — see Supplier.organisationId.
+  id             String       @id @default(cuid())
+  entityId       String
+  entity         Entity       @relation(fields: [entityId], references: [id])
+  supplierId     String
+  supplier       Supplier     @relation(fields: [supplierId], references: [id], onDelete: Cascade)
   // Distinguishes this tenant-owned supplier PCF register from the
   // platform-shared EmissionFactor library (spec T17 acceptance: "shared/
   // global factors are explicitly distinguished from tenant-owned supplier
   // factors") — a supplier PCF is never resolved into another organisation's
   // inventory item even though EmissionFactorSet itself stays platform-global.
-  organisationId String?
-  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
 
   productName       String
   productIdentifier String?
@@ -1660,16 +1642,15 @@ model LcaCorporateDataLink {
 }
 
 model LcaEvidence {
-  id           String        @id @default(cuid())
-  assessmentId String
-  assessment   LcaAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  // Phase 1 tenancy (T17): nullable, expand-only — see Supplier.organisationId.
+  id             String        @id @default(cuid())
+  assessmentId   String
+  assessment     LcaAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
   // Evidence has its own externally addressable download route
-  // (/api/lca/evidence/[id]), so — like ReportSnapshot/Calculation in T16 —
-  // it gets a direct column rather than requiring every lookup to join
-  // through assessment -> entity -> organisation first.
-  organisationId String?
-  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  // (/api/lca/evidence/[id]), so — like ReportSnapshot/Calculation — it gets
+  // a direct column rather than requiring every lookup to join through
+  // assessment -> entity -> organisation first.
+  organisationId String
+  organisation   Organisation  @relation(fields: [organisationId], references: [id])
 
   title       String
   description String?
@@ -1831,17 +1812,16 @@ model LcaCalculationResult {
 /// A frozen, immutable copy of an assessment at a point in time. Issued
 /// versions are never rewritten — a change means a new revision.
 model LcaAssessmentVersion {
-  id           String        @id @default(cuid())
-  assessmentId String
-  assessment   LcaAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  // Phase 1 tenancy (T17): nullable, expand-only — see Supplier.organisationId.
+  id             String        @id @default(cuid())
+  assessmentId   String
+  assessment     LcaAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
   // Spec §4: "No report snapshot, LCA issued version, document, export, AI
   // context, or job payload may combine more than one Organisation" — an
   // issued version is immutable and frozen, so it gets the same direct
-  // column as ReportSnapshot in T16 rather than relying only on the parent
+  // column as ReportSnapshot rather than relying only on the parent
   // assessment join.
-  organisationId String?
-  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  organisationId String
+  organisation   Organisation  @relation(fields: [organisationId], references: [id])
 
   version        Int
   label          String?
@@ -1982,15 +1962,14 @@ enum DataOrigin {
 /// No API key is ever stored here — the key is read from OPENROUTER_API_KEY
 /// server-side only, shared across every tenant.
 ///
-/// `organisationId` is nullable/expand-only, the same deferred-to-contract
-/// contract as every other Phase 1 tenancy column: a pre-tenancy row (`id`
-/// literally `"singleton"`, `organisationId` null) may still exist from
-/// before this migration and is no longer read by application code, which
-/// always resolves a settings row by `organisationId`.
+/// The T1A contract migration dropped the pre-tenancy singleton row (`id`
+/// literally `"singleton"`, `organisationId` null) that predated
+/// Organisation and was already unread by application code, which always
+/// resolves a settings row by `organisationId`.
 model AiSettings {
   id                   String         @id @default(cuid())
-  organisationId       String?        @unique
-  organisation         Organisation?  @relation(fields: [organisationId], references: [id])
+  organisationId       String         @unique
+  organisation         Organisation   @relation(fields: [organisationId], references: [id])
   aiEnabled            Boolean        @default(true)
   openRouterEnabled    Boolean        @default(true)
   /// When true the router will only ever call a model whose OpenRouter
@@ -2061,10 +2040,8 @@ model AiInteraction {
   userId String?
   user   User?   @relation("AiInteractionUser", fields: [userId], references: [id])
 
-  // Phase 1 tenancy (T18): nullable, expand-only — same deferred-to-contract
-  // contract as SourceDocument.organisationId (T16).
-  organisationId String?
-  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
 
   entityId    String?
   siteId      String?
@@ -2110,9 +2087,8 @@ model AiSuggestion {
   targetId   String?
   status     AiSuggestionStatus @default(PENDING)
 
-  // Phase 1 tenancy (T18): nullable, expand-only, same contract as AiInteraction.organisationId.
-  organisationId String?
-  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
 
   confidence       Decimal? @db.Decimal(4, 3)
   requiresReview   Boolean  @default(true)
@@ -2172,11 +2148,9 @@ enum DocumentStatus {
 /// code (AI_MAX_DOCUMENT_BYTES). Document text is always treated as
 /// untrusted content when it reaches a model.
 model SourceDocument {
-  id             String        @id @default(cuid())
-  // Phase 1 tenancy (T16): nullable, expand-only — same deferred-to-T1A
-  // contract as Entity/Site.organisationId.
-  organisationId String?
-  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
   filename       String
   mimeType       String
   byteSize       Int

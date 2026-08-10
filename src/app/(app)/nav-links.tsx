@@ -57,12 +57,18 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function NavLinks({ isAdmin, canManageOrganisation = false }: { isAdmin: boolean; canManageOrganisation?: boolean }) {
+export function NavLinks({
+  canViewPlatformAdmin,
+  canManageOrganisation = false,
+}: {
+  canViewPlatformAdmin: boolean;
+  canManageOrganisation?: boolean;
+}) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   const items = [
     ...BASE_ITEMS,
-    ...(isAdmin ? ADMIN_ITEMS : []),
+    ...(canViewPlatformAdmin ? ADMIN_ITEMS : []),
     // Gated on this organisation's own current permission grant
     // (organisation.membership.manage), not the legacy JWT role — an
     // organisation admin's authority is scoped to their own tenant.
