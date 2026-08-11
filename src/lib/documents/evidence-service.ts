@@ -53,7 +53,15 @@ export const ALLOWED_EVIDENCE_MIME_PREFIXES = [
  * schema (Phase 2 spec §3: "no generic polymorphic link may skip target
  * validation").
  */
-export const EVIDENCE_LINK_RESOURCE_TYPES = ["controlled_document_revision"] as const;
+export const EVIDENCE_LINK_RESOURCE_TYPES = [
+  "controlled_document_revision",
+  // EMS programme foundation (task T23): "source/evidence" on an interested
+  // party requirement, and supporting evidence for a risk/opportunity or
+  // change assessment entry.
+  "interested_party_requirement",
+  "ems_risk_opportunity",
+  "change_assessment",
+] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 
 export function isKnownEvidenceLinkResourceType(value: string): value is EvidenceLinkResourceType {

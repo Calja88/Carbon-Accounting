@@ -190,6 +190,20 @@ model Organisation {
   evidenceLinks               EvidenceLink[]
   documentDistributions       DocumentDistribution[]
 
+  // EMS programme, scope, context and interested parties (T23).
+  emsProgrammes               EmsProgramme[]
+  emsScopeVersions            EmsScopeVersion[]
+  emsScopeEntities            EmsScopeEntity[]
+  emsScopeSites               EmsScopeSite[]
+  emsScopeActivities          EmsScopeActivity[]
+  standardRequirementMaps     StandardRequirementMap[]
+  contextIssues               ContextIssue[]
+  interestedParties           InterestedParty[]
+  interestedPartyRequirements InterestedPartyRequirement[]
+  emsRiskOpportunities        EmsRiskOpportunity[]
+  changeAssessments           ChangeAssessment[]
+  environmentalPolicyRecords  EnvironmentalPolicyRecord[]
+
   @@index([status])
 }
 
@@ -222,6 +236,13 @@ model OrganisationMembership {
   // Controlled documents (T22): document ownership and distribution audience.
   ownedControlledDocuments ControlledDocument[]   @relation("ControlledDocumentOwner")
   documentDistributions    DocumentDistribution[] @relation("DocumentDistributionMember")
+
+  // EMS programme foundation (T23): record ownership.
+  ownedEmsProgrammes           EmsProgramme[]           @relation("EmsProgrammeOwner")
+  ownedStandardRequirementMaps StandardRequirementMap[] @relation("StandardRequirementMapOwner")
+  ownedContextIssues           ContextIssue[]           @relation("ContextIssueOwner")
+  ownedInterestedParties       InterestedParty[]        @relation("InterestedPartyOwner")
+  ownedEmsRiskOpportunities    EmsRiskOpportunity[]     @relation("EmsRiskOpportunityOwner")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -344,6 +365,9 @@ model Entity {
   // Phase 1 RBAC (T11): membership entity-scope grants
   membershipScopes MembershipEntityScope[]
 
+  // EMS programme foundation (T23): scope-version boundary membership.
+  emsScopeEntities EmsScopeEntity[]
+
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy global-unique Entity name —
   // two organisations may now use the same Entity name.
@@ -378,6 +402,10 @@ model Site {
 
   // Controlled documents (T22): distribution audience by site.
   documentDistributions DocumentDistribution[]
+
+  // EMS programme foundation (T23): scope-version boundary membership.
+  emsScopeSites      EmsScopeSite[]
+  emsScopeActivities EmsScopeActivity[]
 
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy [entityId, name] unique —
@@ -435,8 +463,15 @@ model User {
   preparedControlledDocumentRevisions ControlledDocumentRevision[] @relation("ControlledDocumentRevisionPreparedBy")
   reviewedControlledDocumentRevisions ControlledDocumentRevision[] @relation("ControlledDocumentRevisionReviewedBy")
   approvedControlledDocumentRevisions ControlledDocumentRevision[] @relation("ControlledDocumentRevisionApprovedBy")
-  uploadedEvidenceObjects              EvidenceObject[]             @relation("EvidenceObjectUploadedBy")
-  linkedEvidence                       EvidenceLink[]                @relation("EvidenceLinkLinkedBy")
+  uploadedEvidenceObjects             EvidenceObject[]             @relation("EvidenceObjectUploadedBy")
+  linkedEvidence                      EvidenceLink[]               @relation("EvidenceLinkLinkedBy")
+
+  // EMS programme foundation (T23).
+  preparedEmsScopeVersions      EmsScopeVersion[]           @relation("EmsScopeVersionPreparedBy")
+  approvedEmsScopeVersions      EmsScopeVersion[]           @relation("EmsScopeVersionApprovedBy")
+  preparedChangeAssessments     ChangeAssessment[]          @relation("ChangeAssessmentPreparedBy")
+  approvedChangeAssessments     ChangeAssessment[]          @relation("ChangeAssessmentApprovedBy")
+  approvedEnvironmentalPolicies EnvironmentalPolicyRecord[] @relation("EnvironmentalPolicyRecordApprovedBy")
 }
 
 // ---------------------------------------------------------------------------
@@ -2239,11 +2274,11 @@ model ControlledDocumentRevision {
   retentionUntil    DateTime?
 
   preparedByUserId String?
-  preparedBy       User? @relation("ControlledDocumentRevisionPreparedBy", fields: [preparedByUserId], references: [id])
+  preparedBy       User?   @relation("ControlledDocumentRevisionPreparedBy", fields: [preparedByUserId], references: [id])
   reviewedByUserId String?
-  reviewedBy       User? @relation("ControlledDocumentRevisionReviewedBy", fields: [reviewedByUserId], references: [id])
+  reviewedBy       User?   @relation("ControlledDocumentRevisionReviewedBy", fields: [reviewedByUserId], references: [id])
   approvedByUserId String?
-  approvedBy       User? @relation("ControlledDocumentRevisionApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedBy       User?   @relation("ControlledDocumentRevisionApprovedBy", fields: [approvedByUserId], references: [id])
 
   reviewedAt    DateTime?
   approvedAt    DateTime?
@@ -2258,6 +2293,10 @@ model ControlledDocumentRevision {
   successorRevision    ControlledDocumentRevision? @relation("ControlledDocumentRevisionSuccessor")
 
   distributions DocumentDistribution[]
+
+  /// EMS programme foundation (T23): the policy record whose content this
+  /// revision carries, when this document is the environmental policy.
+  environmentalPolicyRecord EnvironmentalPolicyRecord?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2297,7 +2336,7 @@ model EvidenceObject {
   retentionUntil    DateTime?
   /// Deletion is prohibited while this is true, regardless of retention
   /// category — checked in the service layer before any remove() call.
-  legalHold         Boolean                 @default(false)
+  legalHold         Boolean                @default(false)
 
   /// Always set by the malware-scanning interface — PENDING immediately
   /// after upload, until a scanner (no-op in development) updates it.
@@ -2370,17 +2409,481 @@ model DocumentDistribution {
   organisation   Organisation @relation(fields: [organisationId], references: [id])
 
   audienceMembershipId String?
-  audienceMembership    OrganisationMembership? @relation("DocumentDistributionMember", fields: [audienceMembershipId], references: [id])
+  audienceMembership   OrganisationMembership? @relation("DocumentDistributionMember", fields: [audienceMembershipId], references: [id])
   /// Informational role label (not a RoleDefinition FK) for a distribution
   /// addressed to "everyone holding this role" rather than one member.
-  audienceRole          String?
-  audienceSiteId        String?
-  audienceSite          Site?                   @relation(fields: [audienceSiteId], references: [id])
+  audienceRole         String?
+  audienceSiteId       String?
+  audienceSite         Site?                   @relation(fields: [audienceSiteId], references: [id])
 
   issuedAt       DateTime  @default(now())
   acknowledgedAt DateTime?
 
   @@index([organisationId, revisionId])
+}
+
+// ---------------------------------------------------------------------------
+// EMS programme, scope, context and interested parties (task T23,
+// Docs/PHASE2_EMS_FOUNDATION_SPEC.md §3 "EMS root and scope" /
+// "Context, interested parties, risk and change"). This is the EMS root and
+// planning layer: it does not seed copyrighted ISO clause text (fields below
+// hold internal identifiers/keys only, never a "licensedText" column) and it
+// does not seed environmental performance data — every fixture used to
+// exercise this schema is synthetic.
+//
+// `EmsScopeVersion` reuses the T22 ControlledDocumentRevision pattern
+// exactly: a version is freely editable in DRAFT/IN_REVIEW, immutable once
+// APPROVED/SUPERSEDED, and a replacement is always a new row linked back via
+// `supersedesVersion` — enforced in the service layer and, defence-in-depth,
+// by a BEFORE UPDATE trigger (migration
+// 20260811170000_add_ems_programme_foundation) mirroring
+// controlled_document_revision_immutable_once_approved.
+// ---------------------------------------------------------------------------
+
+enum EmsProgrammeStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum EmsCertificationIntent {
+  NONE
+  PLANNED
+  CERTIFIED_EXTERNALLY
+}
+
+enum EmsScopeVersionStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  SUPERSEDED
+}
+
+enum EmsRequirementImplementationStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  IMPLEMENTED
+  NOT_APPLICABLE
+}
+
+enum ContextIssueType {
+  INTERNAL
+  EXTERNAL
+  ENVIRONMENTAL_CONDITION
+}
+
+enum ContextIssueDirection {
+  AFFECTS_ORGANISATION
+  AFFECTED_BY_ORGANISATION
+  BOTH
+}
+
+enum InterestedPartyInfluence {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum EmsRiskOpportunityKind {
+  RISK
+  OPPORTUNITY
+}
+
+enum EmsRiskOpportunityStatus {
+  OPEN
+  MONITORING
+  CLOSED
+}
+
+enum ChangeAssessmentStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  IMPLEMENTED
+  EFFECTIVENESS_REVIEWED
+}
+
+/// The EMS root for an Organisation. "One active EMS programme may contain
+/// many versioned scopes; historical programmes/scopes remain readable"
+/// (Phase 2 spec §1) — enforced by a partial unique index
+/// (`EmsProgramme_organisationId_active_key`, one ACTIVE programme per
+/// organisation) rather than a schema-level singleton, so a suspended/closed
+/// programme's history is never deleted to make room for a new one.
+model EmsProgramme {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  name   String
+  status EmsProgrammeStatus @default(DRAFT)
+
+  /// Internal identifier/version of the standards profile this programme
+  /// maps to (e.g. "ISO14001", "2015") — identifiers only, never clause text.
+  standardsProfile        String
+  standardsProfileVersion String
+
+  certificationIntent EmsCertificationIntent @default(NONE)
+
+  ownerMembershipId String?
+  owner             OrganisationMembership? @relation("EmsProgrammeOwner", fields: [ownerMembershipId], references: [id])
+
+  /// Points at whichever EmsScopeVersion is the current approved boundary —
+  /// same pointer pattern as ControlledDocument.currentRevision.
+  currentScopeVersionId String?          @unique
+  currentScopeVersion   EmsScopeVersion? @relation("EmsProgrammeCurrentScopeVersion", fields: [currentScopeVersionId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  scopeVersions           EmsScopeVersion[]           @relation("EmsProgrammeScopeVersions")
+  standardRequirementMaps StandardRequirementMap[]
+  contextIssues           ContextIssue[]
+  interestedParties       InterestedParty[]
+  riskOpportunities       EmsRiskOpportunity[]
+  changeAssessments       ChangeAssessment[]
+  policyRecords           EnvironmentalPolicyRecord[]
+
+  @@unique([organisationId, name])
+  @@unique([organisationId, id])
+  @@index([organisationId, status])
+}
+
+/// One versioned statement of the EMS boundary. Immutable once
+/// APPROVED/SUPERSEDED — see the trigger note above.
+model EmsScopeVersion {
+  id          String       @id @default(cuid())
+  programmeId String
+  programme   EmsProgramme @relation("EmsProgrammeScopeVersions", fields: [programmeId], references: [id])
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  versionNumber Int
+  statement     String
+  status        EmsScopeVersionStatus @default(DRAFT)
+
+  exclusions          String?
+  exclusionsRationale String?
+
+  effectiveDate DateTime?
+  reviewDueDate DateTime?
+
+  preparedByUserId String?
+  preparedBy       User?     @relation("EmsScopeVersionPreparedBy", fields: [preparedByUserId], references: [id])
+  approvedByUserId String?
+  approvedBy       User?     @relation("EmsScopeVersionApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedAt       DateTime?
+
+  /// The version this one replaces, once approved. Unique: an old version can
+  /// have at most one successor (same shape as
+  /// ControlledDocumentRevision.supersedesRevision).
+  supersedesVersionId String?          @unique
+  supersedesVersion   EmsScopeVersion? @relation("EmsScopeVersionSuccessor", fields: [supersedesVersionId], references: [id])
+  successorVersion    EmsScopeVersion? @relation("EmsScopeVersionSuccessor")
+
+  /// Opposite side of EmsProgramme.currentScopeVersion — no FK column here.
+  currentForProgramme EmsProgramme? @relation("EmsProgrammeCurrentScopeVersion")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  entities   EmsScopeEntity[]
+  sites      EmsScopeSite[]
+  activities EmsScopeActivity[]
+
+  @@unique([programmeId, versionNumber])
+  @@unique([organisationId, id])
+  @@index([organisationId, status])
+}
+
+/// A tenant-scoped Entity included in a scope version's boundary.
+model EmsScopeEntity {
+  id             String          @id @default(cuid())
+  scopeVersionId String
+  scopeVersion   EmsScopeVersion @relation(fields: [scopeVersionId], references: [id])
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  entityId String
+  entity   Entity @relation(fields: [entityId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([scopeVersionId, entityId])
+  @@unique([organisationId, id])
+  @@index([organisationId, entityId])
+}
+
+/// A tenant-scoped Site included in a scope version's boundary. The service
+/// layer, not this schema, enforces "Site must belong to an included Entity"
+/// (Phase 2 spec §3) by checking `site.entityId` against the version's
+/// `EmsScopeEntity` rows.
+model EmsScopeSite {
+  id             String          @id @default(cuid())
+  scopeVersionId String
+  scopeVersion   EmsScopeVersion @relation(fields: [scopeVersionId], references: [id])
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([scopeVersionId, siteId])
+  @@unique([organisationId, id])
+  @@index([organisationId, siteId])
+}
+
+/// A free-text structural activity/product/service included in the
+/// boundary, optionally tied to one Site (Phase 2 spec §3).
+model EmsScopeActivity {
+  id             String          @id @default(cuid())
+  scopeVersionId String
+  scopeVersion   EmsScopeVersion @relation(fields: [scopeVersionId], references: [id])
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  description String
+  siteId      String?
+  site        Site?   @relation(fields: [siteId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, id])
+  @@index([organisationId, scopeVersionId])
+}
+
+/// Maps an internal requirement key (e.g. a clause number) from a standards
+/// profile to this programme's implementation status. `standardProfile` and
+/// `requirementKey` are bare identifiers — never the standard's text; no
+/// `licensedText` column exists here or anywhere else in this schema (Phase 2
+/// spec §1: "ISO references store identifiers/internal mappings only").
+model StandardRequirementMap {
+  id          String       @id @default(cuid())
+  programmeId String
+  programme   EmsProgramme @relation(fields: [programmeId], references: [id])
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  standardProfile String
+  requirementKey  String
+
+  implementationStatus EmsRequirementImplementationStatus @default(NOT_STARTED)
+
+  ownerMembershipId String?
+  owner             OrganisationMembership? @relation("StandardRequirementMapOwner", fields: [ownerMembershipId], references: [id])
+
+  reviewDate DateTime?
+  notes      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([programmeId, standardProfile, requirementKey])
+  @@unique([organisationId, id])
+  @@index([organisationId, programmeId])
+}
+
+/// An internal or external factor, or environmental condition, relevant to
+/// the EMS (Phase 2 spec §3). No environmental performance data — this is a
+/// qualitative register entry, not a measurement.
+model ContextIssue {
+  id          String       @id @default(cuid())
+  programmeId String
+  programme   EmsProgramme @relation(fields: [programmeId], references: [id])
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  type         ContextIssueType
+  title        String
+  description  String?
+  direction    ContextIssueDirection
+  significance String?
+
+  ownerMembershipId String?
+  owner             OrganisationMembership? @relation("ContextIssueOwner", fields: [ownerMembershipId], references: [id])
+
+  reviewDate  DateTime?
+  activeFrom  DateTime?
+  activeUntil DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@index([organisationId, programmeId, type])
+}
+
+/// A party with an interest in, or influence over, the EMS.
+model InterestedParty {
+  id          String       @id @default(cuid())
+  programmeId String
+  programme   EmsProgramme @relation(fields: [programmeId], references: [id])
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  name      String
+  type      String
+  influence InterestedPartyInfluence?
+
+  relationshipOwnerMembershipId String?
+  relationshipOwner             OrganisationMembership? @relation("InterestedPartyOwner", fields: [relationshipOwnerMembershipId], references: [id])
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  requirements InterestedPartyRequirement[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, programmeId])
+}
+
+/// One requirement an interested party holds, and whether it is mandatory.
+/// "source/evidence" (Phase 2 spec §3) is a free-text citation plus, when
+/// needed, an EvidenceLink (`resourceType = "interested_party_requirement"`)
+/// pointed at this row's id — validated by the shared evidence service, same
+/// as every other allow-listed resource type.
+model InterestedPartyRequirement {
+  id                String          @id @default(cuid())
+  interestedPartyId String
+  interestedParty   InterestedParty @relation(fields: [interestedPartyId], references: [id])
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  summary         String
+  sourceReference String?
+  isMandatory     Boolean @default(false)
+
+  evaluationDate DateTime?
+  reviewDate     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@index([organisationId, interestedPartyId])
+}
+
+/// A risk or opportunity register entry. Ratings are organisation-configured
+/// snapshots (`initialRating`/`residualRating` JSON plus a
+/// `ratingScaleVersion` pointer) — "no universal significance formula is
+/// seeded" (Phase 2 spec §3).
+model EmsRiskOpportunity {
+  id          String       @id @default(cuid())
+  programmeId String
+  programme   EmsProgramme @relation(fields: [programmeId], references: [id])
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  kind        EmsRiskOpportunityKind
+  category    String
+  description String
+  consequence String?
+  likelihood  String?
+
+  ratingScaleVersion String
+  initialRating      Json
+  residualRating     Json?
+
+  status EmsRiskOpportunityStatus @default(OPEN)
+
+  ownerMembershipId String?
+  owner             OrganisationMembership? @relation("EmsRiskOpportunityOwner", fields: [ownerMembershipId], references: [id])
+
+  /// Free-text pointer at the record this risk/opportunity was raised from
+  /// (e.g. a context issue) — a plain string pair, not a hard FK, so later
+  /// phases (aspects, obligations — not yet built) can be a `sourceType`
+  /// without a migration; the service layer validates same-Organisation
+  /// ownership of the target before writing.
+  sourceType String?
+  sourceId   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@index([organisationId, programmeId, status])
+}
+
+/// A proposed or implemented change to the EMS and its planned impact.
+/// `affectedRefs` is a structured, generic list of `{ resourceType,
+/// resourceId }` pairs — the same generic-reference shape as EvidenceLink —
+/// so this row can point at scope/context/policy records that exist today
+/// without a hard FK to aspects/obligations/controls/competence records that
+/// later phases (T30+/T40+/T70+) have not built yet.
+model ChangeAssessment {
+  id          String       @id @default(cuid())
+  programmeId String
+  programme   EmsProgramme @relation(fields: [programmeId], references: [id])
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  proposedChange String
+  triggerType    String
+  triggerDate    DateTime?
+
+  affectedRefs Json?
+
+  assessment String?
+  decision   String?
+
+  status ChangeAssessmentStatus @default(DRAFT)
+
+  preparedByUserId String?
+  preparedBy       User?     @relation("ChangeAssessmentPreparedBy", fields: [preparedByUserId], references: [id])
+  approvedByUserId String?
+  approvedBy       User?     @relation("ChangeAssessmentApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedAt       DateTime?
+
+  implementedAt           DateTime?
+  effectivenessReview     String?
+  effectivenessReviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@index([organisationId, programmeId, status])
+}
+
+/// Links the EMS policy to its controlled-document content (the actual
+/// policy text lives in the T22 ControlledDocumentRevision, never here) plus
+/// the top-management approval this record type specifically requires.
+model EnvironmentalPolicyRecord {
+  id          String       @id @default(cuid())
+  programmeId String
+  programme   EmsProgramme @relation(fields: [programmeId], references: [id])
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  controlledDocumentRevisionId String                     @unique
+  controlledDocumentRevision   ControlledDocumentRevision @relation(fields: [controlledDocumentRevisionId], references: [id])
+
+  approvedByUserId String?
+  approvedBy       User?     @relation("EnvironmentalPolicyRecordApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedAt       DateTime?
+  effectiveDate    DateTime?
+  reviewDate       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@index([organisationId, programmeId])
 }
 
 // ---------------------------------------------------------------------------
