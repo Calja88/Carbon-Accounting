@@ -84,6 +84,7 @@ const EMS_OBJECTIVES_MANAGE = ["ems.objective.manage", "ems.action.manage"];
 const EMS_INCIDENT_WORK = ["ems.incident.report", "ems.nonconformity.manage", "ems.corrective_action.manage"];
 const EMS_INCIDENT_MANAGE = [...EMS_INCIDENT_WORK, "ems.incident.manage", "ems.corrective_action.effectiveness_review"];
 const EMS_AUDIT_MANAGE = ["ems.audit_programme.manage", "ems.audit.perform", "ems.audit_report.issue"];
+const EMS_DOCUMENT_MANAGE = ["ems.controlled_document.manage"];
 
 export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
   {
@@ -113,6 +114,8 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       "ems.competence.manage",
       "ems.management_review.manage",
       "ems.management_review.approve",
+      ...EMS_DOCUMENT_MANAGE,
+      "ems.controlled_document.approve",
       "audit.view",
       "ai.use",
       "ai.settings.manage",
@@ -136,6 +139,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       ...EMS_OBJECTIVES_MANAGE,
       ...EMS_INCIDENT_WORK,
       "ems.competence.view",
+      ...EMS_DOCUMENT_MANAGE,
       "ai.use",
     ],
   },
@@ -157,6 +161,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       ...EMS_OBJECTIVES_MANAGE,
       ...EMS_INCIDENT_WORK,
       "ems.competence.view",
+      ...EMS_DOCUMENT_MANAGE,
       "ai.use",
     ],
   },

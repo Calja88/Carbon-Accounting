@@ -19,6 +19,13 @@ import { recordAuditEvent } from "./audit-service";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import { findTenantEvidence, requireAssessmentInScope, toTenantRepositoryContext } from "@/lib/repositories/lca-repository";
 import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import {
+  createEvidenceStorageRegistry,
+  type EvidenceStorageProvider,
+  type StoredEvidenceBytes,
+} from "@/lib/documents/storage/provider";
+
+export type { EvidenceStorageProvider, StoredEvidenceBytes };
 
 /** Guard against a single upload filling the database. */
 export const MAX_EVIDENCE_BYTES = 15 * 1024 * 1024;
@@ -36,21 +43,16 @@ export const ALLOWED_EVIDENCE_MIME_PREFIXES = [
   "application/octet-stream",
 ];
 
-export interface StoredEvidenceBytes {
-  storageProvider: string;
-  storageKey: string;
-}
-
-export interface EvidenceStorageProvider {
-  readonly name: string;
-  put(input: { evidenceId: string; fileName: string; mimeType: string; bytes: Buffer }): Promise<StoredEvidenceBytes>;
-  get(storageKey: string): Promise<Buffer | null>;
-  remove(storageKey: string): Promise<void>;
-}
-
 /**
  * The built-in provider. Bytes live in LcaEvidenceBlob, a table nothing but
  * the download route ever selects from, so evidence listings stay cheap.
+ *
+ * Implements the shared `EvidenceStorageProvider` contract (T22,
+ * src/lib/documents/storage/provider.ts) — LCA's evidence bytes are not
+ * migrated into the new shared EvidenceObject table, but the interface and
+ * the register/active/forKey registry behaviour are now shared, so a real
+ * object-storage provider registered here works the same way it would for
+ * the shared documents module.
  */
 const databaseProvider: EvidenceStorageProvider = {
   name: "database",
@@ -74,22 +76,19 @@ const databaseProvider: EvidenceStorageProvider = {
   },
 };
 
-const providers = new Map<string, EvidenceStorageProvider>([[databaseProvider.name, databaseProvider]]);
+const registry = createEvidenceStorageRegistry("LCA_EVIDENCE_STORAGE", databaseProvider);
 
 /** Registration point for an external provider, once credentials exist. */
 export function registerEvidenceStorageProvider(provider: EvidenceStorageProvider): void {
-  providers.set(provider.name, provider);
+  registry.register(provider);
 }
 
 export function activeEvidenceStorageProvider(): EvidenceStorageProvider {
-  const configured = process.env.LCA_EVIDENCE_STORAGE;
-  if (configured && providers.has(configured)) return providers.get(configured) as EvidenceStorageProvider;
-  return databaseProvider;
+  return registry.active();
 }
 
 export function providerForKey(name: string | null): EvidenceStorageProvider | null {
-  if (!name) return null;
-  return providers.get(name) ?? null;
+  return registry.forKey(name);
 }
 
 // ---------------------------------------------------------------------------

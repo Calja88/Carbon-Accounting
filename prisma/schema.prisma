@@ -183,6 +183,13 @@ model Organisation {
   outboxMessages OutboxMessage[]
   jobRuns        JobRun[]
 
+  // Controlled documents and shared evidence (T22).
+  controlledDocuments         ControlledDocument[]
+  controlledDocumentRevisions ControlledDocumentRevision[]
+  evidenceObjects             EvidenceObject[]
+  evidenceLinks               EvidenceLink[]
+  documentDistributions       DocumentDistribution[]
+
   @@index([status])
 }
 
@@ -211,6 +218,10 @@ model OrganisationMembership {
   roles        MembershipRole[]
   entityScopes MembershipEntityScope[]
   siteScopes   MembershipSiteScope[]
+
+  // Controlled documents (T22): document ownership and distribution audience.
+  ownedControlledDocuments ControlledDocument[]   @relation("ControlledDocumentOwner")
+  documentDistributions    DocumentDistribution[] @relation("DocumentDistributionMember")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -365,6 +376,9 @@ model Site {
   // Phase 1 RBAC (T11): membership site-scope grants
   membershipScopes MembershipSiteScope[]
 
+  // Controlled documents (T22): distribution audience by site.
+  documentDistributions DocumentDistribution[]
+
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy [entityId, name] unique —
   // now organisation-scoped too, matching Entity's own constraint above.
@@ -416,6 +430,13 @@ model User {
   uploadedDocuments    SourceDocument[]     @relation("DocumentUploadedBy")
   createdExtractions   DocumentExtraction[] @relation("ExtractionCreatedBy")
   reviewedExtractions  DocumentExtraction[] @relation("ExtractionReviewedBy")
+
+  // Controlled documents and shared evidence (T22).
+  preparedControlledDocumentRevisions ControlledDocumentRevision[] @relation("ControlledDocumentRevisionPreparedBy")
+  reviewedControlledDocumentRevisions ControlledDocumentRevision[] @relation("ControlledDocumentRevisionReviewedBy")
+  approvedControlledDocumentRevisions ControlledDocumentRevision[] @relation("ControlledDocumentRevisionApprovedBy")
+  uploadedEvidenceObjects              EvidenceObject[]             @relation("EvidenceObjectUploadedBy")
+  linkedEvidence                       EvidenceLink[]                @relation("EvidenceLinkLinkedBy")
 }
 
 // ---------------------------------------------------------------------------
@@ -2083,6 +2104,283 @@ model JobRun {
   @@index([organisationId, jobType, startedAt])
   @@index([outboxMessageId])
   @@index([status, startedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Controlled documents and shared evidence (task T22,
+// Docs/PHASE2_EMS_FOUNDATION_SPEC.md §3 "Controlled documents and evidence").
+//
+// Fixed decisions this section encodes directly in the schema:
+//  - a ControlledDocumentRevision is immutable once APPROVED/EFFECTIVE — the
+//    service layer (document-control-service.ts), not this schema, enforces
+//    that no field on an approved/effective/obsolete row may change and that
+//    a replacement always creates a new revision row, linked back via
+//    `supersedesRevision`;
+//  - evidence bytes live behind one provider interface
+//    (src/lib/documents/storage/provider.ts); this schema stores only
+//    metadata, checksum, and an opaque storage key — never bytes;
+//  - `EvidenceLink.resourceType` is a plain string, not a Postgres enum, so
+//    later phases (T23+) can attach evidence to new resource types without a
+//    migration; the service layer validates it against an explicit allow
+//    list and same-Organisation ownership of the target before writing.
+// ---------------------------------------------------------------------------
+
+enum ControlledDocumentStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  EFFECTIVE
+  OBSOLETE
+}
+
+/// Shared by ControlledDocument/Revision and EvidenceObject — deliberately
+/// one small fixed set rather than a per-domain enum, so a download check can
+/// compare a caller's clearance to one classification value regardless of
+/// which kind of record it guards.
+enum EvidenceClassification {
+  PUBLIC
+  INTERNAL
+  CONFIDENTIAL
+  RESTRICTED
+}
+
+enum RetentionCategory {
+  STANDARD
+  LONG_TERM
+  LEGAL_HOLD
+}
+
+/// The malware-scanning interface (src/lib/documents/malware-scan.ts) always
+/// runs and always sets this field — PENDING until a scanner decides,
+/// SKIPPED only for the explicit no-op development scanner, never silently
+/// left unset.
+enum MalwareScanStatus {
+  PENDING
+  CLEAN
+  INFECTED
+  SKIPPED
+  FAILED
+}
+
+/// A controlled document's identity: its reference/title/category/owner and
+/// a pointer at whichever revision is currently in force. The document row
+/// itself is mutable (owner, review interval); the content and lifecycle
+/// state live on ControlledDocumentRevision, which is not.
+model ControlledDocument {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  /// Stable human-facing code, e.g. "POL-ENV-001". Unique per organisation,
+  /// never reused.
+  reference String
+  title     String
+  /// Free-text/dot-namespaced document category (e.g. "policy", "procedure",
+  /// "form") — a plain string, matching the AuditEvent.eventType convention,
+  /// so new categories never require a migration.
+  category  String
+
+  classification EvidenceClassification @default(INTERNAL)
+
+  ownerMembershipId String?
+  owner             OrganisationMembership? @relation("ControlledDocumentOwner", fields: [ownerMembershipId], references: [id])
+
+  reviewIntervalMonths Int?
+
+  currentRevisionId String?                     @unique
+  currentRevision   ControlledDocumentRevision? @relation("ControlledDocumentCurrentRevision", fields: [currentRevisionId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  revisions ControlledDocumentRevision[] @relation("ControlledDocumentRevisions")
+
+  @@unique([organisationId, reference])
+  @@unique([organisationId, id])
+  @@index([organisationId, category])
+}
+
+/// One immutable-once-approved revision of a controlled document. Draft
+/// revisions may be edited freely; APPROVED/EFFECTIVE/OBSOLETE revisions may
+/// not — a replacement is always a new row (`supersedesRevision`), never an
+/// update to this one (T22 acceptance: "approved revision immutable;
+/// replacement creates successor").
+model ControlledDocumentRevision {
+  id         String             @id @default(cuid())
+  documentId String
+  document   ControlledDocument @relation("ControlledDocumentRevisions", fields: [documentId], references: [id])
+
+  /// Opposite side of ControlledDocument.currentRevision — no FK column here.
+  currentForDocument ControlledDocument? @relation("ControlledDocumentCurrentRevision")
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  revisionNumber Int
+  status         ControlledDocumentStatus @default(DRAFT)
+  changeSummary  String?
+
+  /// Content lives behind the shared evidence provider — this row never
+  /// stores bytes. Nullable because a revision may exist as metadata before
+  /// content is attached (mirrors LcaEvidence's upload-then-link pattern).
+  evidenceObjectId String?         @unique
+  evidenceObject   EvidenceObject? @relation(fields: [evidenceObjectId], references: [id])
+
+  /// Denormalised onto the revision (in addition to EvidenceObject's own
+  /// checksum) so a revision's identity is provable even if the evidence
+  /// link is ever cleared — matches the T22 acceptance criterion that
+  /// checksums are part of the controlled-document record itself.
+  checksumSha256 String?
+  mimeType       String?
+  sizeBytes      Int?
+
+  classification    EvidenceClassification @default(INTERNAL)
+  retentionCategory RetentionCategory      @default(STANDARD)
+  retentionUntil    DateTime?
+
+  preparedByUserId String?
+  preparedBy       User? @relation("ControlledDocumentRevisionPreparedBy", fields: [preparedByUserId], references: [id])
+  reviewedByUserId String?
+  reviewedBy       User? @relation("ControlledDocumentRevisionReviewedBy", fields: [reviewedByUserId], references: [id])
+  approvedByUserId String?
+  approvedBy       User? @relation("ControlledDocumentRevisionApprovedBy", fields: [approvedByUserId], references: [id])
+
+  reviewedAt    DateTime?
+  approvedAt    DateTime?
+  effectiveDate DateTime?
+  reviewDueDate DateTime?
+  obsoleteDate  DateTime?
+
+  /// The revision this one replaces, once effective. Unique: an old revision
+  /// can have at most one successor.
+  supersedesRevisionId String?                     @unique
+  supersedesRevision   ControlledDocumentRevision? @relation("ControlledDocumentRevisionSuccessor", fields: [supersedesRevisionId], references: [id])
+  successorRevision    ControlledDocumentRevision? @relation("ControlledDocumentRevisionSuccessor")
+
+  distributions DocumentDistribution[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([documentId, revisionNumber])
+  @@unique([organisationId, id])
+  @@index([organisationId, status])
+}
+
+/// Shared attachment/evidence metadata — the T22 generalisation of the LCA
+/// module's LcaEvidence/LcaEvidenceBlob pair. Bytes are held by whichever
+/// EvidenceStorageProvider `storageProvider` names; this row is only ever
+/// metadata, checksum, classification and retention state, and download
+/// access is checked (organisation + classification) before any provider
+/// read (src/lib/documents/evidence-service.ts).
+model EvidenceObject {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  filename       String
+  mimeType       String
+  byteSize       Int
+  checksumSha256 String
+
+  /// "database" is the built-in fallback provider; the service layer can
+  /// route to another registered provider without a schema change (same
+  /// pattern as LcaEvidence.storageProvider/storageKey). Nullable because
+  /// the row is created first (to get an id to store bytes under), then
+  /// updated with the provider result — mirrors LcaEvidence's own
+  /// create-then-attach sequence.
+  storageProvider String?
+  storageKey      String?
+
+  classification    EvidenceClassification @default(INTERNAL)
+  retentionCategory RetentionCategory      @default(STANDARD)
+  retentionUntil    DateTime?
+  /// Deletion is prohibited while this is true, regardless of retention
+  /// category — checked in the service layer before any remove() call.
+  legalHold         Boolean                 @default(false)
+
+  /// Always set by the malware-scanning interface — PENDING immediately
+  /// after upload, until a scanner (no-op in development) updates it.
+  malwareScanStatus MalwareScanStatus @default(PENDING)
+  malwareScannedAt  DateTime?
+  malwareScanner    String?
+
+  uploadedByUserId String?
+  uploadedBy       User?    @relation("EvidenceObjectUploadedBy", fields: [uploadedByUserId], references: [id])
+  uploadedAt       DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  links                      EvidenceLink[]
+  controlledDocumentRevision ControlledDocumentRevision?
+  blob                       EvidenceObjectBlob?
+
+  @@unique([organisationId, id])
+  @@index([organisationId, classification])
+}
+
+/// Bytes for the shared evidence provider's built-in "database" backend —
+/// the EvidenceObject counterpart to LcaEvidenceBlob. Deliberately its own
+/// table rather than a reuse of LcaEvidenceBlob: LcaEvidenceBlob carries a
+/// hard FK to LcaEvidence, and T22 explicitly does not migrate existing LCA
+/// evidence bytes into the new shared model. Nothing but the shared
+/// download route selects from this table.
+model EvidenceObjectBlob {
+  id               String         @id @default(cuid())
+  evidenceObjectId String         @unique
+  evidenceObject   EvidenceObject @relation(fields: [evidenceObjectId], references: [id], onDelete: Cascade)
+  data             Bytes
+}
+
+/// Generic evidence-to-resource attachment. `resourceType` is validated
+/// against an explicit allow list and `resourceId` against same-Organisation
+/// ownership of the target in the service layer before this row is ever
+/// written — "no generic polymorphic link may skip target validation"
+/// (Phase 2 spec §3).
+model EvidenceLink {
+  id         String         @id @default(cuid())
+  evidenceId String
+  evidence   EvidenceObject @relation(fields: [evidenceId], references: [id])
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  resourceType String
+  resourceId   String
+  purpose      String?
+
+  linkedByUserId String?
+  linkedBy       User?    @relation("EvidenceLinkLinkedBy", fields: [linkedByUserId], references: [id])
+  linkedAt       DateTime @default(now())
+
+  @@unique([evidenceId, resourceType, resourceId])
+  @@index([organisationId, resourceType, resourceId])
+}
+
+/// A record that a controlled-document revision was issued to a member,
+/// role, or site, with an optional acknowledgement — distinct from
+/// permission-based read access, and never itself a grant of access.
+model DocumentDistribution {
+  id         String                     @id @default(cuid())
+  revisionId String
+  revision   ControlledDocumentRevision @relation(fields: [revisionId], references: [id])
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  audienceMembershipId String?
+  audienceMembership    OrganisationMembership? @relation("DocumentDistributionMember", fields: [audienceMembershipId], references: [id])
+  /// Informational role label (not a RoleDefinition FK) for a distribution
+  /// addressed to "everyone holding this role" rather than one member.
+  audienceRole          String?
+  audienceSiteId        String?
+  audienceSite          Site?                   @relation(fields: [audienceSiteId], references: [id])
+
+  issuedAt       DateTime  @default(now())
+  acknowledgedAt DateTime?
+
+  @@index([organisationId, revisionId])
 }
 
 // ---------------------------------------------------------------------------
