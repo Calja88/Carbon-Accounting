@@ -17,6 +17,7 @@ import {
   Package,
   Truck,
   Users,
+  Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -49,6 +50,7 @@ const ORGANISATION_ITEMS: NavItem[] = [{ href: "/admin/organisation/members", la
 const MORE_ITEMS: NavItem[] = [
   { href: "/suppliers", label: "Suppliers & supplier PCFs", icon: Truck },
   { href: "/methodologies", label: "Methodology register", icon: BookMarked },
+  { href: "/ems/processes", label: "EMS process profiles", icon: Workflow },
   { href: "/help/lca", label: "Product LCA guidance", icon: HelpCircle },
 ];
 
