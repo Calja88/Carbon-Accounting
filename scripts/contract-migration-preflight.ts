@@ -54,9 +54,20 @@ async function run(prisma: PrismaClient) {
       table: "CommutingSurvey",
       sql: `SELECT count(*) FROM "CommutingSurvey" c JOIN "Site" s ON c."siteId" = s.id WHERE c."organisationId" IS NULL AND s."organisationId" IS NULL`,
     },
+    // Calculation's parent (ActivityEntry) is itself parent-derived from
+    // Site within this same migration (see the mechanical-backfill order in
+    // the migration file: ActivityEntry is backfilled from Site *before*
+    // Calculation is backfilled from ActivityEntry). Checking only
+    // ActivityEntry's raw pre-migration organisationId here — as every
+    // other entry in this list correctly does against its own terminal,
+    // already-T12-backfilled parent — produces a false positive: once Site
+    // is fully linked, the real migration's earlier UPDATE resolves
+    // ActivityEntry before Calculation's UPDATE ever runs, so a Calculation
+    // row is only a genuine problem if the whole chain — Calculation,
+    // ActivityEntry, *and* Site — is null.
     {
       table: "Calculation",
-      sql: `SELECT count(*) FROM "Calculation" c JOIN "ActivityEntry" e ON c."activityEntryId" = e.id WHERE c."organisationId" IS NULL AND e."organisationId" IS NULL`,
+      sql: `SELECT count(*) FROM "Calculation" c JOIN "ActivityEntry" e ON c."activityEntryId" = e.id JOIN "Site" s ON e."siteId" = s.id WHERE c."organisationId" IS NULL AND e."organisationId" IS NULL AND s."organisationId" IS NULL`,
     },
     {
       table: "Supplier",
