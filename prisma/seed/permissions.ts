@@ -1,9 +1,16 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { PERMISSION_CATALOGUE } from "../../src/lib/rbac/permission-catalogue";
 import { SYSTEM_ROLE_TEMPLATES } from "../../src/lib/rbac/role-templates";
 
+// Typed as `Prisma.TransactionClient` (a structural subset a plain
+// `PrismaClient` also satisfies) rather than `PrismaClient` itself, so both
+// the top-level seed entry point and callers running inside an interactive
+// `prisma.$transaction(async (tx) => ...)` — like the T12 backfill command —
+// can pass their client straight through with no unsafe cast.
+type Db = Prisma.TransactionClient;
+
 /** Idempotent upsert of the global, immutable permission catalogue (T11 §5). */
-export async function seedPermissionCatalogue(prisma: PrismaClient) {
+export async function seedPermissionCatalogue(prisma: Db) {
   for (const p of PERMISSION_CATALOGUE) {
     await prisma.permissionDefinition.upsert({
       where: { code: p.code },
@@ -23,7 +30,7 @@ export async function seedPermissionCatalogue(prisma: PrismaClient) {
  * the T12 backfill command (or a future signup flow) creates one. Exported
  * here for T12/T13 to reuse rather than reimplement.
  */
-export async function provisionSystemRoleTemplates(prisma: PrismaClient, organisationId: string) {
+export async function provisionSystemRoleTemplates(prisma: Db, organisationId: string) {
   for (const template of SYSTEM_ROLE_TEMPLATES) {
     const role = await prisma.roleDefinition.upsert({
       where: { organisationId_templateKey: { organisationId, templateKey: template.templateKey } },
