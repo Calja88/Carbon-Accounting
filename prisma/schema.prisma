@@ -204,6 +204,10 @@ model Organisation {
   changeAssessments           ChangeAssessment[]
   environmentalPolicyRecords  EnvironmentalPolicyRecord[]
 
+  // Notifications and reminders (T24).
+  notifications Notification[]
+  reminderRules ReminderRule[]
+
   @@index([status])
 }
 
@@ -243,6 +247,9 @@ model OrganisationMembership {
   ownedContextIssues           ContextIssue[]           @relation("ContextIssueOwner")
   ownedInterestedParties       InterestedParty[]        @relation("InterestedPartyOwner")
   ownedEmsRiskOpportunities    EmsRiskOpportunity[]     @relation("EmsRiskOpportunityOwner")
+
+  // Notifications and reminders (T24): notifications addressed to this membership.
+  receivedNotifications Notification[] @relation("NotificationRecipient")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -2884,6 +2891,124 @@ model EnvironmentalPolicyRecord {
 
   @@unique([organisationId, id])
   @@index([organisationId, programmeId])
+}
+
+// ---------------------------------------------------------------------------
+// Notifications and reminders (task T24, Docs/PHASE2_EMS_FOUNDATION_SPEC.md
+// §3 "Audit, outbox and notifications", §7 "P2-07").
+//
+// Fixed decisions this section encodes:
+//  - "Notifications are derived delivery records, not evidence of task
+//    completion" (Phase 2 spec §1) — a Notification never gates a workflow
+//    transition; it is created *after* the domain event it describes.
+//  - In-app delivery only for T24. `NotificationChannel` exists so a later
+//    task can add an email adapter without a migration; the email adapter
+//    itself (src/lib/notifications/delivery/email-adapter.ts) is a no-op
+//    interface stub in T24, never real sending.
+//  - `title`/`body` must be generic, safe text — never a raw record field,
+//    environmental value, or other sensitive detail — enforced by the
+//    service layer's fixed per-eventType message templates, not by this
+//    schema.
+//  - `dedupeKey` is unique per (organisationId, recipientMembershipId,
+//    dedupeKey): re-triggering the same event for the same recipient before
+//    it is superseded collapses to the existing row instead of creating a
+//    duplicate notification.
+//  - Recipient membership is revalidated ACTIVE/in-scope at delivery time,
+//    not just at creation time (spec §6 "Notification recipient is
+//    revalidated as active/in-scope at delivery").
+// ---------------------------------------------------------------------------
+
+enum NotificationStatus {
+  PENDING
+  DELIVERED
+  READ
+  DISMISSED
+  SUPPRESSED
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+}
+
+model Notification {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  recipientMembershipId String
+  recipientMembership   OrganisationMembership @relation("NotificationRecipient", fields: [recipientMembershipId], references: [id])
+
+  // Dot-namespaced, e.g. "ems.review_due", "compliance_obligation.overdue" —
+  // a plain string, not an enum, so later phases add notification types
+  // without a migration (mirrors OutboxMessage.topic, T21).
+  type String
+
+  channel NotificationChannel @default(IN_APP)
+  status  NotificationStatus  @default(PENDING)
+
+  // Generic, non-disclosing copy only — see fixed decisions above.
+  title String
+  body  String
+
+  resourceType String
+  resourceId   String
+
+  // Unique per (organisationId, recipientMembershipId, dedupeKey) — see
+  // fixed decisions above.
+  dedupeKey String
+
+  reminderRuleId String?
+  reminderRule   ReminderRule? @relation(fields: [reminderRuleId], references: [id])
+
+  deliveredAt  DateTime?
+  readAt       DateTime?
+  dismissedAt  DateTime?
+  suppressedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, recipientMembershipId, dedupeKey])
+  @@index([organisationId, recipientMembershipId, status])
+  @@index([organisationId, resourceType, resourceId])
+}
+
+/// A standing rule that generates reminder notifications for a resource
+/// type/event (e.g. "controlled document review due in N days"). Recipients
+/// are resolved at evaluation time from `recipientsPolicy`, never stored as
+/// a fixed list, so a reassignment changes who is reminded without editing
+/// the rule.
+model ReminderRule {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  resourceType String
+  event        String
+
+  // Days before/after the triggering date; negative means "before".
+  offsetDays Int
+
+  // "ONCE" or a simple recurrence key (e.g. "DAILY_UNTIL_RESOLVED") — a
+  // plain string, not an enum, evaluated by the service layer.
+  recurrence String @default("ONCE")
+
+  // Structured recipient-resolution policy (e.g. { "kind": "owner" } or
+  // { "kind": "permission", "permission": "ems.controlled_document.approve" })
+  // resolved against live membership state at evaluation time, never a
+  // stored membership id list.
+  recipientsPolicy Json
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notifications Notification[]
+
+  @@unique([organisationId, resourceType, event])
+  @@index([organisationId, resourceType, isActive])
 }
 
 // ---------------------------------------------------------------------------

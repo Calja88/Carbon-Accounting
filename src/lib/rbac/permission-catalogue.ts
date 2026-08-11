@@ -100,6 +100,7 @@ export const PERMISSION_CATALOGUE: PermissionCatalogueEntry[] = [
   entry("ems.emergency_plan.manage", "Manage emergency preparedness plans"),
   entry("ems.emergency_exercise.record", "Record emergency exercise outcomes"),
   entry("ems.export", "Export EMS records", true),
+  entry("ems.notification.manage", "Configure reminder rules and notification preferences"),
 
   // --- Platform audit trail ---
   entry("audit.view", "View the platform audit trail"),
