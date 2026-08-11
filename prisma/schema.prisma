@@ -179,6 +179,10 @@ model Organisation {
   // Platform audit log (T20).
   auditEvents AuditEvent[]
 
+  // Transactional outbox and job framework (T21).
+  outboxMessages OutboxMessage[]
+  jobRuns        JobRun[]
+
   @@index([status])
 }
 
@@ -1964,13 +1968,121 @@ model AuditEvent {
   source        String
   occurredAt    DateTime @default(now())
 
-  contentHash      String
+  contentHash       String
   previousEventHash String?
 
   @@index([organisationId, occurredAt])
   @@index([organisationId, resourceType, resourceId])
   @@index([organisationId, correlationId])
   @@index([organisationId, sequence])
+}
+
+// ---------------------------------------------------------------------------
+// Transactional outbox and job framework (Phase 2 spec §§2,3 "Audit, outbox
+// and notifications", task T21). `OutboxMessage` is the reliability
+// boundary: a domain write and its outbox row commit in the same Prisma
+// transaction (src/lib/jobs/outbox-service.ts), so a job is never enqueued
+// for a write that didn't happen, and never lost for a write that did.
+//
+// `organisationId` is nullable only for a declared allowlist of platform
+// jobs (PLATFORM_JOB_TOPICS in src/lib/jobs/types.ts) — every other topic is
+// rejected by the service layer unless a tenant context supplies it, so
+// tenant scope on a tenant job is explicit at the call site, not inferred.
+// ---------------------------------------------------------------------------
+
+enum OutboxMessageStatus {
+  PENDING
+  LEASED
+  RETRY
+  COMPLETED
+  DEAD_LETTER
+}
+
+enum JobRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+model OutboxMessage {
+  id             String        @id @default(cuid())
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+
+  // Dot-namespaced job topic, e.g. "legal.sync", "reminder.dispatch" — a
+  // plain string so later phases add topics without a migration; the
+  // service layer, not this schema, enforces the known-topic/tenant-nullable
+  // rule via PLATFORM_JOB_TOPICS.
+  topic   String
+  version Int    @default(1)
+  payload Json
+
+  // Unique per topic: enqueueing the same (topic, idempotencyKey) twice
+  // collapses to the existing row instead of creating a duplicate job.
+  idempotencyKey String
+
+  status      OutboxMessageStatus @default(PENDING)
+  availableAt DateTime            @default(now())
+
+  // Lease fields: a worker claims a batch of due messages with a single
+  // conditional UPDATE (SELECT ... FOR UPDATE SKIP LOCKED), so two workers
+  // can never both win the same row — whichever UPDATE commits first moves
+  // the row out of the leaseable set for the other.
+  leaseOwner String?
+  leaseUntil DateTime?
+
+  attempts    Int @default(0)
+  maxAttempts Int @default(8)
+
+  // Structured error from the most recent failed attempt. Never a raw stack
+  // trace or payload dump — a stable code plus a safe, bounded message.
+  lastErrorCode    String?
+  lastErrorMessage String?
+
+  correlationId String
+  source        String
+
+  completedAt    DateTime?
+  deadLetteredAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jobRuns JobRun[]
+
+  @@unique([topic, idempotencyKey])
+  @@index([status, availableAt])
+  @@index([organisationId, topic])
+  @@index([leaseUntil])
+}
+
+/**
+ * One worker's attempt at one outbox message — the execution history behind
+ * "worker health": recent JobRun rows for a topic/worker reveal failure
+ * rate and stuck workers without a separate heartbeat table.
+ */
+model JobRun {
+  id String @id @default(cuid())
+
+  outboxMessageId String
+  outboxMessage   OutboxMessage @relation(fields: [outboxMessageId], references: [id])
+
+  jobType        String
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  workerId       String
+  correlationId  String
+
+  status     JobRunStatus @default(RUNNING)
+  startedAt  DateTime     @default(now())
+  finishedAt DateTime?
+
+  errorCode    String?
+  errorMessage String?
+
+  @@index([organisationId, jobType, startedAt])
+  @@index([outboxMessageId])
+  @@index([status, startedAt])
 }
 
 // ---------------------------------------------------------------------------
