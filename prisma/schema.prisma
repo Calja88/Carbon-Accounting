@@ -176,6 +176,9 @@ model Organisation {
   aiSuggestions   AiSuggestion[]
   ownedFactorSets EmissionFactorSet[]
 
+  // Platform audit log (T20).
+  auditEvents AuditEvent[]
+
   @@index([status])
 }
 
@@ -397,6 +400,9 @@ model User {
   approvedLcaExclusions    LcaExclusion[]         @relation("LcaExclusionApprover")
   recordedLcaVerifications LcaVerification[]      @relation("LcaVerificationRecorder")
   lcaAuditEvents           LcaAuditEvent[]        @relation("LcaAuditActor")
+
+  // Platform audit log (T20).
+  auditEvents AuditEvent[] @relation("AuditEventActor")
 
   // --- AI layer / evidence documents ---
   aiSettingsUpdates    AiSettings[]         @relation("AiSettingsUpdatedBy")
@@ -1888,6 +1894,83 @@ model LcaAuditEvent {
 
   @@index([assessmentId, occurredAt])
   @@index([entityType, entityId])
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 (T20) — generic append-only platform audit log.
+//
+// Supplements, not replaces, the domain-specific provenance above
+// (LcaAuditEvent) and every immutable Calculation/ReportSnapshot/
+// LcaAssessmentVersion history — those keep recording what they already
+// record. This table exists for tenant-administration events (membership,
+// role/permission changes, organisation settings, access reviews — the
+// vocabulary fixed in Docs/PHASE1_TENANCY_RBAC_SPEC.md §10) and, later,
+// other Phase 2+ EMS events, in one place applications can query/export by
+// organisation regardless of which resource type changed.
+//
+// Immutability is enforced twice, independently:
+//  - No update/delete method exists on the repository
+//    (src/lib/repositories/audit-repository.ts) — the application layer
+//    simply cannot call one.
+//  - A `BEFORE UPDATE OR DELETE` trigger (this table's migration) rejects
+//    any UPDATE/DELETE at the database level, regardless of which Postgres
+//    role issues it — deliberately not dependent on the T1B RLS
+//    owner/runtime-role split, which is an unadopted spike with no Neon
+//    role-provisioning automation yet (Docs/T1B_RLS_SPIKE_FINDINGS.md).
+//
+// `contentHash`/`previousEventHash` form a per-organisation hash chain
+// (src/lib/audit/integrity.ts): each row hashes its own safe fields, and
+// records the previous row's hash for the same organisation. Recomputing
+// hashes and checking the chain detects tampering or a deleted/reordered
+// row even though the application itself never performs those operations.
+// ---------------------------------------------------------------------------
+
+enum AuditActorType {
+  USER
+  SYSTEM
+}
+
+model AuditEvent {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  // Monotonic per-row insertion order, independent of `occurredAt` (clock
+  // skew/backdating never affects ordering). Used to find "the previous
+  // event for this organisation" when computing the hash chain.
+  sequence BigInt @default(autoincrement())
+
+  actorUserId String?
+  actor       User?          @relation("AuditEventActor", fields: [actorUserId], references: [id])
+  actorType   AuditActorType @default(USER)
+
+  // Dot-namespaced, e.g. "membership.suspended", "role.permission_granted" —
+  // the fixed Phase 1 vocabulary (PHASE1_TENANCY_RBAC_SPEC.md §10) plus
+  // later Phase 2+ additions. Plain string, not a Postgres enum, so new
+  // event types never require a schema migration.
+  eventType    String
+  resourceType String
+  resourceId   String?
+
+  // Safe, human-readable description plus a bounded before/after summary or
+  // field-level diff. Never secrets, invitation tokens, file bytes, raw AI
+  // prompts, or environmental values — enforced by convention at every call
+  // site (src/lib/audit/types.ts), not by this schema.
+  summary String
+  before  Json?
+  after   Json?
+
+  correlationId String
+  source        String
+  occurredAt    DateTime @default(now())
+
+  contentHash      String
+  previousEventHash String?
+
+  @@index([organisationId, occurredAt])
+  @@index([organisationId, resourceType, resourceId])
+  @@index([organisationId, correlationId])
+  @@index([organisationId, sequence])
 }
 
 // ---------------------------------------------------------------------------

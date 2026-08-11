@@ -12,6 +12,8 @@ import bcrypt from "bcryptjs";
 import { MembershipStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { hashInvitationToken, assertInvitationAcceptable, InvitationTokenError } from "@/lib/organisation/invitation-service";
+import { createTenantRepositoryContext } from "@/lib/repositories/context";
+import { recordAuditEvent } from "@/lib/repositories/audit-repository";
 
 export interface AcceptInvitationState {
   error: string | null;
@@ -58,9 +60,9 @@ export async function acceptInvitationAction(
   const activeMembership = membership!;
   const passwordHash = await bcrypt.hash(parsed.data.password, 12);
 
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: activeMembership.userId }, data: { passwordHash } }),
-    prisma.organisationMembership.update({
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: activeMembership.userId }, data: { passwordHash } });
+    await tx.organisationMembership.update({
       where: { id: activeMembership.id },
       data: {
         status: MembershipStatus.ACTIVE,
@@ -68,8 +70,27 @@ export async function acceptInvitationAction(
         inviteTokenHash: null,
         inviteTokenExpiresAt: null,
       },
-    }),
-  ]);
+    });
+    // Self-activation: no signed-in session/OrganisationContext exists yet
+    // on this public route, so the actor is the invitee accepting their own
+    // invitation and the correlation id is minted fresh for this operation.
+    const auditCtx = createTenantRepositoryContext({
+      organisationId: activeMembership.organisationId,
+      userId: activeMembership.userId,
+      correlationId: crypto.randomUUID(),
+    });
+    await recordAuditEvent(tx, auditCtx, {
+      eventType: "membership.activated",
+      resourceType: "membership",
+      resourceId: activeMembership.id,
+      summary: "Accepted invitation and activated membership.",
+      actorUserId: activeMembership.userId,
+      before: { status: "INVITED" },
+      after: { status: "ACTIVE" },
+      correlationId: auditCtx.correlationId,
+      source: "invite-accept",
+    });
+  });
 
   return { error: null, success: true };
 }

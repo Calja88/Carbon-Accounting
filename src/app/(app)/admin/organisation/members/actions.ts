@@ -29,6 +29,18 @@ import {
   LastRoleManagerError,
   type RoleManagerCandidate,
 } from "@/lib/organisation/membership-guard";
+import { createTenantRepositoryContext } from "@/lib/repositories/context";
+import { recordAuditEvent, recordAuditEvents } from "@/lib/repositories/audit-repository";
+import type { RecordAuditEventInput } from "@/lib/audit/types";
+
+/** Narrows the request-level context to what the audit repository needs, tying every event this action raises to one correlation id. */
+function auditContext(context: OrganisationContext) {
+  return createTenantRepositoryContext({
+    organisationId: context.organisationId,
+    userId: context.userId,
+    correlationId: context.correlationId,
+  });
+}
 
 export interface MembersActionState {
   error: string | null;
@@ -153,6 +165,32 @@ export async function inviteMemberAction(_prev: MembersActionState, formData: Fo
         assignedByUserId: context.userId,
       })),
     });
+
+    const events: RecordAuditEventInput[] = [
+      {
+        eventType: "membership.invited",
+        resourceType: "membership",
+        resourceId: membership.id,
+        summary: `Invited ${email}.`,
+        actorUserId: context.userId,
+        after: { email, status: "INVITED" },
+        correlationId: context.correlationId,
+        source: "web-app",
+      },
+      ...roles.map(
+        (role): RecordAuditEventInput => ({
+          eventType: "membership.role_assigned",
+          resourceType: "membership",
+          resourceId: membership.id,
+          summary: `Assigned role "${role.name}" at invite time.`,
+          actorUserId: context.userId,
+          after: { roleId: role.id, roleName: role.name },
+          correlationId: context.correlationId,
+          source: "web-app",
+        }),
+      ),
+    ];
+    await recordAuditEvents(tx, auditContext(context), events);
   });
 
   revalidatePath("/admin/organisation/members");
@@ -214,14 +252,27 @@ export async function revokeInvitationAction(_prev: MembersActionState, formData
     return { ...emptyState, error: "Only a pending invitation can be revoked." };
   }
 
-  await prisma.organisationMembership.update({
-    where: { id: membership.id },
-    data: {
-      status: MembershipStatus.REMOVED,
-      removedAt: new Date(),
-      inviteTokenHash: null,
-      inviteTokenExpiresAt: null,
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.organisationMembership.update({
+      where: { id: membership.id },
+      data: {
+        status: MembershipStatus.REMOVED,
+        removedAt: new Date(),
+        inviteTokenHash: null,
+        inviteTokenExpiresAt: null,
+      },
+    });
+    await recordAuditEvent(tx, auditContext(context), {
+      eventType: "membership.removed",
+      resourceType: "membership",
+      resourceId: membership.id,
+      summary: `Revoked the pending invitation for ${membership.user.email}.`,
+      actorUserId: context.userId,
+      before: { status: "INVITED" },
+      after: { status: "REMOVED" },
+      correlationId: context.correlationId,
+      source: "web-app",
+    });
   });
 
   revalidatePath("/admin/organisation/members");
@@ -255,9 +306,22 @@ export async function suspendMembershipAction(_prev: MembersActionState, formDat
     return { ...emptyState, error: friendlyError(err) };
   }
 
-  await prisma.organisationMembership.update({
-    where: { id: membership.id },
-    data: { status: MembershipStatus.SUSPENDED, suspendedAt: new Date() },
+  await prisma.$transaction(async (tx) => {
+    await tx.organisationMembership.update({
+      where: { id: membership.id },
+      data: { status: MembershipStatus.SUSPENDED, suspendedAt: new Date() },
+    });
+    await recordAuditEvent(tx, auditContext(context), {
+      eventType: "membership.suspended",
+      resourceType: "membership",
+      resourceId: membership.id,
+      summary: `Suspended ${membership.user.email}.`,
+      actorUserId: context.userId,
+      before: { status: "ACTIVE" },
+      after: { status: "SUSPENDED" },
+      correlationId: context.correlationId,
+      source: "web-app",
+    });
   });
 
   revalidatePath("/admin/organisation/members");
@@ -278,9 +342,22 @@ export async function reactivateMembershipAction(_prev: MembersActionState, form
     return { ...emptyState, error: "Only a suspended membership can be reactivated." };
   }
 
-  await prisma.organisationMembership.update({
-    where: { id: membership.id },
-    data: { status: MembershipStatus.ACTIVE, suspendedAt: null },
+  await prisma.$transaction(async (tx) => {
+    await tx.organisationMembership.update({
+      where: { id: membership.id },
+      data: { status: MembershipStatus.ACTIVE, suspendedAt: null },
+    });
+    await recordAuditEvent(tx, auditContext(context), {
+      eventType: "membership.activated",
+      resourceType: "membership",
+      resourceId: membership.id,
+      summary: `Reactivated ${membership.user.email} from suspension.`,
+      actorUserId: context.userId,
+      before: { status: "SUSPENDED" },
+      after: { status: "ACTIVE" },
+      correlationId: context.correlationId,
+      source: "web-app",
+    });
   });
 
   revalidatePath("/admin/organisation/members");
@@ -309,14 +386,27 @@ export async function removeMembershipAction(_prev: MembersActionState, formData
     }
   }
 
-  await prisma.organisationMembership.update({
-    where: { id: membership.id },
-    data: {
-      status: MembershipStatus.REMOVED,
-      removedAt: new Date(),
-      inviteTokenHash: null,
-      inviteTokenExpiresAt: null,
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.organisationMembership.update({
+      where: { id: membership.id },
+      data: {
+        status: MembershipStatus.REMOVED,
+        removedAt: new Date(),
+        inviteTokenHash: null,
+        inviteTokenExpiresAt: null,
+      },
+    });
+    await recordAuditEvent(tx, auditContext(context), {
+      eventType: "membership.removed",
+      resourceType: "membership",
+      resourceId: membership.id,
+      summary: `Removed ${membership.user.email}.`,
+      actorUserId: context.userId,
+      before: { status: membership.status },
+      after: { status: "REMOVED" },
+      correlationId: context.correlationId,
+      source: "web-app",
+    });
   });
 
   revalidatePath("/admin/organisation/members");
@@ -354,16 +444,32 @@ export async function assignRoleAction(_prev: MembersActionState, formData: Form
     return { ...emptyState, error: "Member or role not found in this organisation." };
   }
 
-  await prisma.membershipRole.upsert({
+  const existing = await prisma.membershipRole.findUnique({
     where: { membershipId_roleId: { membershipId: membership.id, roleId: role.id } },
-    update: {},
-    create: {
-      organisationId: context.organisationId,
-      membershipId: membership.id,
-      roleId: role.id,
-      assignedByUserId: context.userId,
-    },
   });
+
+  if (!existing) {
+    await prisma.$transaction(async (tx) => {
+      await tx.membershipRole.create({
+        data: {
+          organisationId: context.organisationId,
+          membershipId: membership.id,
+          roleId: role.id,
+          assignedByUserId: context.userId,
+        },
+      });
+      await recordAuditEvent(tx, auditContext(context), {
+        eventType: "membership.role_assigned",
+        resourceType: "membership",
+        resourceId: membership.id,
+        summary: `Assigned role "${role.name}".`,
+        actorUserId: context.userId,
+        after: { roleId: role.id, roleName: role.name },
+        correlationId: context.correlationId,
+        source: "web-app",
+      });
+    });
+  }
 
   revalidatePath("/admin/organisation/members");
   return { ...emptyState, message: `Assigned ${role.name}.` };
@@ -416,8 +522,22 @@ export async function unassignRoleAction(_prev: MembersActionState, formData: Fo
     }
   }
 
-  await prisma.membershipRole.deleteMany({
-    where: { organisationId: context.organisationId, membershipId: membership.id, roleId: role.id },
+  await prisma.$transaction(async (tx) => {
+    const removed = await tx.membershipRole.deleteMany({
+      where: { organisationId: context.organisationId, membershipId: membership.id, roleId: role.id },
+    });
+    if (removed.count > 0) {
+      await recordAuditEvent(tx, auditContext(context), {
+        eventType: "membership.role_removed",
+        resourceType: "membership",
+        resourceId: membership.id,
+        summary: `Unassigned role "${role.name}".`,
+        actorUserId: context.userId,
+        before: { roleId: role.id, roleName: role.name },
+        correlationId: context.correlationId,
+        source: "web-app",
+      });
+    }
   });
 
   revalidatePath("/admin/organisation/members");
