@@ -28,6 +28,9 @@ import {
   ROLE_MANAGEMENT_PERMISSION,
   type RoleManagerCandidate,
 } from "@/lib/organisation/membership-guard";
+import { createTenantRepositoryContext } from "@/lib/repositories/context";
+import { recordAuditEvents } from "@/lib/repositories/audit-repository";
+import type { RecordAuditEventInput } from "@/lib/audit/types";
 
 export interface RoleActionState {
   error: string | null;
@@ -139,21 +142,54 @@ export async function updateRolePermissionsAction(_prev: RoleActionState, formDa
   const toAdd = [...nextCodes].filter((code) => !currentCodes.has(code));
   const toRemove = [...currentCodes].filter((code) => !nextCodes.has(code));
 
-  await prisma.$transaction([
-    ...(toRemove.length > 0
-      ? [prisma.rolePermission.deleteMany({ where: { roleId: role.id, permissionCode: { in: toRemove } } })]
-      : []),
-    ...toAdd.map((code) =>
-      prisma.rolePermission.create({
-        data: {
+  await prisma.$transaction(async (tx) => {
+    if (toRemove.length > 0) {
+      await tx.rolePermission.deleteMany({ where: { roleId: role.id, permissionCode: { in: toRemove } } });
+    }
+    if (toAdd.length > 0) {
+      await tx.rolePermission.createMany({
+        data: toAdd.map((code) => ({
           organisationId: context.organisationId,
           roleId: role.id,
           permissionCode: code,
           grantedByUserId: context.userId,
-        },
-      }),
-    ),
-  ]);
+        })),
+      });
+    }
+
+    const auditCtx = createTenantRepositoryContext({
+      organisationId: context.organisationId,
+      userId: context.userId,
+      correlationId: context.correlationId,
+    });
+    const events: RecordAuditEventInput[] = [
+      ...toAdd.map(
+        (code): RecordAuditEventInput => ({
+          eventType: "role.permission_granted",
+          resourceType: "role_permission",
+          resourceId: role.id,
+          summary: `Granted "${code}" on role "${role.name}".`,
+          actorUserId: context.userId,
+          after: { permissionCode: code },
+          correlationId: context.correlationId,
+          source: "web-app",
+        }),
+      ),
+      ...toRemove.map(
+        (code): RecordAuditEventInput => ({
+          eventType: "role.permission_revoked",
+          resourceType: "role_permission",
+          resourceId: role.id,
+          summary: `Revoked "${code}" on role "${role.name}".`,
+          actorUserId: context.userId,
+          before: { permissionCode: code },
+          correlationId: context.correlationId,
+          source: "web-app",
+        }),
+      ),
+    ];
+    await recordAuditEvents(tx, auditCtx, events);
+  });
 
   revalidatePath("/admin/organisation/roles");
   return {
