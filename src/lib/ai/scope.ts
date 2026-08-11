@@ -12,13 +12,9 @@
  * a prompt said.
  */
 
-import type { Role } from "@prisma/client";
-
 export interface AiActor {
   userId: string;
   name: string;
-  role: Role;
-  isAdmin: boolean;
   /**
    * The Organisation this actor is currently acting within (Phase 1 tenancy,
    * T18). Every AI query that reads or writes tenant-owned data — documents,

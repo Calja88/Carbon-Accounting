@@ -16,7 +16,6 @@ import {
   scopedToSite,
   type AiActor,
 } from "@/lib/ai/scope";
-import { Role } from "@prisma/client";
 
 /**
  * Prompt-injection handling and the data-scope boundary — the two places
@@ -87,8 +86,6 @@ function actor(overrides: Partial<AiActor> = {}): AiActor {
   return {
     userId: "user-1",
     name: "Test User",
-    role: Role.SUSTAINABILITY_LEAD,
-    isAdmin: false,
     organisationId: "org-aster-demo",
     correlationId: "correlation-1",
     entityIds: ["entity-a"],

@@ -7,7 +7,22 @@ import { seedPermissionCatalogue } from "./permissions";
 
 const prisma = new PrismaClient();
 
-async function seedEntitiesAndSites() {
+/**
+ * Phase 1 tenancy (T1A): every seeded Entity/Site now requires an
+ * organisationId at creation, so the dev/seed fixture needs one Organisation
+ * to attach them to — `scripts/backfill-organisation.ts` targets this same
+ * slug for a pre-Phase-1 database, so seeding a fresh one uses it too rather
+ * than a second synthetic tenant name.
+ */
+async function seedOrganisation() {
+  return prisma.organisation.upsert({
+    where: { slug: "paragon-group" },
+    update: {},
+    create: { name: "Paragon Group", slug: "paragon-group" },
+  });
+}
+
+async function seedEntitiesAndSites(organisationId: string) {
   const entities = [
     { name: "Paragon ID" },
     { name: "RFID Discovery" },
@@ -17,9 +32,9 @@ async function seedEntitiesAndSites() {
   const entityRecords: Record<string, string> = {};
   for (const e of entities) {
     const rec = await prisma.entity.upsert({
-      where: { name: e.name },
+      where: { organisationId_name: { organisationId, name: e.name } },
       update: {},
-      create: e,
+      create: { ...e, organisationId },
     });
     entityRecords[e.name] = rec.id;
   }
@@ -34,9 +49,11 @@ async function seedEntitiesAndSites() {
   const siteRecords: Record<string, string> = {};
   for (const s of sites) {
     const rec = await prisma.site.upsert({
-      where: { entityId_name: { entityId: entityRecords[s.entity], name: s.name } },
+      where: {
+        organisationId_entityId_name: { organisationId, entityId: entityRecords[s.entity], name: s.name },
+      },
       update: {},
-      create: { entityId: entityRecords[s.entity], name: s.name, address: s.address },
+      create: { organisationId, entityId: entityRecords[s.entity], name: s.name, address: s.address },
     });
     siteRecords[s.name] = rec.id;
   }
@@ -170,8 +187,11 @@ async function seedActivityDataPoints() {
 }
 
 async function main() {
+  console.log("Seeding organisation...");
+  const organisation = await seedOrganisation();
+
   console.log("Seeding entities and sites...");
-  await seedEntitiesAndSites();
+  await seedEntitiesAndSites(organisation.id);
 
   console.log("Seeding users...");
   await seedUsers();

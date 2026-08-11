@@ -28,7 +28,6 @@ function initials(name: string) {
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
-  const isAdmin = session?.user?.role === "ADMIN";
 
   // Resolved on the server so the assistant opens already knowing whether it
   // can answer — the platform never offers an AI affordance that will fail.
@@ -44,6 +43,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const aiAvailability = organisation
     ? await getAiAvailability(organisation.organisationId)
     : { available: false, reason: null, message: null };
+
+  // Nav visibility for the platform-admin section (factor administration,
+  // AI settings) — gated on this Organisation's own current permission
+  // grants (T1A), not the legacy JWT role. Either permission is enough to
+  // show the section; the destination pages each enforce their own,
+  // narrower permission.
+  const canViewPlatformAdmin =
+    organisation !== null &&
+    (hasPermission(organisation, "carbon.factor.view") || hasPermission(organisation, "ai.settings.manage"));
 
   return (
     <Providers>
@@ -86,7 +94,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
         <div className="mx-auto max-w-6xl px-4 pb-2">
           <NavLinks
-            isAdmin={isAdmin}
+            canViewPlatformAdmin={canViewPlatformAdmin}
             canManageOrganisation={organisation !== null && hasPermission(organisation, "organisation.membership.manage")}
           />
         </div>

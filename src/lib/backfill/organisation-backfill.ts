@@ -20,7 +20,13 @@
  * without a live database.
  */
 
-import { Role, RoleTemplateKey } from "@prisma/client";
+import { Role } from "@prisma/client";
+// Type-only: RoleTemplateKey is never read as a runtime value in this file.
+// The mapping below uses the enum's own string literals directly instead of
+// `RoleTemplateKey.X`, so it no longer depends on `@prisma/client`'s
+// generated runtime enum object being present — only on the *type* lining
+// up, which `tsc` still checks. See role-templates.ts for the matching fix.
+import type { RoleTemplateKey } from "@prisma/client";
 
 /**
  * Legacy single-tenant `Role` → Phase 1 system role template.
@@ -33,10 +39,10 @@ import { Role, RoleTemplateKey } from "@prisma/client";
  * task report, same as the T11 template judgment calls.
  */
 export const LEGACY_ROLE_TO_TEMPLATE: Record<Role, RoleTemplateKey> = {
-  [Role.DATA_OWNER]: RoleTemplateKey.EMS_CONTRIBUTOR,
-  [Role.SUSTAINABILITY_LEAD]: RoleTemplateKey.SUSTAINABILITY_LEAD,
-  [Role.FINANCE]: RoleTemplateKey.FINANCE_READ_ONLY,
-  [Role.ADMIN]: RoleTemplateKey.ORGANISATION_ADMINISTRATOR,
+  [Role.DATA_OWNER]: "EMS_CONTRIBUTOR",
+  [Role.SUSTAINABILITY_LEAD]: "SUSTAINABILITY_LEAD",
+  [Role.FINANCE]: "FINANCE_READ_ONLY",
+  [Role.ADMIN]: "ORGANISATION_ADMINISTRATOR",
 };
 
 export interface BackfillEntityInput {

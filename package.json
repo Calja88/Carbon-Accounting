@@ -12,6 +12,7 @@
     "db:seed:lca-methodology": "tsx prisma/seed/lca-methodology-only.ts",
     "db:migrate": "prisma migrate dev",
     "backfill:organisation": "tsx scripts/backfill-organisation.ts",
+    "migrate:contract-preflight": "tsx scripts/contract-migration-preflight.ts",
     "test": "vitest run"
   },
   "dependencies": {

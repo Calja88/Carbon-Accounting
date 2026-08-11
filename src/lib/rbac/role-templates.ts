@@ -52,7 +52,11 @@
  *    obligations).
  */
 
-import { RoleTemplateKey } from "@prisma/client";
+// Type-only: RoleTemplateKey is never read as a runtime value in this file —
+// each templateKey below is the enum's own string literal, checked against
+// the type by tsc, so this has no runtime dependency on @prisma/client's
+// generated enum object (see organisation-backfill.ts for the matching fix).
+import type { RoleTemplateKey } from "@prisma/client";
 
 export interface RoleTemplateDefinition {
   templateKey: RoleTemplateKey;
@@ -83,7 +87,7 @@ const EMS_AUDIT_MANAGE = ["ems.audit_programme.manage", "ems.audit.perform", "em
 
 export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
   {
-    templateKey: RoleTemplateKey.SUSTAINABILITY_LEAD,
+    templateKey: "SUSTAINABILITY_LEAD",
     name: "Sustainability Lead",
     description: "Full EMS and carbon/LCA authority; the only default approver of compliance obligations.",
     permissionCodes: [
@@ -116,7 +120,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
     ],
   },
   {
-    templateKey: RoleTemplateKey.EMS_CONTRIBUTOR,
+    templateKey: "EMS_CONTRIBUTOR",
     name: "EMS Contributor",
     description: "Does the day-to-day carbon, LCA, and EMS work without approval or role authority.",
     permissionCodes: [
@@ -136,7 +140,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
     ],
   },
   {
-    templateKey: RoleTemplateKey.SITE_MANAGER,
+    templateKey: "SITE_MANAGER",
     name: "Site Manager",
     description: "Same working permissions as EMS Contributor, intended for a RESTRICTED membership scoped to specific entities/sites.",
     permissionCodes: [
@@ -157,7 +161,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
     ],
   },
   {
-    templateKey: RoleTemplateKey.AUDITOR,
+    templateKey: "AUDITOR",
     name: "Auditor",
     description: "Read access plus the ability to perform internal audits; cannot issue audit reports or approve anything by default.",
     permissionCodes: [
@@ -169,7 +173,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
     ],
   },
   {
-    templateKey: RoleTemplateKey.FINANCE_READ_ONLY,
+    templateKey: "FINANCE_READ_ONLY",
     name: "Finance (read-only)",
     description: "Read-only across carbon/EMS, plus the ability to generate and export carbon reports for financial reporting.",
     permissionCodes: [
@@ -180,7 +184,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
     ],
   },
   {
-    templateKey: RoleTemplateKey.ORGANISATION_ADMINISTRATOR,
+    templateKey: "ORGANISATION_ADMINISTRATOR",
     name: "Organisation Administrator",
     description: "Manages organisation, membership, and role configuration. Does NOT get compliance-obligation approval or LCA approve/issue by default.",
     permissionCodes: [

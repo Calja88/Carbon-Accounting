@@ -26,7 +26,6 @@
  * which organisation the id actually belongs to.
  */
 
-import { Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import { accessibleSiteFilter } from "@/lib/repositories/carbon-repository";
@@ -54,7 +53,7 @@ export {
 export async function resolveAiActor(organisation: OrganisationContext): Promise<AiActor | null> {
   const user = await prisma.user.findUnique({
     where: { id: organisation.userId },
-    select: { id: true, name: true, role: true },
+    select: { id: true, name: true },
   });
   if (!user) return null;
 
@@ -70,8 +69,6 @@ export async function resolveAiActor(organisation: OrganisationContext): Promise
   return {
     userId: user.id,
     name: user.name,
-    role: user.role,
-    isAdmin: user.role === Role.ADMIN,
     organisationId: organisation.organisationId,
     correlationId: organisation.correlationId,
     entityIds: Array.from(new Set(sites.map((s) => s.entityId))),
