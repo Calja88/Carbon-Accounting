@@ -12,7 +12,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { planBackfill } from "../src/lib/backfill/organisation-backfill";
-import { provisionSystemRoleTemplates } from "../prisma/seed/permissions";
+import { provisionSystemRoleTemplates, seedPermissionCatalogue } from "../prisma/seed/permissions";
 
 interface CliArgs {
   name: string;
@@ -155,6 +155,13 @@ async function run(prisma: PrismaClient, args: CliArgs) {
       });
     }
 
+    // System role templates grant permission codes that must already exist
+    // as PermissionDefinition rows (RolePermission.permissionCode is a FK
+    // to PermissionDefinition.code). A partially-migrated database — one
+    // that never ran the dev-seed entry point — may not have those rows
+    // yet, so seed the catalogue here first. Idempotent upsert, so this is
+    // a no-op on a database that already has it.
+    await seedPermissionCatalogue(tx as unknown as PrismaClient);
     await provisionSystemRoleTemplates(tx as unknown as PrismaClient, organisation.id);
 
     const roleDefinitions = await tx.roleDefinition.findMany({
