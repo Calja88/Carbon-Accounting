@@ -2208,3 +2208,26 @@ model DocumentExtraction {
 
   @@index([documentId, createdAt])
 }
+
+// ---------------------------------------------------------------------------
+// T1B — PostgreSQL RLS defence-in-depth spike (Docs/PHASE1_TENANCY_RBAC_SPEC.md
+// §9 "Optional RLS migration C"; findings in Docs/T1B_RLS_SPIKE_FINDINGS.md).
+//
+// This table exists only to prove the Prisma + Neon-pooling + Postgres RLS
+// pattern is safe before any rollout decision. It is deliberately isolated:
+// no relation to Organisation or any other model, no application code path
+// reads or writes it, and no real environmental/tenant data is ever stored
+// here. `organisationId` is a plain scalar (not a foreign key) so this slice
+// never touches the real tenancy schema. Application repositories continue
+// to enforce tenant isolation exactly as before T1B; this table's isolation
+// is enforced only by the RLS policy created in this table's migration and
+// exercised by src/lib/rls-spike.
+// ---------------------------------------------------------------------------
+model RlsSpikeRecord {
+  id             String   @id @default(cuid())
+  organisationId String
+  note           String
+  createdAt      DateTime @default(now())
+
+  @@index([organisationId])
+}
