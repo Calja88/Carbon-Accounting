@@ -20,6 +20,24 @@ interface CliArgs {
   apply: boolean;
 }
 
+// Legacy pre-T1A rows can still have a null `organisationId` in the
+// database even though the current schema declares the column
+// non-nullable — that's exactly the state this backfill exists to fix.
+// Prisma's typed model queries decode every row against the *current*
+// schema and throw P2032 the moment they hit one of those legacy nulls,
+// so entities/sites are read via raw SQL here to see the column as it
+// actually is, null and all, instead of through the non-nullable model type.
+interface EntityRow {
+  id: string;
+  organisationId: string | null;
+}
+
+interface SiteRow {
+  id: string;
+  entityId: string;
+  organisationId: string | null;
+}
+
 function parseArgs(argv: string[]): CliArgs {
   let name: string | undefined;
   let slug: string | undefined;
@@ -50,8 +68,8 @@ function parseArgs(argv: string[]): CliArgs {
 async function run(prisma: PrismaClient, args: CliArgs) {
   const [existingOrganisation, entities, sites, users] = await Promise.all([
     prisma.organisation.findUnique({ where: { slug: args.slug }, select: { id: true } }),
-    prisma.entity.findMany({ select: { id: true, organisationId: true } }),
-    prisma.site.findMany({ select: { id: true, entityId: true, organisationId: true } }),
+    prisma.$queryRaw<EntityRow[]>`SELECT id, "organisationId" FROM "Entity"`,
+    prisma.$queryRaw<SiteRow[]>`SELECT id, "entityId", "organisationId" FROM "Site"`,
     prisma.user.findMany({ select: { id: true, role: true } }),
   ]);
 
