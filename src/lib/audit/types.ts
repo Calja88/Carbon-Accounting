@@ -37,6 +37,31 @@ export const AUDIT_EVENT_TYPES = [
   "controlled_document_revision.made_obsolete",
   "evidence_object.uploaded",
   "evidence_object.linked",
+  // EMS programme, scope, context and interested parties (task T23).
+  "ems_programme.created",
+  "ems_programme.activated",
+  "ems_programme.suspended",
+  "ems_programme.closed",
+  "ems_scope_version.created",
+  "ems_scope_version.submitted_for_review",
+  "ems_scope_version.approved",
+  "ems_scope_version.superseded",
+  "standard_requirement_map.upserted",
+  "context_issue.created",
+  "context_issue.updated",
+  "interested_party.created",
+  "interested_party.updated",
+  "interested_party_requirement.created",
+  "interested_party_requirement.updated",
+  "ems_risk_opportunity.created",
+  "ems_risk_opportunity.updated",
+  "change_assessment.created",
+  "change_assessment.reviewed",
+  "change_assessment.approved",
+  "change_assessment.implemented",
+  "change_assessment.effectiveness_reviewed",
+  "environmental_policy_record.linked",
+  "environmental_policy_record.approved",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -51,7 +76,16 @@ export type AuditResourceType =
   | "access_review"
   | "controlled_document"
   | "controlled_document_revision"
-  | "evidence_object";
+  | "evidence_object"
+  | "ems_programme"
+  | "ems_scope_version"
+  | "standard_requirement_map"
+  | "context_issue"
+  | "interested_party"
+  | "interested_party_requirement"
+  | "ems_risk_opportunity"
+  | "change_assessment"
+  | "environmental_policy_record";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept
