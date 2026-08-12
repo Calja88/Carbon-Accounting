@@ -73,8 +73,11 @@ regular test gate.
 ## Operational limitations and rollout blockers
 
 - **Role provisioning is out-of-band and Neon-specific work this spike
-  doesn't cover.** The migration assumes `rls_spike_app` already exists;
-  in this spike that's a local shell script run manually. Neon supports
+  doesn't cover.** The synthetic spike setup creates `rls_spike_app`
+  manually. The checked-in migration activates its isolated RLS policy only
+  when that role exists; ordinary application environments leave RLS disabled
+  on the unused spike table so this experiment cannot block later migrations.
+  Neon supports
   additional Postgres roles, but creating and rotating credentials for a
   non-owner runtime role per environment (dev/preview/prod) needs its own
   infra automation (Neon API or console) before any real table adopts this
@@ -108,11 +111,22 @@ regular test gate.
   that spans a slow external call inside `runInOrganisationScope` risks the
   transaction (and its context) being torn down mid-flight; that's a
   correctness constraint on top of the existing performance one.
-- **Migration-time role check is a `DO`/`RAISE EXCEPTION` guard, not a
-  deploy-pipeline gate.** It stops the migration applying silently against
-  a database where the runtime role is missing, but a real rollout should
-  also fail the release job explicitly (not just the SQL step) if role
-  provisioning hasn't run first.
+- **The spike migration is not production RLS rollout.** It deliberately does
+  not fail an application release when `rls_spike_app` is absent. Any future
+  migration that enables RLS on a real customer-owned table must be a separate
+  owner-approved change with an explicit release preflight for role and
+  credential provisioning.
+
+## Deployment-history repair
+
+The original migration failed in an application database because it required
+the local spike role even though T1B documented that Neon provisioning was not
+implemented. Its historical SQL remains unchanged. The release helper marks
+that migration applied when failed or pending because it affects only the
+isolated spike table; the immediately following repair migration uses idempotent table/index
+creation and an optional-role branch to establish the same safe end state from
+any partial run. Generic application builds never run recovery or migration
+deployment.
 
 ## Decisions for the programme owner
 
