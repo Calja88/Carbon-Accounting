@@ -87,7 +87,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-const { uploadEvidenceObject, readEvidenceObjectBytes, EvidenceError } = await import(
+const { uploadEvidenceObject, readEvidenceObjectBytes, EvidenceError, isKnownEvidenceLinkResourceType } = await import(
   "@/lib/documents/evidence-service"
 );
 const { resetMalwareScanner, registerMalwareScanner } = await import("@/lib/documents/malware-scan");
@@ -105,6 +105,10 @@ beforeEach(() => {
 });
 
 describe("uploadEvidenceObject", () => {
+  it("allows T31 environmental aspects as evidence-link targets", () => {
+    expect(isKnownEvidenceLinkResourceType("environmental_aspect")).toBe(true);
+  });
+
   it("rejects an empty file", async () => {
     await expect(
       uploadEvidenceObject(orgContextA, {

@@ -95,6 +95,18 @@ export async function findTenantActivityProcess(
   return assertChildOwnership(ctx, row, expectedProgrammeId, "programmeId");
 }
 
+/** Loads a T31 environmental aspect only inside the current organisation. */
+export async function findTenantEnvironmentalAspect(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.environmentalAspect.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/** Loads a T31 impact catalogue item only inside the current organisation. */
+export async function findTenantEnvironmentalImpact(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.environmentalImpact.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain

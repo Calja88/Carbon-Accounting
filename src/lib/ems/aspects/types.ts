@@ -5,4 +5,12 @@
  * import `@prisma/client` directly for these.
  */
 
-export type { ProcessActivityType, EmsLifecycleStage, EmsOperatingCondition, ActivityProcessStatus } from "@prisma/client";
+export type {
+  ProcessActivityType,
+  EmsLifecycleStage,
+  EmsOperatingCondition,
+  ActivityProcessStatus,
+  AspectControlRelationship,
+  EnvironmentalEffect,
+  EnvironmentalImpactExtent,
+} from "@prisma/client";
