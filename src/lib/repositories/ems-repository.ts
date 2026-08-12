@@ -79,3 +79,44 @@ export async function findTenantEnvironmentalPolicyRecord(ctx: TenantRepositoryC
   const row = await prisma.environmentalPolicyRecord.findFirst({ where: tenantWhere(ctx, { id }) });
   return assertOwned(ctx, row);
 }
+
+/**
+ * Loads an ActivityProcess only if it belongs to the given tenant context
+ * (task T30). `expectedProgrammeId` guards against the nested-parent-
+ * substitution attack the same way `findTenantEmsScopeVersion` does.
+ */
+export async function findTenantActivityProcess(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedProgrammeId?: string,
+) {
+  const row = await prisma.activityProcess.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedProgrammeId, "programmeId");
+}
+
+/** Loads a T31 environmental aspect only inside the current organisation. */
+export async function findTenantEnvironmentalAspect(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.environmentalAspect.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/** Loads a T31 impact catalogue item only inside the current organisation. */
+export async function findTenantEnvironmentalImpact(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.environmentalImpact.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads a ProcessProfileTemplate by id. Templates are platform content, not
+ * tenant data (task T30 — no organisationId column), so this is a plain
+ * lookup rather than a tenant-scoped one; callers still go through this
+ * function (never `prisma.processProfileTemplate` directly) so the
+ * distinction stays visible at every call site.
+ */
+export async function findProcessProfileTemplate(id: string) {
+  return prisma.processProfileTemplate.findUnique({
+    where: { id },
+    include: { items: { orderBy: { sortOrder: "asc" } } },
+  });
+}

@@ -62,6 +62,20 @@ export const AUDIT_EVENT_TYPES = [
   "change_assessment.effectiveness_reviewed",
   "environmental_policy_record.linked",
   "environmental_policy_record.approved",
+  // Process/activity profiles (task T30).
+  "activity_process.created",
+  "activity_process.revised",
+  "activity_process.activated",
+  "activity_process.archived",
+  "activity_process.template_applied",
+  // Aspect/impact register (task T31).
+  "environmental_aspect.created",
+  "environmental_aspect.updated",
+  "environmental_aspect.deleted",
+  "environmental_impact.created",
+  "environmental_impact.deleted",
+  "aspect_impact.linked",
+  "aspect_impact.unlinked",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -85,7 +99,12 @@ export type AuditResourceType =
   | "interested_party_requirement"
   | "ems_risk_opportunity"
   | "change_assessment"
-  | "environmental_policy_record";
+  | "environmental_policy_record"
+  | "activity_process"
+  | "process_profile_template"
+  | "environmental_aspect"
+  | "environmental_impact"
+  | "aspect_impact_link";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

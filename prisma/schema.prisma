@@ -208,6 +208,12 @@ model Organisation {
   notifications Notification[]
   reminderRules ReminderRule[]
 
+  // Process/activity profiles (T30).
+  activityProcesses    ActivityProcess[]
+  environmentalAspects EnvironmentalAspect[]
+  environmentalImpacts EnvironmentalImpact[]
+  aspectImpactLinks    AspectImpactLink[]
+
   @@index([status])
 }
 
@@ -250,6 +256,9 @@ model OrganisationMembership {
 
   // Notifications and reminders (T24): notifications addressed to this membership.
   receivedNotifications Notification[] @relation("NotificationRecipient")
+
+  // Process/activity profiles (T30): record authorship.
+  createdActivityProcesses ActivityProcess[] @relation("ActivityProcessCreatedBy")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -375,6 +384,9 @@ model Entity {
   // EMS programme foundation (T23): scope-version boundary membership.
   emsScopeEntities EmsScopeEntity[]
 
+  // Process/activity profiles (T30).
+  activityProcesses ActivityProcess[]
+
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy global-unique Entity name —
   // two organisations may now use the same Entity name.
@@ -413,6 +425,9 @@ model Site {
   // EMS programme foundation (T23): scope-version boundary membership.
   emsScopeSites      EmsScopeSite[]
   emsScopeActivities EmsScopeActivity[]
+
+  // Process/activity profiles (T30).
+  activityProcesses ActivityProcess[]
 
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy [entityId, name] unique —
@@ -2550,6 +2565,7 @@ model EmsProgramme {
   riskOpportunities       EmsRiskOpportunity[]
   changeAssessments       ChangeAssessment[]
   policyRecords           EnvironmentalPolicyRecord[]
+  activityProcesses       ActivityProcess[]
 
   @@unique([organisationId, name])
   @@unique([organisationId, id])
@@ -3009,6 +3025,264 @@ model ReminderRule {
 
   @@unique([organisationId, resourceType, event])
   @@index([organisationId, resourceType, isActive])
+}
+
+// ---------------------------------------------------------------------------
+// Process/activity profiles (task T30, Docs/PHASE3_ASPECTS_OPERATIONS_SPEC.md
+// §§1-2 "Process/activity structure").
+//
+// Fixed decisions this section encodes:
+//  - "Process starter profiles contain structure only; users must confirm
+//    before application" (spec §1) — ProcessProfileTemplate/ProcessTemplateItem
+//    carry no environmental values, and process-service.ts requires an
+//    explicit `confirm: true` before any ActivityProcess is created from one.
+//  - Applying a template creates DRAFT ActivityProcesses only, never
+//    aspects/scores/measurements — those models do not exist until T31/T34.
+//  - Template application is idempotent: the service layer looks for an
+//    existing non-superseded ActivityProcess with the same
+//    (organisationId, siteId, sourceTemplateItemId) before creating one, and
+//    reuses it instead of duplicating — the same "check inside the write
+//    transaction" shape T23 uses for its one-ACTIVE-programme guard.
+//  - Revising a profile never mutates an existing ActivityProcess row — it
+//    creates a new row and links back via `supersedesProcessId`, the same
+//    supersede-chain shape as `EmsScopeVersion`/`ControlledDocumentRevision`,
+//    so anything that already references the old row (a future aspect/
+//    assessment) keeps pointing at unchanged data.
+//  - Templates are platform content (no organisationId) — structural
+//    starters, not tenant data — matching `EmissionFactorSet`/
+//    `LcaMethodologyProfile`'s shared/platform-owned pattern.
+// ---------------------------------------------------------------------------
+
+enum ProcessActivityType {
+  ACTIVITY
+  PRODUCT
+  SERVICE
+}
+
+enum EmsLifecycleStage {
+  RAW_MATERIAL_ACQUISITION
+  DESIGN
+  PRODUCTION
+  TRANSPORTATION_DELIVERY
+  USE
+  END_OF_LIFE_TREATMENT
+  OTHER
+}
+
+enum EmsOperatingCondition {
+  NORMAL
+  ABNORMAL
+  STARTUP_SHUTDOWN
+  MAINTENANCE
+  EMERGENCY
+}
+
+enum ActivityProcessStatus {
+  DRAFT
+  ACTIVE
+  SUPERSEDED
+  ARCHIVED
+}
+
+enum AspectControlRelationship {
+  DIRECT_CONTROL
+  INFLUENCE
+}
+
+enum EnvironmentalEffect {
+  BENEFICIAL
+  ADVERSE
+}
+
+enum EnvironmentalImpactExtent {
+  LOCAL
+  GLOBAL
+  LOCAL_AND_GLOBAL
+}
+
+/// A platform-owned structural starter template (Hull/Rayleigh/Milton Keynes
+/// operations). Never tenant data — no organisationId, no environmental
+/// values; see ProcessTemplateItem.
+model ProcessProfileTemplate {
+  id           String  @id @default(cuid())
+  key          String  @unique
+  name         String
+  siteLabel    String
+  description  String
+  version      Int     @default(1)
+  isStructural Boolean @default(true)
+  isActive     Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items            ProcessTemplateItem[]
+  appliedProcesses ActivityProcess[]
+
+  @@index([isActive])
+}
+
+/// One structural node of a ProcessProfileTemplate — name/type/suggested
+/// lifecycle stage and operating condition only. No environmental values or
+/// aspects: applying this produces a draft ActivityProcess, never an aspect
+/// or measurement.
+model ProcessTemplateItem {
+  id         String                 @id @default(cuid())
+  templateId String
+  template   ProcessProfileTemplate @relation(fields: [templateId], references: [id])
+
+  parentId String?
+  parent   ProcessTemplateItem?  @relation("ProcessTemplateItemParent", fields: [parentId], references: [id])
+  children ProcessTemplateItem[] @relation("ProcessTemplateItemParent")
+
+  name                        String
+  description                 String?
+  activityType                ProcessActivityType   @default(ACTIVITY)
+  suggestedLifecycleStage     EmsLifecycleStage?
+  suggestedOperatingCondition EmsOperatingCondition @default(NORMAL)
+  sortOrder                   Int                   @default(0)
+
+  appliedProcesses ActivityProcess[]
+
+  @@index([templateId])
+  @@index([parentId])
+}
+
+/// One site/organisation process, activity, product, or service, and the
+/// lifecycle/operating conditions it runs under (Phase 3 spec §2). Tenant-
+/// and site-scoped; revising creates a new row via `supersedesProcessId`
+/// rather than mutating an existing row.
+model ActivityProcess {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  programmeId String
+  programme   EmsProgramme @relation(fields: [programmeId], references: [id])
+
+  entityId String?
+  entity   Entity? @relation(fields: [entityId], references: [id])
+
+  siteId String?
+  site   Site?   @relation(fields: [siteId], references: [id])
+
+  parentId String?
+  parent   ActivityProcess?  @relation("ActivityProcessParent", fields: [parentId], references: [id])
+  children ActivityProcess[] @relation("ActivityProcessParent")
+
+  name               String
+  description        String?
+  activityType       ProcessActivityType   @default(ACTIVITY)
+  lifecycleStage     EmsLifecycleStage?
+  operatingCondition EmsOperatingCondition @default(NORMAL)
+  status             ActivityProcessStatus @default(DRAFT)
+
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+
+  // Template provenance — null for a hand-authored process.
+  sourceTemplateId     String?
+  sourceTemplate       ProcessProfileTemplate? @relation(fields: [sourceTemplateId], references: [id])
+  sourceTemplateItemId String?
+  sourceTemplateItem   ProcessTemplateItem?    @relation(fields: [sourceTemplateItemId], references: [id])
+
+  // Revision chain (never mutate in place): the process this one replaces.
+  // Unique — an old process can have at most one successor, same shape as
+  // EmsScopeVersion.supersedesVersionId.
+  supersedesProcessId String?          @unique
+  supersedesProcess   ActivityProcess? @relation("ActivityProcessRevision", fields: [supersedesProcessId], references: [id])
+  successorProcess    ActivityProcess? @relation("ActivityProcessRevision")
+
+  createdByMembershipId String?
+  createdBy             OrganisationMembership? @relation("ActivityProcessCreatedBy", fields: [createdByMembershipId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  environmentalAspects EnvironmentalAspect[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, programmeId, status])
+  @@index([organisationId, siteId])
+  @@index([organisationId, entityId])
+  @@index([organisationId, sourceTemplateItemId])
+}
+
+/// A tenant-owned environmental aspect associated with one T30 process.
+/// Lifecycle and operating-condition values are recorded explicitly on the
+/// aspect so the register captures the perspective under which it was
+/// identified without reusing or changing any LCA model or calculation.
+model EnvironmentalAspect {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  processId String
+  process   ActivityProcess @relation(fields: [organisationId, processId], references: [organisationId, id])
+
+  name                String
+  description         String?
+  sourceInputOutput   String?
+  scopeDescription    String?
+  existingControls    String?
+  controlRelationship AspectControlRelationship
+  lifecycleStage      EmsLifecycleStage?
+  operatingCondition  EmsOperatingCondition
+  effect              EnvironmentalEffect
+  activeFrom          DateTime                  @default(now())
+  activeTo            DateTime?
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+
+  impactLinks AspectImpactLink[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, processId])
+  @@index([organisationId, operatingCondition])
+}
+
+/// Organisation-level impact catalogue. Impacts deliberately contain no
+/// carbon/LCA totals: those domains may only be linked later by provenance.
+model EnvironmentalImpact {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  name        String
+  category    String
+  receptor    String?
+  extent      EnvironmentalImpactExtent
+  effect      EnvironmentalEffect
+  description String?
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  aspectLinks AspectImpactLink[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, name])
+  @@index([organisationId, category])
+}
+
+/// Tenant-enforced many-to-many aspect/impact relation. Repeating
+/// organisationId in both composite foreign keys makes a mixed-tenant link
+/// invalid at the database boundary as well as in the service layer.
+model AspectImpactLink {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  aspectId String
+  aspect   EnvironmentalAspect @relation(fields: [organisationId, aspectId], references: [organisationId, id], onDelete: Cascade)
+
+  impactId String
+  impact   EnvironmentalImpact @relation(fields: [organisationId, impactId], references: [organisationId, id], onDelete: Cascade)
+
+  causalDescription String?
+  createdAt         DateTime @default(now())
+
+  @@unique([organisationId, aspectId, impactId])
+  @@index([organisationId, impactId])
 }
 
 // ---------------------------------------------------------------------------

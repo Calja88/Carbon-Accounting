@@ -61,6 +61,9 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   "interested_party_requirement",
   "ems_risk_opportunity",
   "change_assessment",
+  // Aspect/impact register (task T31): callers must resolve the aspect with
+  // findTenantEnvironmentalAspect before invoking linkEvidence.
+  "environmental_aspect",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 
