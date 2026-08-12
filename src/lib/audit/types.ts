@@ -76,6 +76,13 @@ export const AUDIT_EVENT_TYPES = [
   "environmental_impact.deleted",
   "aspect_impact.linked",
   "aspect_impact.unlinked",
+  // Versioned aspect significance (task T32).
+  "significance_method.created",
+  "significance_method.approved",
+  "significance_method.superseded",
+  "aspect_assessment.created",
+  "aspect_assessment.approved",
+  "aspect_assessment.superseded",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -104,7 +111,9 @@ export type AuditResourceType =
   | "process_profile_template"
   | "environmental_aspect"
   | "environmental_impact"
-  | "aspect_impact_link";
+  | "aspect_impact_link"
+  | "significance_method"
+  | "aspect_assessment";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

@@ -5,6 +5,15 @@ import { requireOrganisationContext, OrganisationAccessError, type OrganisationC
 import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import { EvidenceError } from "@/lib/documents/evidence-service";
+import { SignificanceValidationError } from "@/lib/ems/aspects/significance-engine";
+import {
+  SignificanceWorkflowError,
+  approveAspectAssessment,
+  approveSignificanceMethod,
+  createAspectAssessment,
+  createSignificanceMethod,
+  createSuccessorSignificanceMethod,
+} from "@/lib/ems/aspects/significance-service";
 import {
   AspectRegisterError,
   createEnvironmentalAspect,
@@ -20,6 +29,8 @@ import {
   aspectImpactLinkFormSchema,
   environmentalAspectFormSchema,
   environmentalImpactFormSchema,
+  aspectAssessmentInputSchema,
+  significanceMethodInputSchema,
 } from "@/lib/ems/aspects/schemas";
 
 export interface AspectActionState {
@@ -34,8 +45,17 @@ function friendlyError(error: unknown): string {
   if (error instanceof PermissionDeniedError) return "You don't have permission to do that.";
   if (error instanceof TenantOwnershipError) return "That record could not be found in this organisation.";
   if (error instanceof AspectRegisterError || error instanceof EvidenceError) return error.message;
+  if (error instanceof SignificanceWorkflowError || error instanceof SignificanceValidationError) return error.message;
   if (error instanceof Error && error.message.includes("Unique constraint")) return "That register entry already exists.";
   throw error;
+}
+
+function parseJson(value: FormDataEntryValue | null, label: string): unknown {
+  try {
+    return JSON.parse(String(value ?? ""));
+  } catch {
+    throw new SignificanceWorkflowError(`${label} must be valid JSON.`);
+  }
 }
 
 async function requireContext(): Promise<OrganisationContext> {
@@ -190,6 +210,86 @@ export async function uploadAspectEvidenceAction(_previous: AspectActionState, f
     });
     revalidateAspects();
     return { ...emptyState, message: "Evidence attached." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function createSignificanceMethodAction(_previous: AspectActionState, formData: FormData): Promise<AspectActionState> {
+  try {
+    const context = await requireContext();
+    const formula = String(formData.get("formula"));
+    const formulaConfig = formula === "RULE_SET"
+      ? { formula, rules: parseJson(formData.get("rulesJson"), "Rules") }
+      : { formula };
+    const parsed = significanceMethodInputSchema.safeParse({
+      programmeId: formData.get("programmeId"),
+      methodKey: formData.get("methodKey"),
+      name: formData.get("name"),
+      formulaConfig,
+      threshold: formData.get("threshold"),
+      criteria: parseJson(formData.get("criteriaJson"), "Criteria"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the method details." };
+    const supersedesMethodId = String(formData.get("supersedesMethodId") ?? "");
+    if (supersedesMethodId) {
+      await createSuccessorSignificanceMethod(context, supersedesMethodId, {
+        name: parsed.data.name,
+        formulaConfig: parsed.data.formulaConfig,
+        threshold: parsed.data.threshold,
+        criteria: parsed.data.criteria,
+      });
+    } else {
+      await createSignificanceMethod(context, parsed.data);
+    }
+    revalidateAspects();
+    return { ...emptyState, message: supersedesMethodId ? "Successor method created." : "Significance method created." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function approveSignificanceMethodAction(_previous: AspectActionState, formData: FormData): Promise<AspectActionState> {
+  try {
+    const context = await requireContext();
+    await approveSignificanceMethod(context, String(formData.get("methodId") ?? ""));
+    revalidateAspects();
+    return { ...emptyState, message: "Significance method approved." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function createAspectAssessmentAction(_previous: AspectActionState, formData: FormData): Promise<AspectActionState> {
+  try {
+    const context = await requireContext();
+    const inputs: Record<string, string> = {};
+    for (const [key, value] of formData.entries()) {
+      if (key.startsWith("criterion:")) inputs[key.slice("criterion:".length)] = String(value);
+    }
+    const overrideValue = String(formData.get("overrideSignificant") ?? "");
+    const parsed = aspectAssessmentInputSchema.safeParse({
+      aspectId: formData.get("aspectId"),
+      methodId: formData.get("methodId"),
+      inputs,
+      overrideSignificant: overrideValue === "" ? null : overrideValue === "true",
+      overrideRationale: String(formData.get("overrideRationale") ?? "").trim() || null,
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the assessment inputs." };
+    await createAspectAssessment(context, parsed.data);
+    revalidateAspects();
+    return { ...emptyState, message: "Assessment snapshot created." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function approveAspectAssessmentAction(_previous: AspectActionState, formData: FormData): Promise<AspectActionState> {
+  try {
+    const context = await requireContext();
+    await approveAspectAssessment(context, String(formData.get("assessmentId") ?? ""));
+    revalidateAspects();
+    return { ...emptyState, message: "Assessment approved." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }

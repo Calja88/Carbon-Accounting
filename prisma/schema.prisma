@@ -213,6 +213,9 @@ model Organisation {
   environmentalAspects EnvironmentalAspect[]
   environmentalImpacts EnvironmentalImpact[]
   aspectImpactLinks    AspectImpactLink[]
+  significanceMethods  SignificanceMethod[]
+  aspectAssessments    AspectAssessment[]
+  significanceCriteria SignificanceCriterion[]
 
   @@index([status])
 }
@@ -259,6 +262,12 @@ model OrganisationMembership {
 
   // Process/activity profiles (T30): record authorship.
   createdActivityProcesses ActivityProcess[] @relation("ActivityProcessCreatedBy")
+
+  // Significance method and assessment authorship/approval (T32).
+  preparedSignificanceMethods SignificanceMethod[] @relation("SignificanceMethodPreparedBy")
+  approvedSignificanceMethods SignificanceMethod[] @relation("SignificanceMethodApprovedBy")
+  assessedAspectAssessments   AspectAssessment[]   @relation("AspectAssessmentAssessedBy")
+  approvedAspectAssessments   AspectAssessment[]   @relation("AspectAssessmentApprovedBy")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -2566,6 +2575,7 @@ model EmsProgramme {
   changeAssessments       ChangeAssessment[]
   policyRecords           EnvironmentalPolicyRecord[]
   activityProcesses       ActivityProcess[]
+  significanceMethods     SignificanceMethod[]
 
   @@unique([organisationId, name])
   @@unique([organisationId, id])
@@ -3100,6 +3110,24 @@ enum EnvironmentalImpactExtent {
   LOCAL_AND_GLOBAL
 }
 
+enum SignificanceFormula {
+  WEIGHTED_SUM
+  MAX_CRITERION
+  RULE_SET
+}
+
+enum SignificanceMethodStatus {
+  DRAFT
+  APPROVED
+  SUPERSEDED
+}
+
+enum AspectAssessmentStatus {
+  DRAFT
+  APPROVED
+  SUPERSEDED
+}
+
 /// A platform-owned structural starter template (Hull/Rayleigh/Milton Keynes
 /// operations). Never tenant data — no organisationId, no environmental
 /// values; see ProcessTemplateItem.
@@ -3235,6 +3263,7 @@ model EnvironmentalAspect {
   updatedAt           DateTime                  @updatedAt
 
   impactLinks AspectImpactLink[]
+  assessments AspectAssessment[]
 
   @@unique([organisationId, id])
   @@index([organisationId, processId])
@@ -3283,6 +3312,117 @@ model AspectImpactLink {
 
   @@unique([organisationId, aspectId, impactId])
   @@index([organisationId, impactId])
+}
+
+/// An organisation-configured significance method. Approved versions are
+/// immutable; changing criteria/formula creates a successor version.
+model SignificanceMethod {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  programmeId String
+  programme   EmsProgramme @relation(fields: [organisationId, programmeId], references: [organisationId, id])
+
+  methodKey     String
+  name          String
+  version       Int
+  status        SignificanceMethodStatus @default(DRAFT)
+  formula       SignificanceFormula
+  formulaConfig Json
+  threshold     Decimal                  @db.Decimal(24, 10)
+
+  preparedByMembershipId String
+  preparedBy             OrganisationMembership  @relation("SignificanceMethodPreparedBy", fields: [organisationId, preparedByMembershipId], references: [organisationId, id])
+  approvedByMembershipId String?
+  approvedBy             OrganisationMembership? @relation("SignificanceMethodApprovedBy", fields: [organisationId, approvedByMembershipId], references: [organisationId, id])
+  approvedAt             DateTime?
+
+  supersedesMethodId String?
+  supersedesMethod   SignificanceMethod? @relation("SignificanceMethodSuccessor", fields: [organisationId, supersedesMethodId], references: [organisationId, id])
+  successorMethod    SignificanceMethod? @relation("SignificanceMethodSuccessor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  criteria    SignificanceCriterion[]
+  assessments AspectAssessment[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, methodKey, version])
+  @@unique([organisationId, supersedesMethodId])
+  @@index([organisationId, programmeId, status])
+}
+
+/// One stable-key criterion belonging to an exact method version.
+model SignificanceCriterion {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  methodId String
+  method   SignificanceMethod @relation(fields: [organisationId, methodId], references: [organisationId, id], onDelete: Cascade)
+
+  key         String
+  label       String
+  scaleConfig Json
+  weight      Decimal? @db.Decimal(24, 10)
+  required    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@unique([organisationId, methodId, key])
+  @@index([organisationId, methodId, sortOrder])
+}
+
+/// A significance calculation pinned to exact method/criteria/input/result
+/// snapshots. Approval freezes it; reassessment creates a successor row.
+model AspectAssessment {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  aspectId String
+  aspect   EnvironmentalAspect @relation(fields: [organisationId, aspectId], references: [organisationId, id])
+  methodId String
+  method   SignificanceMethod  @relation(fields: [organisationId, methodId], references: [organisationId, id])
+
+  assessmentVersion Int
+  status            AspectAssessmentStatus @default(DRAFT)
+
+  methodKeySnapshot     String
+  methodVersionSnapshot Int
+  formulaSnapshot       SignificanceFormula
+  formulaConfigSnapshot Json
+  thresholdSnapshot     Decimal             @db.Decimal(24, 10)
+  criteriaSnapshot      Json
+  criterionInputs       Json
+  calculatedScore       Decimal             @db.Decimal(24, 10)
+  calculatedSignificant Boolean
+  calculationTrace      Json
+  overrideSignificant   Boolean?
+  overrideRationale     String?
+  finalSignificant      Boolean
+
+  assessedByMembershipId String
+  assessedBy             OrganisationMembership  @relation("AspectAssessmentAssessedBy", fields: [organisationId, assessedByMembershipId], references: [organisationId, id])
+  assessedAt             DateTime                @default(now())
+  approvedByMembershipId String?
+  approvedBy             OrganisationMembership? @relation("AspectAssessmentApprovedBy", fields: [organisationId, approvedByMembershipId], references: [organisationId, id])
+  approvedAt             DateTime?
+
+  supersedesAssessmentId String?
+  supersedesAssessment   AspectAssessment? @relation("AspectAssessmentSuccessor", fields: [organisationId, supersedesAssessmentId], references: [organisationId, id])
+  successorAssessment    AspectAssessment? @relation("AspectAssessmentSuccessor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, aspectId, assessmentVersion])
+  @@unique([organisationId, supersedesAssessmentId])
+  @@index([organisationId, aspectId, status])
+  @@index([organisationId, methodId])
 }
 
 // ---------------------------------------------------------------------------

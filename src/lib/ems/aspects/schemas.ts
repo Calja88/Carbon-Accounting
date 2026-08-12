@@ -69,3 +69,60 @@ export const aspectImpactLinkFormSchema = z.object({
   impactId: z.string().min(1, "Choose an impact."),
   causalDescription: optionalText,
 });
+
+const decimalTextSchema = z.string().trim().min(1, "Enter a numeric value.");
+
+export const significanceScaleConfigSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("NUMERIC"),
+    min: decimalTextSchema,
+    max: decimalTextSchema,
+  }),
+  z.object({
+    kind: z.literal("SCORED_OPTIONS"),
+    options: z.array(z.object({
+      value: z.string().trim().min(1),
+      label: z.string().trim().min(1),
+      score: decimalTextSchema,
+    })).min(1),
+  }),
+]);
+
+export const significanceFormulaConfigSchema = z.discriminatedUnion("formula", [
+  z.object({ formula: z.literal("WEIGHTED_SUM") }),
+  z.object({ formula: z.literal("MAX_CRITERION") }),
+  z.object({
+    formula: z.literal("RULE_SET"),
+    rules: z.array(z.object({
+      criterionKey: z.string().trim().min(1),
+      operator: z.enum(["GT", "GTE", "LT", "LTE", "EQ"]),
+      compareTo: decimalTextSchema,
+    })).min(1, "Add at least one rule."),
+  }),
+]);
+
+export const significanceCriterionInputSchema = z.object({
+  key: z.string().trim().regex(/^[a-z][a-z0-9_-]*$/i, "Use a stable alphanumeric criterion key."),
+  label: z.string().trim().min(1).max(200),
+  scaleConfig: significanceScaleConfigSchema,
+  weight: decimalTextSchema.optional(),
+  required: z.boolean().default(true),
+  sortOrder: z.number().int().min(0),
+});
+
+export const significanceMethodInputSchema = z.object({
+  programmeId: z.string().min(1, "Choose an EMS programme."),
+  methodKey: z.string().trim().regex(/^[a-z][a-z0-9_-]*$/i, "Use a stable alphanumeric method key."),
+  name: z.string().trim().min(1).max(200),
+  formulaConfig: significanceFormulaConfigSchema,
+  threshold: decimalTextSchema,
+  criteria: z.array(significanceCriterionInputSchema).min(1, "Add at least one criterion."),
+});
+
+export const aspectAssessmentInputSchema = z.object({
+  aspectId: z.string().min(1),
+  methodId: z.string().min(1),
+  inputs: z.record(z.string(), z.string()),
+  overrideSignificant: z.boolean().nullable().optional(),
+  overrideRationale: z.string().trim().max(4000).nullable().optional(),
+});

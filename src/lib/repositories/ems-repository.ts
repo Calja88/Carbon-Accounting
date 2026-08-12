@@ -107,6 +107,18 @@ export async function findTenantEnvironmentalImpact(ctx: TenantRepositoryContext
   return assertOwned(ctx, row);
 }
 
+/** Loads one exact T32 method version only inside the current organisation. */
+export async function findTenantSignificanceMethod(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.significanceMethod.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/** Loads one exact T32 assessment version only inside the current organisation. */
+export async function findTenantAspectAssessment(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.aspectAssessment.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain

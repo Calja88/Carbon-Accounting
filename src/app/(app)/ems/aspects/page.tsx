@@ -4,7 +4,10 @@ import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organ
 import { hasPermission, PermissionDeniedError, requirePermission } from "@/lib/rbac/authorize";
 import { listActivityProcesses } from "@/lib/ems/aspects/process-service";
 import { listEnvironmentalAspects, listEnvironmentalImpacts } from "@/lib/ems/aspects/aspect-service";
+import { listEmsProgrammes } from "@/lib/ems/foundation/programme-service";
+import { listAspectAssessments, listSignificanceMethods } from "@/lib/ems/aspects/significance-service";
 import { AspectRegister } from "./aspect-forms";
+import { SignificanceWorkspace } from "./significance-forms";
 
 export const dynamic = "force-dynamic";
 
@@ -18,10 +21,13 @@ export default async function EmsAspectsPage() {
     throw error;
   }
 
-  const [processRows, aspectRows, impactRows] = await Promise.all([
+  const [processRows, aspectRows, impactRows, programmeRows, methodRows, assessmentRows] = await Promise.all([
     listActivityProcesses(context),
     listEnvironmentalAspects(context),
     listEnvironmentalImpacts(context),
+    listEmsProgrammes(context),
+    listSignificanceMethods(context),
+    listAspectAssessments(context),
   ]);
   const aspectIds = aspectRows.map((aspect) => aspect.id);
   const evidenceLinks = aspectIds.length === 0 ? [] : await prisma.evidenceLink.findMany({
@@ -60,6 +66,48 @@ export default async function EmsAspectsPage() {
           This register stores no carbon or product-LCA totals.
         </p>
       </div>
+      <SignificanceWorkspace
+        programmes={programmeRows.map((programme) => ({ id: programme.id, name: programme.name }))}
+        aspects={aspectRows.map((aspect) => ({ id: aspect.id, name: aspect.name, programmeId: aspect.process.programmeId }))}
+        methods={methodRows.map((method) => ({
+          id: method.id,
+          programmeId: method.programmeId,
+          methodKey: method.methodKey,
+          name: method.name,
+          version: method.version,
+          status: method.status,
+          formula: method.formula,
+          formulaConfig: method.formulaConfig,
+          threshold: method.threshold.toString(),
+          criteria: method.criteria.map((criterion) => ({
+            key: criterion.key,
+            label: criterion.label,
+            scaleConfig: criterion.scaleConfig,
+            weight: criterion.weight?.toString() ?? null,
+            required: criterion.required,
+            sortOrder: criterion.sortOrder,
+          })),
+        }))}
+        assessments={assessmentRows.map((assessment) => ({
+          id: assessment.id,
+          aspectId: assessment.aspectId,
+          assessmentVersion: assessment.assessmentVersion,
+          status: assessment.status,
+          methodKeySnapshot: assessment.methodKeySnapshot,
+          methodVersionSnapshot: assessment.methodVersionSnapshot,
+          formulaSnapshot: assessment.formulaSnapshot,
+          thresholdSnapshot: assessment.thresholdSnapshot.toString(),
+          criterionInputs: assessment.criterionInputs,
+          calculatedScore: assessment.calculatedScore.toString(),
+          calculatedSignificant: assessment.calculatedSignificant,
+          overrideSignificant: assessment.overrideSignificant,
+          overrideRationale: assessment.overrideRationale,
+          finalSignificant: assessment.finalSignificant,
+          calculationTrace: assessment.calculationTrace,
+        }))}
+        canEdit={hasPermission(context, "ems.aspect.edit")}
+        canApprove={hasPermission(context, "ems.aspect.approve")}
+      />
       <AspectRegister
         processes={processes}
         aspects={aspectRows.map((aspect) => ({
