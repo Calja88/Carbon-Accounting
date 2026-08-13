@@ -64,6 +64,9 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   // Aspect/impact register (task T31): callers must resolve the aspect with
   // findTenantEnvironmentalAspect before invoking linkEvidence.
   "environmental_aspect",
+  // Operational-control review evidence (task T33). Callers resolve the
+  // check in the tenant repository before linking.
+  "control_check",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 

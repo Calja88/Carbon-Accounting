@@ -46,6 +46,7 @@ const RESOURCE_TYPE_LABELS: Record<string, string> = {
   objective: "an EMS objective",
   audit_report: "an internal audit report",
   competence_record: "a competence record",
+  operational_control: "an operational control",
 };
 
 function resourceLabel(resourceType: string): string {

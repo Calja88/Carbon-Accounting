@@ -119,6 +119,18 @@ export async function findTenantAspectAssessment(ctx: TenantRepositoryContext, i
   return assertOwned(ctx, row);
 }
 
+/** Loads one exact T33 operational-control version only inside the current organisation. */
+export async function findTenantOperationalControl(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.operationalControl.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/** Loads a T33 control check only inside the current organisation. */
+export async function findTenantControlCheck(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.controlCheck.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain

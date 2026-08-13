@@ -217,6 +217,12 @@ model Organisation {
   aspectAssessments    AspectAssessment[]
   significanceCriteria SignificanceCriterion[]
 
+  // Operational controls and review cycle (T33).
+  operationalControls       OperationalControl[]
+  operationalControlAspects OperationalControlAspect[]
+  controlApplicabilities    ControlApplicability[]
+  controlChecks             ControlCheck[]
+
   @@index([status])
 }
 
@@ -268,6 +274,10 @@ model OrganisationMembership {
   approvedSignificanceMethods SignificanceMethod[] @relation("SignificanceMethodApprovedBy")
   assessedAspectAssessments   AspectAssessment[]   @relation("AspectAssessmentAssessedBy")
   approvedAspectAssessments   AspectAssessment[]   @relation("AspectAssessmentApprovedBy")
+
+  // Operational-control ownership and check review (T33).
+  ownedOperationalControls OperationalControl[] @relation("OperationalControlOwner")
+  reviewedControlChecks    ControlCheck[]       @relation("ControlCheckReviewer")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -396,6 +406,9 @@ model Entity {
   // Process/activity profiles (T30).
   activityProcesses ActivityProcess[]
 
+  // Operational-control applicability (T33).
+  controlApplicabilities ControlApplicability[]
+
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy global-unique Entity name —
   // two organisations may now use the same Entity name.
@@ -437,6 +450,9 @@ model Site {
 
   // Process/activity profiles (T30).
   activityProcesses ActivityProcess[]
+
+  // Operational-control applicability (T33).
+  controlApplicabilities ControlApplicability[]
 
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy [entityId, name] unique —
@@ -503,6 +519,7 @@ model User {
   preparedChangeAssessments     ChangeAssessment[]          @relation("ChangeAssessmentPreparedBy")
   approvedChangeAssessments     ChangeAssessment[]          @relation("ChangeAssessmentApprovedBy")
   approvedEnvironmentalPolicies EnvironmentalPolicyRecord[] @relation("EnvironmentalPolicyRecordApprovedBy")
+  operationalControls           OperationalControl[]
 }
 
 // ---------------------------------------------------------------------------
@@ -2329,6 +2346,9 @@ model ControlledDocumentRevision {
   /// revision carries, when this document is the environmental policy.
   environmentalPolicyRecord EnvironmentalPolicyRecord?
 
+  // Exact procedure revision pinned by an operational-control version (T33).
+  operationalControls OperationalControl[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -3227,7 +3247,8 @@ model ActivityProcess {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  environmentalAspects EnvironmentalAspect[]
+  environmentalAspects   EnvironmentalAspect[]
+  controlApplicabilities ControlApplicability[]
 
   @@unique([organisationId, id])
   @@index([organisationId, programmeId, status])
@@ -3262,8 +3283,9 @@ model EnvironmentalAspect {
   createdAt           DateTime                  @default(now())
   updatedAt           DateTime                  @updatedAt
 
-  impactLinks AspectImpactLink[]
-  assessments AspectAssessment[]
+  impactLinks             AspectImpactLink[]
+  assessments             AspectAssessment[]
+  operationalControlLinks OperationalControlAspect[]
 
   @@unique([organisationId, id])
   @@index([organisationId, processId])
@@ -3423,6 +3445,146 @@ model AspectAssessment {
   @@unique([organisationId, supersedesAssessmentId])
   @@index([organisationId, aspectId, status])
   @@index([organisationId, methodId])
+}
+
+// ---------------------------------------------------------------------------
+// Operational controls and review cycle (task T33).
+//
+// Controls are versioned records: a review/revision creates a successor and
+// marks the prior version SUPERSEDED. Aspect links and applicability belong to
+// the exact version so historic decisions remain traceable. A procedure link
+// pins an exact controlled-document revision rather than a mutable document.
+// ---------------------------------------------------------------------------
+
+enum OperationalControlType {
+  ENGINEERING
+  PROCEDURAL
+  MONITORING
+  COMPETENCE
+  PROCUREMENT
+  EMERGENCY
+  OTHER
+}
+
+enum OperationalControlStatus {
+  DRAFT
+  ACTIVE
+  SUPERSEDED
+  RETIRED
+}
+
+enum ControlCheckResult {
+  PENDING
+  PASS
+  FAIL
+  NOT_APPLICABLE
+}
+
+model OperationalControl {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  controlKey            String
+  version               Int
+  title                 String
+  type                  OperationalControlType
+  status                OperationalControlStatus @default(ACTIVE)
+  description           String?
+  frequency             String?
+  acceptanceCriteria    String?
+  effectivenessCriteria String?
+
+  ownerMembershipId String
+  owner             OrganisationMembership @relation("OperationalControlOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id])
+
+  controlledDocumentRevisionId String?
+  controlledDocumentRevision   ControlledDocumentRevision? @relation(fields: [organisationId, controlledDocumentRevisionId], references: [organisationId, id], onDelete: Restrict)
+
+  effectiveFrom DateTime  @default(now())
+  reviewDueDate DateTime
+  reviewedAt    DateTime?
+
+  supersedesControlId String?
+  supersedesControl   OperationalControl? @relation("OperationalControlSuccessor", fields: [organisationId, supersedesControlId], references: [organisationId, id], onDelete: Restrict)
+  successorControl    OperationalControl? @relation("OperationalControlSuccessor")
+
+  createdByUserId String?
+  createdBy       User?    @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  aspectLinks     OperationalControlAspect[]
+  applicabilities ControlApplicability[]
+  checks          ControlCheck[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, controlKey, version])
+  @@unique([organisationId, supersedesControlId])
+  @@index([organisationId, status, reviewDueDate])
+  @@index([organisationId, ownerMembershipId])
+}
+
+model OperationalControlAspect {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  controlId String
+  control   OperationalControl  @relation(fields: [organisationId, controlId], references: [organisationId, id], onDelete: Cascade)
+  aspectId  String
+  aspect    EnvironmentalAspect @relation(fields: [organisationId, aspectId], references: [organisationId, id], onDelete: Cascade)
+  createdAt DateTime            @default(now())
+
+  @@unique([organisationId, controlId, aspectId], map: "OperationalControlAspect_control_aspect_key")
+  @@index([organisationId, aspectId])
+}
+
+model ControlApplicability {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  controlId                 String
+  control                   OperationalControl @relation(fields: [organisationId, controlId], references: [organisationId, id], onDelete: Cascade)
+  entityId                  String?
+  entity                    Entity?            @relation(fields: [organisationId, entityId], references: [organisationId, id], onDelete: Restrict)
+  siteId                    String?
+  site                      Site?              @relation(fields: [organisationId, siteId], references: [organisationId, id], onDelete: Restrict)
+  processId                 String?
+  process                   ActivityProcess?   @relation(fields: [organisationId, processId], references: [organisationId, id], onDelete: Restrict)
+  externalProviderReference String?
+  createdAt                 DateTime           @default(now())
+
+  @@unique([organisationId, controlId, entityId, siteId, processId, externalProviderReference], map: "ControlApplicability_scope_key")
+  @@index([organisationId, controlId])
+  @@index([organisationId, entityId])
+  @@index([organisationId, siteId])
+  @@index([organisationId, processId])
+}
+
+model ControlCheck {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  controlId        String
+  control          OperationalControl @relation(fields: [organisationId, controlId], references: [organisationId, id])
+  scheduledAt      DateTime
+  performedAt      DateTime?
+  result           ControlCheckResult @default(PENDING)
+  notes            String?
+  exceptionSummary String?
+  actionReference  String?
+
+  reviewerMembershipId String?
+  reviewer             OrganisationMembership? @relation("ControlCheckReviewer", fields: [organisationId, reviewerMembershipId], references: [organisationId, id], onDelete: Restrict)
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+
+  @@unique([organisationId, id])
+  @@index([organisationId, controlId, scheduledAt])
+  @@index([organisationId, result])
 }
 
 // ---------------------------------------------------------------------------
