@@ -67,6 +67,10 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   // Operational-control review evidence (task T33). Callers resolve the
   // check in the tenant repository before linking.
   "control_check",
+  // Environmental monitoring and calibration evidence (task T34). Callers
+  // resolve each target through its tenant-scoped domain service first.
+  "monitoring_result",
+  "equipment_calibration",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 

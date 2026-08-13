@@ -88,6 +88,14 @@ export const AUDIT_EVENT_TYPES = [
   "operational_control.revised",
   "operational_control.retired",
   "control_check.recorded",
+  // Environmental monitoring and calibration (task T34).
+  "monitoring_plan.created",
+  "monitoring_result.recorded",
+  "monitoring_result.reviewed",
+  "monitoring_exception.reviewed",
+  "monitoring_equipment.created",
+  "equipment_calibration.recorded",
+  "calibration_exception.reviewed",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -120,7 +128,11 @@ export type AuditResourceType =
   | "significance_method"
   | "aspect_assessment"
   | "operational_control"
-  | "control_check";
+  | "control_check"
+  | "monitoring_plan"
+  | "monitoring_result"
+  | "monitoring_equipment"
+  | "equipment_calibration";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

@@ -223,6 +223,13 @@ model Organisation {
   controlApplicabilities    ControlApplicability[]
   controlChecks             ControlCheck[]
 
+  // Environmental monitoring and calibration (T34).
+  monitoringPlans            MonitoringPlan[]
+  monitoringResults          MonitoringResult[]
+  monitoringExceptionReviews MonitoringExceptionReview[]
+  monitoringEquipment        MonitoringEquipment[]
+  equipmentCalibrations      EquipmentCalibration[]
+
   @@index([status])
 }
 
@@ -278,6 +285,14 @@ model OrganisationMembership {
   // Operational-control ownership and check review (T33).
   ownedOperationalControls OperationalControl[] @relation("OperationalControlOwner")
   reviewedControlChecks    ControlCheck[]       @relation("ControlCheckReviewer")
+
+  // Environmental monitoring and calibration (T34).
+  responsibleMonitoringPlans    MonitoringPlan[]            @relation("MonitoringPlanResponsible")
+  recordedMonitoringResults     MonitoringResult[]          @relation("MonitoringResultRecorder")
+  reviewedMonitoringResults     MonitoringResult[]          @relation("MonitoringResultReviewer")
+  reviewedMonitoringExceptions  MonitoringExceptionReview[] @relation("MonitoringExceptionReviewer")
+  ownedMonitoringEquipment      MonitoringEquipment[]       @relation("MonitoringEquipmentOwner")
+  recordedEquipmentCalibrations EquipmentCalibration[]      @relation("EquipmentCalibrationRecorder")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -3286,6 +3301,7 @@ model EnvironmentalAspect {
   impactLinks             AspectImpactLink[]
   assessments             AspectAssessment[]
   operationalControlLinks OperationalControlAspect[]
+  monitoringPlans         MonitoringPlan[]
 
   @@unique([organisationId, id])
   @@index([organisationId, processId])
@@ -3517,6 +3533,7 @@ model OperationalControl {
   aspectLinks     OperationalControlAspect[]
   applicabilities ControlApplicability[]
   checks          ControlCheck[]
+  monitoringPlans MonitoringPlan[]
 
   @@unique([organisationId, id])
   @@unique([organisationId, controlKey, version])
@@ -3585,6 +3602,206 @@ model ControlCheck {
   @@unique([organisationId, id])
   @@index([organisationId, controlId, scheduledAt])
   @@index([organisationId, result])
+}
+
+// ---------------------------------------------------------------------------
+// Environmental monitoring and calibration (task T34).
+//
+// Measurement rows are append-only. Reviewing a result changes review
+// metadata only; a corrected measurement is a new MonitoringResult. Units
+// are copied from the plan and protected by a composite tenant boundary.
+// ---------------------------------------------------------------------------
+
+enum MonitoringPlanStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+}
+
+enum MonitoringDataQualityFlag {
+  VALIDATED
+  ESTIMATED
+  SUSPECT
+  REJECTED
+}
+
+enum MonitoringReviewStatus {
+  PENDING
+  REVIEWED
+  EXCEPTION_REVIEW_REQUIRED
+}
+
+enum MonitoringValidityDecision {
+  VALID
+  PARTIALLY_VALID
+  INVALID
+}
+
+enum MonitoringEquipmentStatus {
+  ACTIVE
+  OUT_OF_SERVICE
+  RETIRED
+}
+
+enum EquipmentCalibrationResult {
+  PASS
+  FAIL
+  OUT_OF_TOLERANCE
+}
+
+model MonitoringPlan {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  planKey            String
+  parameter          String
+  method             String
+  location           String
+  frequency          String
+  unit               String
+  acceptanceCriteria String
+  status             MonitoringPlanStatus @default(ACTIVE)
+
+  aspectId  String?
+  aspect    EnvironmentalAspect? @relation(fields: [organisationId, aspectId], references: [organisationId, id], onDelete: Restrict)
+  controlId String?
+  control   OperationalControl?  @relation(fields: [organisationId, controlId], references: [organisationId, id], onDelete: Restrict)
+
+  // T40/T50 are not prerequisites for T34; references preserve the specified
+  // integration points without introducing those later-phase models.
+  obligationReference String?
+  objectiveReference  String?
+
+  responsibleMembershipId String
+  responsible             OrganisationMembership @relation("MonitoringPlanResponsible", fields: [organisationId, responsibleMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  instrumentRequired Boolean              @default(false)
+  equipmentId        String?
+  equipment          MonitoringEquipment? @relation(fields: [organisationId, equipmentId], references: [organisationId, id], onDelete: Restrict)
+
+  reviewDueDate DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  results MonitoringResult[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, planKey])
+  @@index([organisationId, status, reviewDueDate])
+  @@index([organisationId, aspectId])
+  @@index([organisationId, controlId])
+  @@index([organisationId, equipmentId])
+}
+
+model MonitoringResult {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  planId String
+  plan   MonitoringPlan @relation(fields: [organisationId, planId], references: [organisationId, id], onDelete: Restrict)
+
+  measuredAt        DateTime
+  periodStart       DateTime?
+  periodEnd         DateTime?
+  value             Decimal                   @db.Decimal(30, 12)
+  unit              String
+  qualitativeResult String?
+  dataQualityFlag   MonitoringDataQualityFlag
+  reviewStatus      MonitoringReviewStatus    @default(PENDING)
+
+  recordedByMembershipId String
+  recordedBy             OrganisationMembership  @relation("MonitoringResultRecorder", fields: [organisationId, recordedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  reviewedByMembershipId String?
+  reviewedBy             OrganisationMembership? @relation("MonitoringResultReviewer", fields: [organisationId, reviewedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  reviewedAt             DateTime?
+  reviewNote             String?
+  createdAt              DateTime                @default(now())
+
+  exceptionReview MonitoringExceptionReview?
+
+  @@unique([organisationId, id])
+  @@index([organisationId, planId, measuredAt])
+  @@index([organisationId, reviewStatus])
+}
+
+model MonitoringEquipment {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  reference            String
+  description          String
+  location             String
+  calibrationFrequency String
+  status               MonitoringEquipmentStatus @default(ACTIVE)
+  calibrationDueDate   DateTime
+
+  ownerMembershipId String
+  owner             OrganisationMembership @relation("MonitoringEquipmentOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id], onDelete: Restrict)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  plans        MonitoringPlan[]
+  calibrations EquipmentCalibration[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, reference])
+  @@index([organisationId, status, calibrationDueDate])
+}
+
+model EquipmentCalibration {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  equipmentId String
+  equipment   MonitoringEquipment @relation(fields: [organisationId, equipmentId], references: [organisationId, id], onDelete: Restrict)
+
+  dueDate           DateTime
+  performedAt       DateTime
+  provider          String
+  method            String
+  result            EquipmentCalibrationResult
+  nextDueDate       DateTime
+  outOfTolerance    Boolean
+  responseReference String?
+
+  recordedByMembershipId String
+  recordedBy             OrganisationMembership @relation("EquipmentCalibrationRecorder", fields: [organisationId, recordedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  createdAt              DateTime               @default(now())
+
+  exceptionReview MonitoringExceptionReview?
+
+  @@unique([organisationId, id])
+  @@index([organisationId, equipmentId, performedAt])
+  @@index([organisationId, outOfTolerance])
+}
+
+model MonitoringExceptionReview {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  resultId      String?
+  result        MonitoringResult?     @relation(fields: [organisationId, resultId], references: [organisationId, id], onDelete: Restrict)
+  calibrationId String?
+  calibration   EquipmentCalibration? @relation(fields: [organisationId, calibrationId], references: [organisationId, id], onDelete: Restrict)
+
+  reason                 String
+  validityDecision       MonitoringValidityDecision
+  consequence            String
+  actionReference        String?
+  reviewedByMembershipId String
+  reviewedBy             OrganisationMembership     @relation("MonitoringExceptionReviewer", fields: [organisationId, reviewedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  reviewedAt             DateTime                   @default(now())
+  createdAt              DateTime                   @default(now())
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, resultId])
+  @@unique([organisationId, calibrationId])
+  @@index([organisationId, validityDecision])
 }
 
 // ---------------------------------------------------------------------------
