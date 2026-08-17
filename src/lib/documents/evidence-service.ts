@@ -76,6 +76,9 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   // Applicability workflow (task T43). Callers resolve the assessment in
   // the tenant repository before linking.
   "applicability_assessment",
+  // Compliance evaluation (task T45). Callers resolve the item in the
+  // tenant repository before linking.
+  "compliance_evaluation_item",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 

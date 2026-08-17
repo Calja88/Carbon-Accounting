@@ -41,6 +41,7 @@ const RESOURCE_TYPE_LABELS: Record<string, string> = {
   controlled_document: "a controlled document",
   change_assessment: "a change assessment",
   compliance_obligation: "a compliance obligation",
+  compliance_evaluation: "a compliance evaluation",
   legal_source: "a legal register source",
   action: "an EMS action",
   objective: "an EMS objective",
