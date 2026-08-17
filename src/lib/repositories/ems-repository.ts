@@ -245,6 +245,12 @@ export async function findTenantComplianceEvaluationItem(
   return assertChildOwnership(ctx, row, expectedEvaluationId, "evaluationId");
 }
 
+/** Loads a T46 other-requirement source only inside the current organisation. */
+export async function findTenantOtherRequirementSource(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.otherRequirementSource.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain

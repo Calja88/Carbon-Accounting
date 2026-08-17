@@ -11,6 +11,7 @@ const tables = vi.hoisted(() => ({
   processes: [] as Row[],
   aspects: [] as Row[],
   instruments: [] as Row[],
+  otherRequirementSources: [] as Row[],
   changeEvents: [] as Row[],
   assessments: [] as Row[],
   scopes: [] as Row[],
@@ -49,6 +50,7 @@ vi.mock("@/lib/prisma", () => {
     }),
   };
   const legalInstrument = { findUnique: vi.fn(async ({ where }: FindArgs) => find(tables.instruments, where ?? {})) };
+  const otherRequirementSource = { findFirst: vi.fn(async ({ where }: FindArgs) => find(tables.otherRequirementSources, where ?? {})) };
   const legalChangeEvent = {
     findUnique: vi.fn(async ({ where }: FindArgs) => find(tables.changeEvents, where ?? {})),
     findMany: vi.fn(async ({ where }: FindArgs) => {
@@ -126,6 +128,7 @@ vi.mock("@/lib/prisma", () => {
     activityProcess,
     environmentalAspect,
     legalInstrument,
+    otherRequirementSource,
     legalChangeEvent,
     applicabilityAssessment,
     applicabilityAssessmentScope,
@@ -171,6 +174,7 @@ beforeEach(() => {
   tables.processes.length = 0;
   tables.aspects.length = 0;
   tables.instruments.length = 0;
+  tables.otherRequirementSources.length = 0;
   tables.changeEvents.length = 0;
   tables.assessments.length = 0;
   tables.scopes.length = 0;
@@ -181,6 +185,7 @@ beforeEach(() => {
   tables.entities.push({ id: ENTITY_A, organisationId: ORG_A, name: "Aster Manufacturing" });
   tables.sites.push({ id: SITE_A, organisationId: ORG_A, entityId: ENTITY_A, name: "Aster North" });
   tables.instruments.push({ id: "instrument-1", title: "Synthetic Environmental Permitting Order" });
+  tables.otherRequirementSources.push({ id: "other-source-1", organisationId: ORG_A, title: "Synthetic Site A discharge consent" });
   tables.changeEvents.push({
     id: "event-1",
     sourceInstrumentId: "instrument-1",
@@ -265,6 +270,62 @@ describe("createApplicabilityAssessment", () => {
     await expect(createApplicabilityAssessment(contextB, baseInput({ instrumentId: "instrument-1", changeEventId: undefined }))).rejects.toBeInstanceOf(
       TenantOwnershipError,
     );
+  });
+});
+
+describe("createApplicabilityAssessment sourced from a T46 other-requirement source", () => {
+  function otherRequirementInput(overrides: Partial<Parameters<typeof createApplicabilityAssessment>[1]> = {}) {
+    return {
+      instrumentId: null,
+      otherRequirementSourceId: "other-source-1",
+      changeEventId: null,
+      decision: "APPLICABLE" as const,
+      rationale: "Synthetic rationale: this permit governs Site A's discharge activity.",
+      scopes: [{ entityId: ENTITY_A }],
+      actorUserId: "user-a",
+      ...overrides,
+    };
+  }
+
+  it("creates a DRAFT assessment sourced from the manual source, not an instrument", async () => {
+    const assessment = await createApplicabilityAssessment(contextA, otherRequirementInput());
+    expect(assessment.status).toBe("DRAFT");
+    expect(assessment.otherRequirementSourceId).toBe("other-source-1");
+    expect(assessment.instrumentId).toBeFalsy();
+  });
+
+  it("rejects supplying both an instrumentId and an otherRequirementSourceId", async () => {
+    await expect(
+      createApplicabilityAssessment(contextA, otherRequirementInput({ instrumentId: "instrument-1" })),
+    ).rejects.toBeInstanceOf(ApplicabilityWorkflowError);
+  });
+
+  it("rejects supplying neither an instrumentId nor an otherRequirementSourceId", async () => {
+    await expect(createApplicabilityAssessment(contextA, otherRequirementInput({ otherRequirementSourceId: null }))).rejects.toBeInstanceOf(
+      ApplicabilityWorkflowError,
+    );
+  });
+
+  it("rejects a manual source paired with a change event", async () => {
+    await expect(createApplicabilityAssessment(contextA, otherRequirementInput({ changeEventId: "event-1" }))).rejects.toBeInstanceOf(
+      ApplicabilityWorkflowError,
+    );
+  });
+
+  it("does not resolve a foreign-tenant other-requirement source for another organisation", async () => {
+    await expect(createApplicabilityAssessment(contextB, otherRequirementInput())).rejects.toBeInstanceOf(TenantOwnershipError);
+  });
+
+  it("rejects an unknown other-requirement source id", async () => {
+    await expect(
+      createApplicabilityAssessment(contextA, otherRequirementInput({ otherRequirementSourceId: "unknown-source" })),
+    ).rejects.toBeInstanceOf(TenantOwnershipError);
+  });
+
+  it("lists a manual-source assessment alongside instrument-sourced ones", async () => {
+    await createApplicabilityAssessment(contextA, otherRequirementInput());
+    const listed = await listApplicabilityAssessments(contextA);
+    expect(listed.some((a) => a.otherRequirementSourceId === "other-source-1")).toBe(true);
   });
 });
 

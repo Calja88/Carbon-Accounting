@@ -253,9 +253,16 @@ beforeEach(() => {
   tables.entities.push({ id: ENTITY_A, organisationId: ORG_A, name: "Aster Manufacturing" });
   tables.sites.push({ id: SITE_A, organisationId: ORG_A, entityId: ENTITY_A, name: "Aster North" });
   tables.instruments.push({ id: "instrument-1", title: "Synthetic Environmental Permitting Order" });
-  tables.assessments.push({ id: "assessment-applicable", organisationId: ORG_A, instrumentId: "instrument-1", status: "APPLICABLE" });
-  tables.assessments.push({ id: "assessment-uncertain", organisationId: ORG_A, instrumentId: "instrument-1", status: "UNCERTAIN" });
-  tables.assessments.push({ id: "assessment-b", organisationId: ORG_B, instrumentId: "instrument-1", status: "APPLICABLE" });
+  tables.assessments.push({ id: "assessment-applicable", organisationId: ORG_A, instrumentId: "instrument-1", otherRequirementSourceId: null, status: "APPLICABLE" });
+  tables.assessments.push({ id: "assessment-uncertain", organisationId: ORG_A, instrumentId: "instrument-1", otherRequirementSourceId: null, status: "UNCERTAIN" });
+  tables.assessments.push({ id: "assessment-b", organisationId: ORG_B, instrumentId: "instrument-1", otherRequirementSourceId: null, status: "APPLICABLE" });
+  tables.assessments.push({
+    id: "assessment-other-requirement",
+    organisationId: ORG_A,
+    instrumentId: null,
+    otherRequirementSourceId: "other-source-1",
+    status: "APPLICABLE",
+  });
   tables.memberships.push({ id: "membership-owner", organisationId: ORG_A, status: "ACTIVE" });
   tables.changeEvents.push({ id: "event-1", sourceInstrumentId: "instrument-1" });
 });
@@ -300,6 +307,31 @@ describe("createComplianceObligation", () => {
 
   it("rejects an empty title", async () => {
     await expect(createComplianceObligation(contextA, baseInput({ title: "  " }))).rejects.toBeInstanceOf(ComplianceObligationError);
+  });
+});
+
+describe("createComplianceObligation sourced from a T46 other-requirement source", () => {
+  it("carries otherRequirementSourceId, not instrumentId, onto the created version", async () => {
+    const { version } = await createComplianceObligation(contextA, baseInput({ applicabilityAssessmentId: "assessment-other-requirement" }));
+    expect(version.otherRequirementSourceId).toBe("other-source-1");
+    expect(version.instrumentId).toBeFalsy();
+  });
+
+  it("createSuccessorComplianceObligationVersion also inherits the manual source", async () => {
+    const { obligation, version: v1 } = await createComplianceObligation(
+      contextA,
+      baseInput({ applicabilityAssessmentId: "assessment-other-requirement" }),
+    );
+    await submitComplianceObligationVersionForReview(contextA, v1.id as string, "user-drafter");
+    await approveComplianceObligationVersion(approverContextA, v1.id as string, { actorUserId: "user-approver" });
+
+    const v2 = await createSuccessorComplianceObligationVersion(
+      contextA,
+      obligation.id as string,
+      baseInput({ applicabilityAssessmentId: "assessment-other-requirement" }),
+    );
+    expect(v2.otherRequirementSourceId).toBe("other-source-1");
+    expect(v2.instrumentId).toBeFalsy();
   });
 });
 

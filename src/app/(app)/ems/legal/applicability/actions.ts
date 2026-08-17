@@ -51,6 +51,7 @@ function scopesFromForm(parsed: { entityIds: string[]; siteIds: string[]; proces
 function parseAssessmentForm(formData: FormData) {
   return createApplicabilityAssessmentFormSchema.safeParse({
     instrumentId: formData.get("instrumentId"),
+    otherRequirementSourceId: formData.get("otherRequirementSourceId"),
     changeEventId: formData.get("changeEventId"),
     supersedesAssessmentId: formData.get("supersedesAssessmentId"),
     decision: formData.get("decision"),
@@ -71,7 +72,8 @@ export async function createApplicabilityAssessmentAction(
     const parsed = parseAssessmentForm(formData);
     if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the assessment details." };
     await createApplicabilityAssessment(context, {
-      instrumentId: parsed.data.instrumentId,
+      instrumentId: parsed.data.instrumentId || null,
+      otherRequirementSourceId: parsed.data.otherRequirementSourceId || null,
       changeEventId: parsed.data.changeEventId || null,
       supersedesAssessmentId: parsed.data.supersedesAssessmentId || null,
       decision: parsed.data.decision,

@@ -124,6 +124,10 @@ export const AUDIT_EVENT_TYPES = [
   "compliance_evaluation.issued",
   "compliance_evaluation_item.recorded",
   "compliance_evaluation_finding_link.requested",
+  // Other requirements and manual legal sources (task T46).
+  "other_requirement_source.created",
+  "other_requirement_source.updated",
+  "other_requirement_source.status_changed",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -170,7 +174,8 @@ export type AuditResourceType =
   | "compliance_evaluation_programme"
   | "compliance_evaluation"
   | "compliance_evaluation_item"
-  | "compliance_evaluation_finding_link";
+  | "compliance_evaluation_finding_link"
+  | "other_requirement_source";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

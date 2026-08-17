@@ -25,7 +25,7 @@ export default async function ComplianceObligationsPage() {
     listComplianceObligations(context),
     prisma.applicabilityAssessment.findMany({
       where: tenantWhere(ctx, { status: "APPLICABLE" as const }),
-      include: { instrument: { select: { title: true } } },
+      include: { instrument: { select: { title: true } }, otherRequirementSource: { select: { title: true } } },
       orderBy: { assessedAt: "desc" },
     }),
     prisma.entity.findMany({ where: tenantWhere(ctx, {}), orderBy: { name: "asc" } }),
@@ -61,7 +61,10 @@ export default async function ComplianceObligationsPage() {
       </div>
 
       <ObligationWorkspace
-        applicableAssessments={applicableAssessments.map((assessment) => ({ id: assessment.id, instrumentTitle: assessment.instrument.title }))}
+        applicableAssessments={applicableAssessments.map((assessment) => ({
+          id: assessment.id,
+          instrumentTitle: assessment.instrument?.title ?? assessment.otherRequirementSource?.title ?? "Manual other-requirement source",
+        }))}
         obligations={obligations.map((obligation) => ({
           id: obligation.id,
           activeVersionId: obligation.activeVersionId,
@@ -72,7 +75,7 @@ export default async function ComplianceObligationsPage() {
             status: version.status,
             title: version.title,
             requirementSummary: version.requirementSummary,
-            instrumentTitle: version.instrument.title,
+            instrumentTitle: version.instrument?.title ?? version.otherRequirementSource?.title ?? "Manual other-requirement source",
             applicabilityAssessmentId: version.applicabilityAssessmentId,
             ownerName: version.owner.user.name ?? version.ownerMembershipId,
             frequency: version.frequency,

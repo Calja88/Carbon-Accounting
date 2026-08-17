@@ -29,15 +29,29 @@ type ChangeEventOption = {
   organisationAssessmentCount: number;
 };
 
+/** A T46 other-requirement source not yet (or already) assessed — the manual-source counterpart of ChangeEventOption. */
+type OtherRequirementSourceOption = {
+  id: string;
+  type: string;
+  title: string;
+  issuingParty: string;
+  organisationAssessmentCount: number;
+};
+
 type ScopeSummary = { id: string; label: string; kind: "entity" | "site" | "process" | "aspect" };
+
+/** Either source id is set, never both — mirrors ApplicabilityAssessment.instrumentId/otherRequirementSourceId. */
+type SourceKind = "instrument" | "other_requirement";
 
 type AssessmentRow = {
   id: string;
   status: string;
   proposedDecision: string | null;
   rationale: string | null;
-  instrumentId: string;
-  instrumentTitle: string;
+  instrumentId: string | null;
+  otherRequirementSourceId: string | null;
+  sourceKind: SourceKind;
+  sourceLabel: string;
   changeEventId: string | null;
   assessedAt: string;
   reviewedAt: string | null;
@@ -101,7 +115,8 @@ function ScopePicker({ entities, sites, processes, aspects }: { entities: Option
 }
 
 function CreateAssessmentForm({
-  instrumentId,
+  sourceKind,
+  sourceId,
   changeEventId,
   supersedesAssessmentId,
   entities,
@@ -110,7 +125,8 @@ function CreateAssessmentForm({
   aspects,
   onCreated,
 }: {
-  instrumentId: string;
+  sourceKind: SourceKind;
+  sourceId: string;
   changeEventId?: string | null;
   supersedesAssessmentId?: string | null;
   entities: Option[];
@@ -126,7 +142,7 @@ function CreateAssessmentForm({
       className="space-y-4 rounded-lg border border-slate-200 p-4"
       onSubmit={() => onCreated?.()}
     >
-      <input type="hidden" name="instrumentId" value={instrumentId} />
+      <input type="hidden" name={sourceKind === "instrument" ? "instrumentId" : "otherRequirementSourceId"} value={sourceId} />
       {changeEventId && <input type="hidden" name="changeEventId" value={changeEventId} />}
       {supersedesAssessmentId && <input type="hidden" name="supersedesAssessmentId" value={supersedesAssessmentId} />}
       <div className="grid gap-4 sm:grid-cols-2">
@@ -184,7 +200,47 @@ function CandidateRow({
           <details>
             <summary className="cursor-pointer text-sm font-medium text-blue-700">Assess this candidate</summary>
             <div className="mt-3">
-              <CreateAssessmentForm instrumentId={event.instrumentId} changeEventId={event.id} entities={entities} sites={sites} processes={processes} aspects={aspects} />
+              <CreateAssessmentForm sourceKind="instrument" sourceId={event.instrumentId} changeEventId={event.id} entities={entities} sites={sites} processes={processes} aspects={aspects} />
+            </div>
+          </details>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function OtherRequirementCandidateRow({
+  source,
+  entities,
+  sites,
+  processes,
+  aspects,
+  canAssess,
+}: {
+  source: OtherRequirementSourceOption;
+  entities: Option[];
+  sites: Option[];
+  processes: Option[];
+  aspects: Option[];
+  canAssess: boolean;
+}) {
+  return (
+    <Card>
+      <CardContent className="space-y-3 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="font-medium text-slate-900">{source.title}</p>
+            <p className="text-xs text-slate-500">{source.type} · {source.issuingParty}</p>
+          </div>
+          <Badge tone={source.organisationAssessmentCount > 0 ? "info" : "neutral"}>
+            {source.organisationAssessmentCount > 0 ? `${source.organisationAssessmentCount} assessment(s)` : "Not yet assessed"}
+          </Badge>
+        </div>
+        {canAssess && (
+          <details>
+            <summary className="cursor-pointer text-sm font-medium text-blue-700">Assess this source</summary>
+            <div className="mt-3">
+              <CreateAssessmentForm sourceKind="other_requirement" sourceId={source.id} entities={entities} sites={sites} processes={processes} aspects={aspects} />
             </div>
           </details>
         )}
@@ -277,9 +333,10 @@ function AssessmentCard({
       <CardContent className="space-y-3 py-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="font-medium text-slate-900">{assessment.instrumentTitle}</p>
+            <p className="font-medium text-slate-900">{assessment.sourceLabel}</p>
             <p className="text-xs text-slate-500">
-              Assessed {new Date(assessment.assessedAt).toLocaleDateString("en-GB")}
+              {assessment.sourceKind === "instrument" ? "Legal instrument" : "Other requirement source"} · Assessed{" "}
+              {new Date(assessment.assessedAt).toLocaleDateString("en-GB")}
               {assessment.reviewedAt ? ` · reviewed ${new Date(assessment.reviewedAt).toLocaleDateString("en-GB")}` : ""}
               {assessment.nextReviewAt ? ` · next review ${new Date(assessment.nextReviewAt).toLocaleDateString("en-GB")}` : ""}
             </p>
@@ -325,7 +382,8 @@ function AssessmentCard({
               <summary className="cursor-pointer text-sm font-medium text-blue-700">Re-assess (creates a new draft)</summary>
               <div className="mt-3">
                 <CreateAssessmentForm
-                  instrumentId={assessment.instrumentId}
+                  sourceKind={assessment.sourceKind}
+                  sourceId={(assessment.instrumentId ?? assessment.otherRequirementSourceId) as string}
                   changeEventId={assessment.changeEventId}
                   supersedesAssessmentId={assessment.id}
                   entities={entities}
@@ -343,6 +401,7 @@ function AssessmentCard({
 
 export function ApplicabilityWorkspace({
   changeEvents,
+  otherRequirementSources,
   assessments,
   entities,
   sites,
@@ -353,6 +412,7 @@ export function ApplicabilityWorkspace({
   canReview,
 }: {
   changeEvents: ChangeEventOption[];
+  otherRequirementSources: OtherRequirementSourceOption[];
   assessments: AssessmentRow[];
   entities: Option[];
   sites: Option[];
@@ -371,6 +431,22 @@ export function ApplicabilityWorkspace({
         ) : (
           changeEvents.map((event) => (
             <CandidateRow key={event.id} event={event} entities={entities} sites={sites} processes={processes} aspects={aspects} canAssess={canAssess} />
+          ))
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold text-slate-900">Other requirement sources</h2>
+        <p className="text-sm text-slate-500">
+          Manually recorded permits, consents, regulator notices, contracts, customer requirements, and voluntary
+          commitments. Manage the source record itself on the{" "}
+          <a href="/ems/legal/other-requirements" className="text-blue-700 underline">other requirements</a> page.
+        </p>
+        {otherRequirementSources.length === 0 ? (
+          <Card><CardContent className="py-8 text-center text-sm text-slate-500">No active other-requirement sources recorded yet.</CardContent></Card>
+        ) : (
+          otherRequirementSources.map((source) => (
+            <OtherRequirementCandidateRow key={source.id} source={source} entities={entities} sites={sites} processes={processes} aspects={aspects} canAssess={canAssess} />
           ))
         )}
       </div>

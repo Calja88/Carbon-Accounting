@@ -6,7 +6,11 @@ import { tenantWhere } from "@/lib/repositories/tenant-scope";
 import { toTenantRepositoryContext } from "@/lib/repositories/ems-repository";
 import { listActivityProcesses } from "@/lib/ems/aspects/process-service";
 import { listEnvironmentalAspects } from "@/lib/ems/aspects/aspect-service";
-import { listAssessableLegalChangeEvents, listApplicabilityAssessments } from "@/lib/ems/legal/applicability-service";
+import {
+  listAssessableLegalChangeEvents,
+  listAssessableOtherRequirementSources,
+  listApplicabilityAssessments,
+} from "@/lib/ems/legal/applicability-service";
 import { ApplicabilityWorkspace } from "./applicability-forms";
 
 export const dynamic = "force-dynamic";
@@ -23,8 +27,9 @@ export default async function ApplicabilityPage() {
 
   const ctx = toTenantRepositoryContext(context);
 
-  const [changeEvents, assessments, processRows, aspectRows, entities, sites, members] = await Promise.all([
+  const [changeEvents, otherRequirementSources, assessments, processRows, aspectRows, entities, sites, members] = await Promise.all([
     listAssessableLegalChangeEvents(context),
+    listAssessableOtherRequirementSources(context),
     listApplicabilityAssessments(context),
     listActivityProcesses(context),
     listEnvironmentalAspects(context),
@@ -52,12 +57,14 @@ export default async function ApplicabilityPage() {
     evidenceByAssessment.set(link.resourceId, current);
   }
 
-  const decidedAssessmentsByInstrument = new Map<string, string[]>();
+  const decidedAssessmentsBySource = new Map<string, string[]>();
   for (const assessment of assessments) {
     if (assessment.status === "APPLICABLE" || assessment.status === "NOT_APPLICABLE" || assessment.status === "UNCERTAIN") {
-      const current = decidedAssessmentsByInstrument.get(assessment.instrumentId) ?? [];
+      const sourceKey = assessment.instrumentId ?? assessment.otherRequirementSourceId;
+      if (!sourceKey) continue;
+      const current = decidedAssessmentsBySource.get(sourceKey) ?? [];
       current.push(assessment.id);
-      decidedAssessmentsByInstrument.set(assessment.instrumentId, current);
+      decidedAssessmentsBySource.set(sourceKey, current);
     }
   }
 
@@ -84,26 +91,38 @@ export default async function ApplicabilityPage() {
           affectedInstrumentTitle: event.affectedInstrument?.title ?? null,
           organisationAssessmentCount: event.organisationAssessments.length,
         }))}
-        assessments={assessments.map((assessment) => ({
-          id: assessment.id,
-          status: assessment.status,
-          proposedDecision: assessment.proposedDecision,
-          rationale: assessment.rationale,
-          instrumentId: assessment.instrumentId,
-          instrumentTitle: assessment.instrument.title,
-          changeEventId: assessment.changeEventId,
-          assessedAt: assessment.assessedAt.toISOString(),
-          reviewedAt: assessment.reviewedAt ? assessment.reviewedAt.toISOString() : null,
-          nextReviewAt: assessment.nextReviewAt ? assessment.nextReviewAt.toISOString() : null,
-          supersedesAssessmentId: assessment.supersedesAssessmentId,
-          scopes: assessment.scopes.map((scope) => ({
-            id: scope.id,
-            label: scope.entity?.name ?? scope.site?.name ?? scope.process?.name ?? scope.aspect?.name ?? "Unknown scope",
-            kind: scope.entityId ? "entity" : scope.siteId ? "site" : scope.processId ? "process" : "aspect",
-          })),
-          evidence: evidenceByAssessment.get(assessment.id) ?? [],
-          hasSuccessorEligible: (decidedAssessmentsByInstrument.get(assessment.instrumentId) ?? []).includes(assessment.id),
+        otherRequirementSources={otherRequirementSources.map((source) => ({
+          id: source.id,
+          type: source.type,
+          title: source.title,
+          issuingParty: source.issuingParty,
+          organisationAssessmentCount: source.organisationAssessments.length,
         }))}
+        assessments={assessments.map((assessment) => {
+          const sourceKey = (assessment.instrumentId ?? assessment.otherRequirementSourceId) as string;
+          return {
+            id: assessment.id,
+            status: assessment.status,
+            proposedDecision: assessment.proposedDecision,
+            rationale: assessment.rationale,
+            instrumentId: assessment.instrumentId,
+            otherRequirementSourceId: assessment.otherRequirementSourceId,
+            sourceKind: (assessment.instrumentId ? "instrument" : "other_requirement") as "instrument" | "other_requirement",
+            sourceLabel: assessment.instrument?.title ?? assessment.otherRequirementSource?.title ?? "Unknown source",
+            changeEventId: assessment.changeEventId,
+            assessedAt: assessment.assessedAt.toISOString(),
+            reviewedAt: assessment.reviewedAt ? assessment.reviewedAt.toISOString() : null,
+            nextReviewAt: assessment.nextReviewAt ? assessment.nextReviewAt.toISOString() : null,
+            supersedesAssessmentId: assessment.supersedesAssessmentId,
+            scopes: assessment.scopes.map((scope) => ({
+              id: scope.id,
+              label: scope.entity?.name ?? scope.site?.name ?? scope.process?.name ?? scope.aspect?.name ?? "Unknown scope",
+              kind: scope.entityId ? "entity" : scope.siteId ? "site" : scope.processId ? "process" : "aspect",
+            })),
+            evidence: evidenceByAssessment.get(assessment.id) ?? [],
+            hasSuccessorEligible: (decidedAssessmentsBySource.get(sourceKey) ?? []).includes(assessment.id),
+          };
+        })}
         entities={entities.map((entity) => ({ id: entity.id, name: entity.name }))}
         sites={sites.map((site) => ({ id: site.id, name: site.name }))}
         processes={processRows

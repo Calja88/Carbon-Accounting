@@ -41,6 +41,13 @@
  *  - only a resolved, permission-checked `OrganisationContext` can reach
  *    any exported function here — there is no AI-callable entry point in
  *    this module, so "AI cannot set decision" holds architecturally.
+ *
+ * T46 extension: `createComplianceObligation`/`createSuccessorComplianceObligationVersion`
+ * copy whichever one of `instrumentId`/`otherRequirementSourceId` is set on
+ * the source `ApplicabilityAssessment` — a T46 manual source (permit,
+ * consent, regulator notice, contract, customer requirement, voluntary
+ * commitment) goes through this exact same versioning/approval state
+ * machine as a `LegalInstrument`, unmodified.
  */
 
 import type { ComplianceObligationVersionStatus, Prisma } from "@prisma/client";
@@ -103,6 +110,7 @@ export interface CreateSuccessorObligationVersionInput extends ComplianceObligat
 
 const versionListInclude = {
   instrument: { select: { title: true } },
+  otherRequirementSource: { select: { title: true, type: true } },
   owner: { include: { user: { select: { name: true } } } },
   scopes: {
     include: {
@@ -137,6 +145,7 @@ export async function getComplianceObligationVersion(context: OrganisationContex
     include: {
       obligation: true,
       instrument: true,
+      otherRequirementSource: true,
       provisionReference: true,
       applicabilityAssessment: true,
       scopes: {
@@ -256,6 +265,7 @@ export async function createComplianceObligation(context: OrganisationContext, i
         title: input.title.trim(),
         requirementSummary: input.requirementSummary.trim(),
         instrumentId: assessment.instrumentId,
+        otherRequirementSourceId: assessment.otherRequirementSourceId,
         provisionReferenceId: input.provisionReferenceId || null,
         applicabilityAssessmentId: assessment.id,
         ownerMembershipId: input.ownerMembershipId,
@@ -625,6 +635,7 @@ export async function createSuccessorComplianceObligationVersion(
         title: input.title.trim(),
         requirementSummary: input.requirementSummary.trim(),
         instrumentId: assessment.instrumentId,
+        otherRequirementSourceId: assessment.otherRequirementSourceId,
         provisionReferenceId: input.provisionReferenceId || null,
         applicabilityAssessmentId: assessment.id,
         ownerMembershipId: input.ownerMembershipId,

@@ -4,17 +4,23 @@ import { z } from "zod";
 
 export const applicabilityDecisionSchema = z.enum(["APPLICABLE", "NOT_APPLICABLE", "UNCERTAIN"]);
 
-export const createApplicabilityAssessmentFormSchema = z.object({
-  instrumentId: z.string().trim().min(1, "Choose a legal instrument."),
-  changeEventId: z.string().trim().optional().or(z.literal("")),
-  supersedesAssessmentId: z.string().trim().optional().or(z.literal("")),
-  decision: applicabilityDecisionSchema,
-  rationale: z.string().trim().min(1, "Enter a rationale.").max(4000),
-  entityIds: z.array(z.string().trim().min(1)).default([]),
-  siteIds: z.array(z.string().trim().min(1)).default([]),
-  processIds: z.array(z.string().trim().min(1)).default([]),
-  aspectIds: z.array(z.string().trim().min(1)).default([]),
-});
+export const createApplicabilityAssessmentFormSchema = z
+  .object({
+    instrumentId: z.string().trim().optional().or(z.literal("")),
+    otherRequirementSourceId: z.string().trim().optional().or(z.literal("")),
+    changeEventId: z.string().trim().optional().or(z.literal("")),
+    supersedesAssessmentId: z.string().trim().optional().or(z.literal("")),
+    decision: applicabilityDecisionSchema,
+    rationale: z.string().trim().min(1, "Enter a rationale.").max(4000),
+    entityIds: z.array(z.string().trim().min(1)).default([]),
+    siteIds: z.array(z.string().trim().min(1)).default([]),
+    processIds: z.array(z.string().trim().min(1)).default([]),
+    aspectIds: z.array(z.string().trim().min(1)).default([]),
+  })
+  .refine((value) => Boolean(value.instrumentId) !== Boolean(value.otherRequirementSourceId), {
+    message: "Choose exactly one legal instrument or other-requirement source.",
+    path: ["instrumentId"],
+  });
 
 export const decideApplicabilityAssessmentFormSchema = z.object({
   assessmentId: z.string().trim().min(1),

@@ -300,7 +300,13 @@ const evaluationDetailInclude = {
   },
   items: {
     include: {
-      obligationVersion: { include: { instrument: { select: { title: true } }, obligation: { select: { id: true } } } },
+      obligationVersion: {
+        include: {
+          instrument: { select: { title: true } },
+          otherRequirementSource: { select: { title: true } },
+          obligation: { select: { id: true } },
+        },
+      },
       evaluator: { include: { user: { select: { name: true } } } },
       findingLinks: { orderBy: { requestedAt: "desc" as const } },
     },
