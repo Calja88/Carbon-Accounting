@@ -36,6 +36,15 @@
  *    exported function here — there is no AI-callable entry point in this
  *    module, so "AI cannot set decision" holds architecturally, not just by
  *    convention.
+ *
+ * T46 extension (spec §5 "source/instrument/change/other requirement"):
+ * every function above works identically whether an assessment is sourced
+ * from a `LegalInstrument` or a manually entered `OtherRequirementSource`
+ * (task T46, other-requirement-service.ts) — `validateSource` is the one
+ * place that branches on which of `instrumentId`/`otherRequirementSourceId`
+ * the caller supplied (exactly one, never both/neither), and a manual
+ * source never carries a `changeEventId` (only the T41/T42 provider sync
+ * produces `LegalChangeEvent` rows).
  */
 
 import type { ApplicabilityAssessmentStatus } from "@prisma/client";
@@ -72,19 +81,21 @@ export interface ApplicabilityScopeInput {
 }
 
 export interface CreateApplicabilityAssessmentInput {
-  instrumentId: string;
+  /** Exactly one of `instrumentId`/`otherRequirementSourceId` must be set. */
+  instrumentId?: string | null;
+  otherRequirementSourceId?: string | null;
   changeEventId?: string | null;
   decision: ApplicabilityDecision;
   rationale: string;
   scopes: ApplicabilityScopeInput[];
-  /** Assessing this instrument again after a prior decided assessment: the id of the assessment being revised. */
+  /** Assessing this same source again after a prior decided assessment: the id of the assessment being revised. */
   supersedesAssessmentId?: string | null;
   actorUserId: string;
 }
 
 export type UpdateApplicabilityAssessmentDraftInput = Omit<
   CreateApplicabilityAssessmentInput,
-  "instrumentId" | "changeEventId" | "supersedesAssessmentId"
+  "instrumentId" | "otherRequirementSourceId" | "changeEventId" | "supersedesAssessmentId"
 >;
 
 export interface DecideApplicabilityAssessmentInput {
@@ -139,6 +150,40 @@ export async function listAssessableLegalChangeEvents(context: OrganisationConte
   }));
 }
 
+/**
+ * Every ACTIVE T46 `OtherRequirementSource` this organisation may want to
+ * assess, with its own assessment history — the manual-source counterpart
+ * of `listAssessableLegalChangeEvents` above. Unlike a `LegalChangeEvent`,
+ * an other-requirement source is already Organisation-owned, so this is a
+ * single tenant-scoped query rather than a global-candidates-plus-join.
+ */
+export async function listAssessableOtherRequirementSources(context: OrganisationContext) {
+  requirePermission(context, "ems.view");
+  const ctx = toTenantRepositoryContext(context);
+  const sources = await prisma.otherRequirementSource.findMany({
+    where: tenantWhere(ctx, { status: "ACTIVE" as const }),
+    orderBy: { createdAt: "desc" },
+  });
+  if (sources.length === 0) return [];
+
+  const assessments = await prisma.applicabilityAssessment.findMany({
+    where: tenantWhere(ctx, { otherRequirementSourceId: { in: sources.map((source) => source.id) } }),
+    orderBy: { createdAt: "desc" },
+  });
+  const assessmentsBySource = new Map<string, typeof assessments>();
+  for (const assessment of assessments) {
+    if (!assessment.otherRequirementSourceId) continue;
+    const existing = assessmentsBySource.get(assessment.otherRequirementSourceId) ?? [];
+    existing.push(assessment);
+    assessmentsBySource.set(assessment.otherRequirementSourceId, existing);
+  }
+
+  return sources.map((source) => ({
+    ...source,
+    organisationAssessments: assessmentsBySource.get(source.id) ?? [],
+  }));
+}
+
 export async function listApplicabilityAssessments(context: OrganisationContext) {
   requirePermission(context, "ems.view");
   const ctx = toTenantRepositoryContext(context);
@@ -146,6 +191,7 @@ export async function listApplicabilityAssessments(context: OrganisationContext)
     where: tenantWhere(ctx, {}),
     include: {
       instrument: true,
+      otherRequirementSource: true,
       changeEvent: true,
       scopes: {
         include: {
@@ -211,27 +257,59 @@ async function validateScopes(context: OrganisationContext, scopes: Applicabilit
   return validated;
 }
 
-async function validateInstrumentAndEvent(instrumentId: string, changeEventId: string | null | undefined) {
-  const instrument = await prisma.legalInstrument.findUnique({ where: { id: instrumentId } });
-  if (!instrument) throw new ApplicabilityWorkflowError("Unknown legal instrument.");
-  if (changeEventId) {
-    const event = await prisma.legalChangeEvent.findUnique({ where: { id: changeEventId } });
-    if (!event) throw new ApplicabilityWorkflowError("Unknown legal change event.");
-    if (event.sourceInstrumentId !== instrument.id && event.affectedInstrumentId !== instrument.id) {
-      throw new ApplicabilityWorkflowError("The change event does not reference this instrument.");
-    }
+/**
+ * Resolves and validates whichever one source the caller supplied — a
+ * global `LegalInstrument` (optionally with a `LegalChangeEvent` that must
+ * actually reference it) or a tenant-owned T46 `OtherRequirementSource`
+ * (which never carries a change event: only the provider sync produces
+ * those). Returns the pair of columns `createApplicabilityAssessment`/
+ * `findPredecessorAssessment` write onto the row — exactly one is non-null.
+ */
+async function validateSource(
+  ctx: ReturnType<typeof toTenantRepositoryContext>,
+  input: { instrumentId?: string | null; otherRequirementSourceId?: string | null; changeEventId?: string | null },
+): Promise<{ instrumentId: string | null; otherRequirementSourceId: string | null }> {
+  const instrumentId = input.instrumentId || null;
+  const otherRequirementSourceId = input.otherRequirementSourceId || null;
+  if (Boolean(instrumentId) === Boolean(otherRequirementSourceId)) {
+    throw new ApplicabilityWorkflowError("Choose exactly one legal instrument or other-requirement source.");
   }
-  return instrument;
+
+  if (instrumentId) {
+    const instrument = await prisma.legalInstrument.findUnique({ where: { id: instrumentId } });
+    if (!instrument) throw new ApplicabilityWorkflowError("Unknown legal instrument.");
+    if (input.changeEventId) {
+      const event = await prisma.legalChangeEvent.findUnique({ where: { id: input.changeEventId } });
+      if (!event) throw new ApplicabilityWorkflowError("Unknown legal change event.");
+      if (event.sourceInstrumentId !== instrument.id && event.affectedInstrumentId !== instrument.id) {
+        throw new ApplicabilityWorkflowError("The change event does not reference this instrument.");
+      }
+    }
+    return { instrumentId: instrument.id, otherRequirementSourceId: null };
+  }
+
+  if (input.changeEventId) {
+    throw new ApplicabilityWorkflowError("A manual other-requirement source cannot reference a legal change event.");
+  }
+  const source = await prisma.otherRequirementSource.findFirst({ where: tenantWhere(ctx, { id: otherRequirementSourceId as string }) });
+  if (!source) throw new TenantOwnershipError();
+  return { instrumentId: null, otherRequirementSourceId: source.id };
 }
 
 export async function createApplicabilityAssessment(context: OrganisationContext, input: CreateApplicabilityAssessmentInput) {
   requirePermission(context, "ems.applicability.assess");
   if (!input.rationale.trim()) throw new ApplicabilityWorkflowError("Enter a rationale for the proposed decision.");
-  await validateInstrumentAndEvent(input.instrumentId, input.changeEventId);
-  const scopes = await validateScopes(context, input.scopes);
   const ctx = toTenantRepositoryContext(context);
+  const source = await validateSource(ctx, input);
+  const scopes = await validateScopes(context, input.scopes);
 
-  let predecessor: { id: string; status: ApplicabilityAssessmentStatus; successorAssessment: { id: string } | null } | null = null;
+  let predecessor: {
+    id: string;
+    status: ApplicabilityAssessmentStatus;
+    instrumentId: string | null;
+    otherRequirementSourceId: string | null;
+    successorAssessment: { id: string } | null;
+  } | null = null;
   if (input.supersedesAssessmentId) {
     predecessor = await prisma.applicabilityAssessment.findFirst({
       where: tenantWhere(ctx, { id: input.supersedesAssessmentId }),
@@ -244,13 +322,17 @@ export async function createApplicabilityAssessment(context: OrganisationContext
     if (predecessor.successorAssessment) {
       throw new ApplicabilityWorkflowError("That assessment already has a successor.");
     }
+    if (predecessor.instrumentId !== source.instrumentId || predecessor.otherRequirementSourceId !== source.otherRequirementSourceId) {
+      throw new ApplicabilityWorkflowError("A successor assessment must re-assess the same source as its predecessor.");
+    }
   }
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const assessment = await tx.applicabilityAssessment.create({
       data: {
         organisationId: txCtx.organisationId,
-        instrumentId: input.instrumentId,
+        instrumentId: source.instrumentId,
+        otherRequirementSourceId: source.otherRequirementSourceId,
         changeEventId: input.changeEventId || null,
         rationale: input.rationale.trim(),
         proposedDecision: input.decision,
@@ -272,11 +354,18 @@ export async function createApplicabilityAssessment(context: OrganisationContext
       eventType: "applicability_assessment.created",
       resourceType: "applicability_assessment",
       resourceId: assessment.id,
-      summary: `Applicability assessment drafted for instrument ${input.instrumentId}.`,
+      summary: source.instrumentId
+        ? `Applicability assessment drafted for instrument ${source.instrumentId}.`
+        : `Applicability assessment drafted for other-requirement source ${source.otherRequirementSourceId}.`,
       actorUserId: input.actorUserId,
       correlationId: txCtx.correlationId,
       source: "web-app",
-      after: { instrumentId: input.instrumentId, changeEventId: input.changeEventId ?? null, proposedDecision: input.decision },
+      after: {
+        instrumentId: source.instrumentId,
+        otherRequirementSourceId: source.otherRequirementSourceId,
+        changeEventId: input.changeEventId ?? null,
+        proposedDecision: input.decision,
+      },
     });
     return assessment;
   });

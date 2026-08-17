@@ -85,7 +85,7 @@ export default async function ComplianceEvaluationsPage() {
             followUpDate: item.followUpDate ? item.followUpDate.toISOString() : null,
             obligationTitle: item.obligationVersion.title,
             obligationVersion: item.obligationVersion.version,
-            instrumentTitle: item.obligationVersion.instrument.title,
+            instrumentTitle: item.obligationVersion.instrument?.title ?? item.obligationVersion.otherRequirementSource?.title ?? "Manual other-requirement source",
             findingLinks: item.findingLinks.map((link) => ({
               id: link.id,
               linkType: link.linkType,

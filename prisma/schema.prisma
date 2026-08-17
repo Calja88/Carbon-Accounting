@@ -253,6 +253,9 @@ model Organisation {
   complianceEvaluationItems        ComplianceEvaluationItem[]
   complianceEvaluationFindingLinks ComplianceEvaluationFindingLink[]
 
+  // Other requirements and manual legal sources (T46).
+  otherRequirementSources OtherRequirementSource[]
+
   @@index([status])
 }
 
@@ -326,6 +329,9 @@ model OrganisationMembership {
   ownedComplianceObligationVersions ComplianceObligationVersion[]  @relation("ComplianceObligationVersionOwner")
   complianceObligationApprovals     ComplianceObligationApproval[] @relation("ComplianceObligationApprovalApprover")
   obligationChangeReviews           ObligationChangeReview[]       @relation("ObligationChangeReviewReviewer")
+
+  // Other requirements and manual legal sources (T46).
+  ownedOtherRequirementSources OtherRequirementSource[] @relation("OtherRequirementSourceOwner")
 
   // Compliance evaluation (T45).
   ledComplianceEvaluationProgrammes         ComplianceEvaluationProgramme[]   @relation("ComplianceEvaluationProgrammeLead")
@@ -4752,22 +4758,32 @@ enum ApplicabilityAssessmentStatus {
   SUPERSEDED
 }
 
-/// One organisation's applicability judgement against a legal instrument
-/// (optionally prompted by one specific change event). `rationale`,
-/// `evidence` (via `EvidenceLink`, resourceType "applicability_assessment"),
+/// One organisation's applicability judgement against a legal instrument or
+/// a T46 `OtherRequirementSource` (optionally, for an instrument, prompted
+/// by one specific change event). `rationale`, `evidence` (via
+/// `EvidenceLink`, resourceType "applicability_assessment"),
 /// `reviewedByMembershipId` and `nextReviewAt` are required before
 /// `decide()` may move this row out of IN_REVIEW (service-layer rule, spec
 /// §9 "decision/rationale/reviewer/evidence/review date required") —
 /// nullable here only because a DRAFT may not have them yet.
 /// `followUpOwnerMembershipId` is required specifically for an UNCERTAIN
 /// decision (spec §2 "UNCERTAIN requires an owner and follow-up date").
+///
+/// Exactly one of `instrumentId`/`otherRequirementSourceId` is set
+/// (service-layer rule, defence-in-depth `applicability_assessment_source`
+/// CHECK constraint below) — spec §5 "source/instrument/change/other
+/// requirement" — so a manual T46 source follows the identical DRAFT ->
+/// IN_REVIEW -> decided state machine an automated legal instrument does.
 model ApplicabilityAssessment {
   id             String       @id @default(cuid())
   organisationId String
   organisation   Organisation @relation(fields: [organisationId], references: [id])
 
-  instrumentId String
-  instrument   LegalInstrument @relation(fields: [instrumentId], references: [id])
+  instrumentId String?
+  instrument   LegalInstrument? @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+
+  otherRequirementSourceId String?
+  otherRequirementSource   OtherRequirementSource? @relation(fields: [organisationId, otherRequirementSourceId], references: [organisationId, id])
 
   changeEventId String?
   changeEvent   LegalChangeEvent? @relation(fields: [changeEventId], references: [id])
@@ -4814,6 +4830,7 @@ model ApplicabilityAssessment {
   @@unique([organisationId, id])
   @@unique([organisationId, supersedesAssessmentId])
   @@index([organisationId, instrumentId, status])
+  @@index([organisationId, otherRequirementSourceId, status])
   @@index([organisationId, changeEventId])
   @@index([organisationId, status])
   @@index([organisationId, assessedByMembershipId])
@@ -4940,9 +4957,17 @@ model ComplianceObligationVersion {
   title              String
   requirementSummary String
 
-  // Source/provisions this obligation traces to (spec §5).
-  instrumentId String
-  instrument   LegalInstrument @relation(fields: [instrumentId], references: [id])
+  // Source/provisions this obligation traces to (spec §5). Exactly one of
+  // `instrumentId`/`otherRequirementSourceId` is set, mirroring
+  // `applicabilityAssessment.instrumentId`/`.otherRequirementSourceId` —
+  // this obligation version always inherits whichever one is set on its
+  // `applicabilityAssessment` (T46: "records follow identical
+  // applicability/approval/version rules").
+  instrumentId String?
+  instrument   LegalInstrument? @relation(fields: [instrumentId], references: [id], onDelete: Restrict)
+
+  otherRequirementSourceId String?
+  otherRequirementSource   OtherRequirementSource? @relation(fields: [organisationId, otherRequirementSourceId], references: [organisationId, id])
 
   provisionReferenceId String?
   provisionReference   LegalProvisionReference? @relation(fields: [provisionReferenceId], references: [id])
@@ -4994,6 +5019,7 @@ model ComplianceObligationVersion {
   @@index([organisationId, obligationId, status])
   @@index([organisationId, status])
   @@index([organisationId, instrumentId])
+  @@index([organisationId, otherRequirementSourceId])
   @@index([organisationId, ownerMembershipId])
 }
 
@@ -5101,6 +5127,96 @@ model ObligationChangeReview {
 
   @@index([organisationId, obligationVersionId])
   @@index([organisationId, changeEventId])
+}
+
+// ---------------------------------------------------------------------------
+// Other requirements and manual legal sources (task T46,
+// Docs/PHASE4_LEGAL_COMPLIANCE_SPEC.md §§1-2,5,9). Unlike `LegalInstrument`
+// (global platform reference data ingested by the T41/T42 provider sync),
+// an `OtherRequirementSource` is a permit, consent, regulator notice,
+// contract, customer requirement or voluntary commitment a competent user
+// enters by hand — so it is Organisation-owned from creation, has no
+// provider/canonicalId, and is never touched by the legal sync worker.
+//
+// Spec §1 "official legislation, permits, consents, regulator notices,
+// contracts, customer requirements and voluntary commitments share the
+// applicability/obligation workflow but retain distinct source types" is
+// what `ApplicabilityAssessment.otherRequirementSourceId` and
+// `ComplianceObligationVersion.otherRequirementSourceId` exist for (both
+// added alongside this model, each mutually exclusive with the
+// pre-existing `instrumentId` column on that same row via a CHECK
+// constraint the migration adds) — a manual source assessed here moves
+// through the exact same DRAFT -> IN_REVIEW -> APPLICABLE/NOT_APPLICABLE/
+// UNCERTAIN state machine (T43) and the exact same
+// DRAFT -> IN_REVIEW -> APPROVED -> ACTIVE versioning/approval state
+// machine (T44) a `LegalInstrument`-sourced one does — "records follow
+// identical applicability/approval/version rules" (T46 acceptance). This
+// model itself carries no version chain of its own: like
+// `ExternalProviderControl` (T35), it is a plain, competent-user-editable
+// record with a status and a review/expiry date, not obligation content —
+// "manual source gets review/expiry" (T46 acceptance) is `nextReviewAt`/
+// `expiryDate` here; the *approved obligation's* content immutability
+// still comes entirely from T44's existing
+// `compliance_obligation_version_immutable_once_approved` trigger.
+// ---------------------------------------------------------------------------
+
+enum OtherRequirementSourceType {
+  PERMIT
+  CONSENT
+  REGULATOR_NOTICE
+  CONTRACT
+  CUSTOMER_REQUIREMENT
+  VOLUNTARY_COMMITMENT
+}
+
+enum OtherRequirementSourceStatus {
+  ACTIVE
+  EXPIRED
+  SUPERSEDED
+  WITHDRAWN
+}
+
+/// A manually entered, Organisation-owned legal/other-requirement source
+/// (spec §5 "OtherRequirementSource: type, issuing party, reference,
+/// dates, controlled evidence, status"). `type` and `issuingParty` make
+/// "source type and authority clear" (T46 acceptance); supporting files are
+/// attached the same controlled-evidence way every other EMS record is
+/// (`EvidenceLink`, resourceType "other_requirement_source").
+model OtherRequirementSource {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  type         OtherRequirementSourceType
+  title        String
+  issuingParty String
+  reference    String?
+  description  String?
+
+  issuedAt      DateTime?
+  effectiveFrom DateTime?
+  expiryDate    DateTime?
+  nextReviewAt  DateTime?
+
+  status OtherRequirementSourceStatus @default(ACTIVE)
+
+  ownerMembershipId String
+  owner             OrganisationMembership @relation("OtherRequirementSourceOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Organisation-owned applicability decisions against this source (T46, mirrors LegalInstrument.applicabilityAssessments).
+  applicabilityAssessments ApplicabilityAssessment[]
+
+  // Organisation-owned compliance obligation versions sourced from this record (T46, mirrors LegalInstrument.complianceObligationVersions).
+  complianceObligationVersions ComplianceObligationVersion[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, status])
+  @@index([organisationId, type])
+  @@index([organisationId, nextReviewAt])
 }
 
 // ---------------------------------------------------------------------------

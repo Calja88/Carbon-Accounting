@@ -79,6 +79,9 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   // Compliance evaluation (task T45). Callers resolve the item in the
   // tenant repository before linking.
   "compliance_evaluation_item",
+  // Other requirements and manual legal sources (task T46). Callers
+  // resolve the source in the tenant repository before linking.
+  "other_requirement_source",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 
