@@ -101,6 +101,11 @@ export const AUDIT_EVENT_TYPES = [
   "emergency_plan.revised",
   "emergency_exercise.recorded",
   "emergency_exercise_action.recorded",
+  // Applicability workflow (task T43).
+  "applicability_assessment.created",
+  "applicability_assessment.submitted_for_review",
+  "applicability_assessment.decided",
+  "applicability_assessment.superseded",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -140,7 +145,8 @@ export type AuditResourceType =
   | "communication_record"
   | "emergency_scenario"
   | "emergency_plan"
-  | "emergency_exercise";
+  | "emergency_exercise"
+  | "applicability_assessment";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

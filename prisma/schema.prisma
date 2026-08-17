@@ -234,6 +234,10 @@ model Organisation {
   emergencyExercises             EmergencyExercise[]
   emergencyExerciseActions       EmergencyExerciseAction[]
 
+  // Legal applicability workflow (T43).
+  applicabilityAssessments      ApplicabilityAssessment[]
+  applicabilityAssessmentScopes ApplicabilityAssessmentScope[]
+
   @@index([status])
 }
 
@@ -297,6 +301,11 @@ model OrganisationMembership {
   sentCommunicationRecords      CommunicationRecord[]        @relation("CommunicationRecordSender")
   approvedCommunicationRecords  CommunicationRecord[]        @relation("CommunicationRecordApprover")
   ownedEmergencyExerciseActions EmergencyExerciseAction[]    @relation("EmergencyExerciseActionOwner")
+
+  // Legal applicability workflow (T43).
+  assessedApplicabilityAssessments ApplicabilityAssessment[] @relation("ApplicabilityAssessmentAssessedBy")
+  reviewedApplicabilityAssessments ApplicabilityAssessment[] @relation("ApplicabilityAssessmentReviewedBy")
+  followUpApplicabilityAssessments ApplicabilityAssessment[] @relation("ApplicabilityAssessmentFollowUpOwner")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -428,6 +437,9 @@ model Entity {
   // Operational-control applicability (T33).
   controlApplicabilities ControlApplicability[]
 
+  // Legal applicability assessment scopes (T43).
+  applicabilityAssessmentScopes ApplicabilityAssessmentScope[]
+
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy global-unique Entity name —
   // two organisations may now use the same Entity name.
@@ -475,6 +487,9 @@ model Site {
 
   // Emergency preparedness scenarios (T35).
   emergencyScenarios EmergencyScenario[]
+
+  // Legal applicability assessment scopes (T43).
+  applicabilityAssessmentScopes ApplicabilityAssessmentScope[]
 
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy [entityId, name] unique —
@@ -3283,6 +3298,9 @@ model ActivityProcess {
   controlApplicabilities ControlApplicability[]
   emergencyScenarios     EmergencyScenario[]
 
+  // Legal applicability assessment scopes (T43).
+  applicabilityAssessmentScopes ApplicabilityAssessmentScope[]
+
   @@unique([organisationId, id])
   @@index([organisationId, programmeId, status])
   @@index([organisationId, siteId])
@@ -3323,6 +3341,9 @@ model EnvironmentalAspect {
   // External providers and emergency preparedness (T35).
   externalProviderControlLinks ExternalProviderControlAspect[]
   emergencyScenarios           EmergencyScenario[]
+
+  // Legal applicability assessment scopes (T43).
+  applicabilityAssessmentScopes ApplicabilityAssessmentScope[]
 
   @@unique([organisationId, id])
   @@index([organisationId, processId])
@@ -4514,6 +4535,9 @@ model LegalInstrument {
   sourceOfEvents      LegalChangeEvent[]            @relation("LegalChangeEventSourceInstrument")
   affectedByEvents    LegalChangeEvent[]            @relation("LegalChangeEventAffectedInstrument")
 
+  // Organisation-owned applicability decisions against this instrument (T43).
+  applicabilityAssessments ApplicabilityAssessment[]
+
   @@unique([providerId, canonicalId])
   @@index([status])
 }
@@ -4640,7 +4664,133 @@ model LegalChangeEvent {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Organisation-owned applicability decisions prompted by this event (T43).
+  applicabilityAssessments ApplicabilityAssessment[]
+
   @@unique([providerId, dedupeKey])
   @@index([providerId, detectedAt])
   @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Applicability workflow (task T43, Docs/PHASE4_LEGAL_COMPLIANCE_SPEC.md
+// §§1-2,5,9). Organisation-owned: unlike everything above in this section,
+// `ApplicabilityAssessment`/`ApplicabilityAssessmentScope` carry
+// `organisationId` because a legal-change candidate's applicability is a
+// human, per-tenant judgement, not shared platform reference data.
+//
+// State machine (spec §2): DRAFT -> IN_REVIEW -> APPLICABLE / NOT_APPLICABLE
+// / UNCERTAIN -> SUPERSEDED. A decided assessment (any of the three decision
+// statuses) is never edited in place — re-assessing an instrument/event
+// creates a new DRAFT via `supersedesAssessmentId`, exactly the
+// AspectAssessment/SignificanceMethod revision-chain shape, so a
+// NOT_APPLICABLE decision "remains reviewable history" (T43 acceptance)
+// rather than being overwritten. Detecting/recording the underlying
+// LegalChangeEvent (T40/T42) never itself changes this table — an
+// assessment is always a distinct, human-authored write.
+// ---------------------------------------------------------------------------
+
+enum ApplicabilityAssessmentStatus {
+  DRAFT
+  IN_REVIEW
+  APPLICABLE
+  NOT_APPLICABLE
+  UNCERTAIN
+  SUPERSEDED
+}
+
+/// One organisation's applicability judgement against a legal instrument
+/// (optionally prompted by one specific change event). `rationale`,
+/// `evidence` (via `EvidenceLink`, resourceType "applicability_assessment"),
+/// `reviewedByMembershipId` and `nextReviewAt` are required before
+/// `decide()` may move this row out of IN_REVIEW (service-layer rule, spec
+/// §9 "decision/rationale/reviewer/evidence/review date required") —
+/// nullable here only because a DRAFT may not have them yet.
+/// `followUpOwnerMembershipId` is required specifically for an UNCERTAIN
+/// decision (spec §2 "UNCERTAIN requires an owner and follow-up date").
+model ApplicabilityAssessment {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  instrumentId String
+  instrument   LegalInstrument @relation(fields: [instrumentId], references: [id])
+
+  changeEventId String?
+  changeEvent   LegalChangeEvent? @relation(fields: [changeEventId], references: [id])
+
+  status    ApplicabilityAssessmentStatus @default(DRAFT)
+  rationale String?
+
+  // The assessor's proposed decision, entered at DRAFT/IN_REVIEW time.
+  // Reuses `ApplicabilityAssessmentStatus` rather than a second enum, but
+  // is only ever set to one of the three decision members (service-layer
+  // rule) — `status` is what the reviewer actually decides, and may agree
+  // with or override this proposal.
+  proposedDecision ApplicabilityAssessmentStatus?
+
+  assessedByMembershipId String
+  assessedBy             OrganisationMembership @relation("ApplicabilityAssessmentAssessedBy", fields: [organisationId, assessedByMembershipId], references: [organisationId, id])
+  assessedAt             DateTime               @default(now())
+
+  reviewedByMembershipId String?
+  reviewedBy             OrganisationMembership? @relation("ApplicabilityAssessmentReviewedBy", fields: [organisationId, reviewedByMembershipId], references: [organisationId, id])
+  reviewedAt             DateTime?
+
+  // Next scheduled/change-triggered review date — the spec §9 "review date"
+  // acceptance item. Required by the service before a decision is recorded.
+  nextReviewAt DateTime?
+
+  // UNCERTAIN-only follow-up owner (spec §2). Restrict, not cascade: the
+  // owning membership must be explicitly reassigned, never silently dropped.
+  followUpOwnerMembershipId String?
+  followUpOwner             OrganisationMembership? @relation("ApplicabilityAssessmentFollowUpOwner", fields: [organisationId, followUpOwnerMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  supersedesAssessmentId String?
+  supersedesAssessment   ApplicabilityAssessment? @relation("ApplicabilityAssessmentSuccessor", fields: [organisationId, supersedesAssessmentId], references: [organisationId, id])
+  successorAssessment    ApplicabilityAssessment? @relation("ApplicabilityAssessmentSuccessor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  scopes ApplicabilityAssessmentScope[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, supersedesAssessmentId])
+  @@index([organisationId, instrumentId, status])
+  @@index([organisationId, changeEventId])
+  @@index([organisationId, status])
+  @@index([organisationId, assessedByMembershipId])
+}
+
+/// One Entity/Site/Process/Aspect this assessment's decision covers — the
+/// spec §5 "assessed scopes" list. Exactly one of the four columns is set
+/// per row (service-layer rule, mirroring `ControlApplicability`'s shape);
+/// an assessment may have several scope rows to cover multiple sites/
+/// processes/aspects at once.
+model ApplicabilityAssessmentScope {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  assessmentId String
+  assessment   ApplicabilityAssessment @relation(fields: [organisationId, assessmentId], references: [organisationId, id], onDelete: Cascade)
+
+  entityId  String?
+  entity    Entity?              @relation(fields: [organisationId, entityId], references: [organisationId, id], onDelete: Restrict)
+  siteId    String?
+  site      Site?                @relation(fields: [organisationId, siteId], references: [organisationId, id], onDelete: Restrict)
+  processId String?
+  process   ActivityProcess?     @relation(fields: [organisationId, processId], references: [organisationId, id], onDelete: Restrict)
+  aspectId  String?
+  aspect    EnvironmentalAspect? @relation(fields: [organisationId, aspectId], references: [organisationId, id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, assessmentId, entityId, siteId, processId, aspectId], map: "ApplicabilityAssessmentScope_scope_key")
+  @@index([organisationId, assessmentId])
+  @@index([organisationId, entityId])
+  @@index([organisationId, siteId])
+  @@index([organisationId, processId])
+  @@index([organisationId, aspectId])
 }

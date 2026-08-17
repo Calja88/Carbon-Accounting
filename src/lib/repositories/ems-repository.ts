@@ -182,6 +182,12 @@ export async function findTenantEmergencyExercise(ctx: TenantRepositoryContext, 
   return assertOwned(ctx, row);
 }
 
+/** Loads one exact T43 applicability assessment version only inside the current organisation. */
+export async function findTenantApplicabilityAssessment(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.applicabilityAssessment.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain
