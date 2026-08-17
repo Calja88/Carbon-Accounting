@@ -4320,3 +4320,327 @@ model RlsSpikeRecord {
 
   @@index([organisationId])
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4 — provider-neutral legal register (task T40,
+// Docs/PHASE4_LEGAL_COMPLIANCE_SPEC.md §§1-3 "Fixed decisions" and
+// "Provider-neutral source model").
+//
+// Everything below is a platform-global authoritative reference, not tenant
+// data — same pattern as `AiModelCatalog` (T18): one shared record set that
+// every Organisation reads, never scoped by `organisationId`. Per-Organisation
+// review/applicability/obligation state (`LegalReviewCandidate` and later
+// Phase 4 tasks) is deliberately out of scope here — T42 adds it once a
+// sync worker exists to populate it.
+//
+// Immutability: `LegalInstrumentVersion` is the retrieved, checksummed
+// snapshot of an instrument at a point in time — the "source provenance"
+// the T40 acceptance criteria requires stay immutable — so its migration
+// adds an append-only trigger (deny UPDATE/DELETE) exactly like
+// `AuditEvent`'s. `LegalChangeEvent`'s detection/evidence columns get a
+// narrower trigger that blocks changes to those columns specifically while
+// still allowing `status` to progress through its DETECTED -> ... state
+// machine in a later task (T42 triage) — the same partial-immutability
+// shape as `EmsScopeVersion`/`AspectAssessment`.
+// ---------------------------------------------------------------------------
+
+enum LegalSourceAuthorityType {
+  OFFICIAL
+  EDITORIAL
+}
+
+enum LegalSourceProviderStatus {
+  ENABLED
+  DISABLED
+}
+
+enum LegalSyncStream {
+  PUBLICATIONS
+  EFFECTS
+  VERSIONS
+}
+
+enum LegalSyncCursorStatus {
+  ACTIVE
+  STALE
+  ERROR
+}
+
+enum LegalInstrumentStatus {
+  ACTIVE
+  REVOKED
+  SUPERSEDED
+  UNKNOWN
+}
+
+/// LegalChangeEvent.status state machine (spec §2):
+/// DETECTED -> TRIAGED -> REVIEW_REQUIRED -> REVIEWED -> DISMISSED/CLOSED.
+/// T40 only ever writes DETECTED; later transitions are T42's triage worker.
+enum LegalChangeEventStatus {
+  DETECTED
+  TRIAGED
+  REVIEW_REQUIRED
+  REVIEWED
+  DISMISSED
+  CLOSED
+}
+
+/// Stable jurisdiction reference (e.g. "GB-ENG", "GB"). Organisation-neutral;
+/// an Organisation's jurisdiction subscriptions are Organisation-owned state
+/// added by a later task, not stored here.
+model Jurisdiction {
+  id   String @id @default(cuid())
+  code String @unique
+
+  name        String
+  country     String
+  subdivision String?
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  instruments LegalInstrumentJurisdiction[]
+  syncCursors LegalSyncCursor[]
+
+  @@index([active])
+}
+
+/// Organisation-neutral legal taxonomy. An Organisation's own local tags are
+/// separate, Organisation-owned state added by a later task, not stored here.
+model LegalTopic {
+  id  String @id @default(cuid())
+  key String @unique
+
+  name        String
+  description String?
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  instruments LegalInstrumentTopic[]
+
+  @@index([active])
+}
+
+/// One row per legal content source (e.g. "legislation-gov-uk"). Holds a
+/// non-secret configuration reference only — credentials live outside the
+/// database, in the provider's own configuration (T41 concern).
+model LegalSourceProvider {
+  id  String @id @default(cuid())
+  key String @unique
+
+  name            String
+  authorityType   LegalSourceAuthorityType
+  configReference String?
+  status          LegalSourceProviderStatus @default(ENABLED)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cursors      LegalSyncCursor[]
+  instruments  LegalInstrument[]
+  changeEvents LegalChangeEvent[]
+
+  @@index([status])
+}
+
+/// Per (provider, stream, filter) sync position. `filterKey` is the
+/// canonical encoding of whatever narrows a poll — a jurisdiction code, or
+/// "" when the stream is not jurisdiction-filtered — so uniqueness never
+/// depends on a nullable column. Advancing `cursor`/`lastSuccessAt` is the
+/// service layer's job (`legal-source-service.ts`): the acceptance
+/// criterion "cursors advance transactionally only after batch commit"
+/// means the update happens inside the same transaction as the
+/// instrument/version/event rows it accounts for, never before or outside
+/// it — there is nothing at the schema level that can enforce that by
+/// itself.
+model LegalSyncCursor {
+  id String @id @default(cuid())
+
+  providerId String
+  provider   LegalSourceProvider @relation(fields: [providerId], references: [id])
+
+  stream         LegalSyncStream
+  jurisdictionId String?
+  jurisdiction   Jurisdiction?   @relation(fields: [jurisdictionId], references: [id])
+  filterKey      String          @default("")
+
+  cursor         String?
+  overlapStartAt DateTime?
+  lastSuccessAt  DateTime?
+  lastAttemptAt  DateTime?
+  status         LegalSyncCursorStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([providerId, stream, filterKey])
+  @@index([providerId, status])
+}
+
+/// A provider's canonical instrument (e.g. one UK statutory instrument).
+/// Mutable "current state" pointer — `status`/`latestSourceHash`/
+/// `lastCheckedAt` update as new versions/events arrive. The immutable
+/// history lives in `LegalInstrumentVersion`, not here.
+model LegalInstrument {
+  id String @id @default(cuid())
+
+  providerId  String
+  provider    LegalSourceProvider @relation(fields: [providerId], references: [id])
+  canonicalId String
+
+  instrumentType String
+  title          String
+  year           Int?
+  number         String?
+
+  madeAt         DateTime?
+  publishedAt    DateTime?
+  commencementAt DateTime?
+
+  status           LegalInstrumentStatus @default(ACTIVE)
+  latestSourceHash String?
+  lastCheckedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jurisdictions       LegalInstrumentJurisdiction[]
+  topics              LegalInstrumentTopic[]
+  versions            LegalInstrumentVersion[]
+  provisionReferences LegalProvisionReference[]
+  sourceOfEvents      LegalChangeEvent[]            @relation("LegalChangeEventSourceInstrument")
+  affectedByEvents    LegalChangeEvent[]            @relation("LegalChangeEventAffectedInstrument")
+
+  @@unique([providerId, canonicalId])
+  @@index([status])
+}
+
+model LegalInstrumentJurisdiction {
+  id String @id @default(cuid())
+
+  instrumentId String
+  instrument   LegalInstrument @relation(fields: [instrumentId], references: [id])
+
+  jurisdictionId String
+  jurisdiction   Jurisdiction @relation(fields: [jurisdictionId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([instrumentId, jurisdictionId])
+}
+
+model LegalInstrumentTopic {
+  id String @id @default(cuid())
+
+  instrumentId String
+  instrument   LegalInstrument @relation(fields: [instrumentId], references: [id])
+
+  topicId String
+  topic   LegalTopic @relation(fields: [topicId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([instrumentId, topicId])
+}
+
+/// The immutable, checksummed snapshot behind an instrument at one provider
+/// retrieval — "source provenance" in the T40 acceptance criteria. Never
+/// updated or deleted once written (see migration trigger); a corrected or
+/// newer retrieval is always a new row, never an edit of this one.
+/// `documentStorageRef` is an opaque storage key, never inline document
+/// bytes — same convention as `EvidenceObject` (T22).
+model LegalInstrumentVersion {
+  id String @id @default(cuid())
+
+  instrumentId String
+  instrument   LegalInstrument @relation(fields: [instrumentId], references: [id])
+
+  providerVersionId  String
+  retrievedAt        DateTime
+  metadata           Json
+  documentStorageRef String?
+  checksum           String
+  sourceUrl          String
+
+  createdAt DateTime @default(now())
+
+  provisionReferences LegalProvisionReference[]
+  sourceOfEvents      LegalChangeEvent[]        @relation("LegalChangeEventSourceVersion")
+
+  @@unique([instrumentId, providerVersionId])
+}
+
+/// A pointer to one provision within an instrument/version — the provider's
+/// identifier/URI and a short label only. Never stores copied legislative
+/// prose (spec §3: "no unlicensed copied prose").
+model LegalProvisionReference {
+  id String @id @default(cuid())
+
+  instrumentId String
+  instrument   LegalInstrument @relation(fields: [instrumentId], references: [id])
+
+  versionId String?
+  version   LegalInstrumentVersion? @relation(fields: [versionId], references: [id])
+
+  providerProvisionId String
+  label               String?
+  uri                 String?
+
+  createdAt DateTime @default(now())
+
+  affectedByEvents LegalChangeEvent[] @relation("LegalChangeEventAffectedProvision")
+
+  @@unique([instrumentId, providerProvisionId])
+}
+
+/// One provider-reported change (new publication, amendment, effect, ...).
+/// `dedupeKey` is the provider's own identifier for the change (falls back
+/// to a content-derived key when a provider doesn't supply one) — the
+/// `(providerId, dedupeKey)` unique constraint is what makes replaying a
+/// provider's feed, or an overlapping poll window, idempotent: a repeat
+/// insert collapses onto the existing row instead of creating a duplicate
+/// (T40 acceptance: "unique idempotency constraints prevent duplicate
+/// events"). Detecting a change never decides applicability or creates an
+/// obligation — that is Organisation-owned state a later task adds.
+model LegalChangeEvent {
+  id String @id @default(cuid())
+
+  providerId      String
+  provider        LegalSourceProvider @relation(fields: [providerId], references: [id])
+  providerEventId String
+
+  /// Provider-specific, e.g. "NEW_PUBLICATION", "AMENDMENT", "EFFECT" — a
+  /// plain string, not an enum, so a new provider's vocabulary never forces
+  /// a migration (same reasoning as `OutboxMessage.topic`).
+  eventType String
+
+  sourceInstrumentId String
+  sourceInstrument   LegalInstrument @relation("LegalChangeEventSourceInstrument", fields: [sourceInstrumentId], references: [id])
+
+  affectedInstrumentId String?
+  affectedInstrument   LegalInstrument? @relation("LegalChangeEventAffectedInstrument", fields: [affectedInstrumentId], references: [id])
+
+  affectedProvisionId String?
+  affectedProvision   LegalProvisionReference? @relation("LegalChangeEventAffectedProvision", fields: [affectedProvisionId], references: [id])
+
+  sourceVersionId String?
+  sourceVersion   LegalInstrumentVersion? @relation("LegalChangeEventSourceVersion", fields: [sourceVersionId], references: [id])
+  sourceHash      String?
+
+  detectedAt  DateTime
+  effectiveAt DateTime?
+  rawEvidence Json
+  dedupeKey   String
+
+  status LegalChangeEventStatus @default(DETECTED)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([providerId, dedupeKey])
+  @@index([providerId, detectedAt])
+  @@index([status])
+}
