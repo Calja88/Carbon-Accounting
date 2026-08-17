@@ -73,6 +73,9 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   "external_provider_evaluation",
   "communication_record",
   "emergency_exercise",
+  // Applicability workflow (task T43). Callers resolve the assessment in
+  // the tenant repository before linking.
+  "applicability_assessment",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 
