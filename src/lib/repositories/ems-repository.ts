@@ -188,6 +188,27 @@ export async function findTenantApplicabilityAssessment(ctx: TenantRepositoryCon
   return assertOwned(ctx, row);
 }
 
+/** Loads a T44 compliance obligation only inside the current organisation. */
+export async function findTenantComplianceObligation(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.complianceObligation.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads one exact T44 compliance obligation version only inside the current
+ * organisation, and (when `expectedObligationId` is supplied) attached to
+ * that exact obligation — the nested-parent-substitution guard.
+ */
+export async function findTenantComplianceObligationVersion(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedObligationId?: string,
+) {
+  const row = await prisma.complianceObligationVersion.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedObligationId, "obligationId");
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain

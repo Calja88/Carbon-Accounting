@@ -238,6 +238,14 @@ model Organisation {
   applicabilityAssessments      ApplicabilityAssessment[]
   applicabilityAssessmentScopes ApplicabilityAssessmentScope[]
 
+  // Compliance obligation versioning and approval (T44).
+  complianceObligations               ComplianceObligation[]
+  complianceObligationVersions        ComplianceObligationVersion[]
+  complianceObligationVersionScopes   ComplianceObligationVersionScope[]
+  complianceObligationVersionControls ComplianceObligationVersionControl[]
+  complianceObligationApprovals       ComplianceObligationApproval[]
+  obligationChangeReviews             ObligationChangeReview[]
+
   @@index([status])
 }
 
@@ -306,6 +314,11 @@ model OrganisationMembership {
   assessedApplicabilityAssessments ApplicabilityAssessment[] @relation("ApplicabilityAssessmentAssessedBy")
   reviewedApplicabilityAssessments ApplicabilityAssessment[] @relation("ApplicabilityAssessmentReviewedBy")
   followUpApplicabilityAssessments ApplicabilityAssessment[] @relation("ApplicabilityAssessmentFollowUpOwner")
+
+  // Compliance obligation versioning and approval (T44).
+  ownedComplianceObligationVersions ComplianceObligationVersion[]  @relation("ComplianceObligationVersionOwner")
+  complianceObligationApprovals     ComplianceObligationApproval[] @relation("ComplianceObligationApprovalApprover")
+  obligationChangeReviews           ObligationChangeReview[]       @relation("ObligationChangeReviewReviewer")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -440,6 +453,9 @@ model Entity {
   // Legal applicability assessment scopes (T43).
   applicabilityAssessmentScopes ApplicabilityAssessmentScope[]
 
+  // Compliance obligation version scopes (T44).
+  complianceObligationVersionScopes ComplianceObligationVersionScope[]
+
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy global-unique Entity name —
   // two organisations may now use the same Entity name.
@@ -490,6 +506,9 @@ model Site {
 
   // Legal applicability assessment scopes (T43).
   applicabilityAssessmentScopes ApplicabilityAssessmentScope[]
+
+  // Compliance obligation version scopes (T44).
+  complianceObligationVersionScopes ComplianceObligationVersionScope[]
 
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy [entityId, name] unique —
@@ -3345,6 +3364,9 @@ model EnvironmentalAspect {
   // Legal applicability assessment scopes (T43).
   applicabilityAssessmentScopes ApplicabilityAssessmentScope[]
 
+  // Compliance obligation version scopes (T44).
+  complianceObligationVersionScopes ComplianceObligationVersionScope[]
+
   @@unique([organisationId, id])
   @@index([organisationId, processId])
   @@index([organisationId, operatingCondition])
@@ -3575,6 +3597,9 @@ model OperationalControl {
   aspectLinks     OperationalControlAspect[]
   applicabilities ControlApplicability[]
   checks          ControlCheck[]
+
+  // Compliance obligation version control links (T44).
+  complianceObligationVersionLinks ComplianceObligationVersionControl[]
 
   @@unique([organisationId, id])
   @@unique([organisationId, controlKey, version])
@@ -4538,6 +4563,9 @@ model LegalInstrument {
   // Organisation-owned applicability decisions against this instrument (T43).
   applicabilityAssessments ApplicabilityAssessment[]
 
+  // Organisation-owned compliance obligation versions sourced from this instrument (T44).
+  complianceObligationVersions ComplianceObligationVersion[]
+
   @@unique([providerId, canonicalId])
   @@index([status])
 }
@@ -4617,6 +4645,9 @@ model LegalProvisionReference {
 
   affectedByEvents LegalChangeEvent[] @relation("LegalChangeEventAffectedProvision")
 
+  // Organisation-owned compliance obligation versions citing this provision (T44).
+  complianceObligationVersions ComplianceObligationVersion[]
+
   @@unique([instrumentId, providerProvisionId])
 }
 
@@ -4666,6 +4697,9 @@ model LegalChangeEvent {
 
   // Organisation-owned applicability decisions prompted by this event (T43).
   applicabilityAssessments ApplicabilityAssessment[]
+
+  // Organisation-owned obligation-change reviews prompted by this event (T44).
+  obligationChangeReviews ObligationChangeReview[]
 
   @@unique([providerId, dedupeKey])
   @@index([providerId, detectedAt])
@@ -4755,6 +4789,9 @@ model ApplicabilityAssessment {
 
   scopes ApplicabilityAssessmentScope[]
 
+  // Compliance obligation versions created from this decided assessment (T44).
+  complianceObligationVersions ComplianceObligationVersion[]
+
   @@unique([organisationId, id])
   @@unique([organisationId, supersedesAssessmentId])
   @@index([organisationId, instrumentId, status])
@@ -4793,4 +4830,252 @@ model ApplicabilityAssessmentScope {
   @@index([organisationId, siteId])
   @@index([organisationId, processId])
   @@index([organisationId, aspectId])
+}
+
+// ---------------------------------------------------------------------------
+// Compliance obligation versioning and approval (task T44,
+// Docs/PHASE4_LEGAL_COMPLIANCE_SPEC.md §§1-2,5,9). Organisation-owned, same
+// shape family as T22 ControlledDocument/ControlledDocumentRevision:
+// `ComplianceObligation` is a stable reference that only ever points at the
+// current *active* version; `ComplianceObligationVersion` carries the actual
+// content and only ever becomes ACTIVE through `approveComplianceObligationVersion`
+// (obligation-service.ts), which is the one place the active pointer moves.
+//
+// State machine (spec §2): DRAFT -> IN_REVIEW -> APPROVED -> ACTIVE ->
+// SUPERSEDED / RETIRED, with an IN_REVIEW -> REJECTED branch and an
+// IN_REVIEW -> DRAFT "returned for revision" branch. A version that has left
+// DRAFT/IN_REVIEW is never edited in place (T44 acceptance: "approved record
+// immutable; edits create successor") — the migration's
+// `compliance_obligation_version_immutable_once_approved` trigger is
+// defence-in-depth for that rule, mirroring T22's controlled-document
+// trigger exactly.
+//
+// `ComplianceObligationApproval` is the append-only decision log the spec
+// §5 asks for in addition to the denormalised `approvedByUserId`/
+// `approvedAt` columns on the version itself — it is never updated or
+// deleted, so "every decision audited" holds for REJECTED/RETURNED
+// decisions too, not just the one that ends up ACTIVE.
+// ---------------------------------------------------------------------------
+
+enum ComplianceObligationVersionStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  ACTIVE
+  SUPERSEDED
+  RETIRED
+  REJECTED
+}
+
+enum ComplianceObligationApprovalDecision {
+  APPROVED
+  REJECTED
+  RETURNED
+}
+
+enum ObligationChangeReviewDecision {
+  NO_CHANGE
+  REVISE
+  RETIRE
+  SEEK_ADVICE
+}
+
+/// Stable reference to one compliance obligation. Never carries obligation
+/// content itself — only the pointer to whichever `ComplianceObligationVersion`
+/// is currently ACTIVE, so "active pointer changes only inside approval
+/// transaction" (spec §5) is enforced by there being exactly one write site
+/// for `activeVersionId` (`approveComplianceObligationVersion`).
+model ComplianceObligation {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  activeVersionId String?                   @unique
+  activeVersion   ComplianceObligationVersion? @relation("ComplianceObligationActiveVersion", fields: [organisationId, activeVersionId], references: [organisationId, id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions ComplianceObligationVersion[] @relation("ComplianceObligationVersions")
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, activeVersionId])
+  @@index([organisationId])
+}
+
+/// One version of one compliance obligation's content — title, requirement
+/// summary, source/provisions, owner, frequency/trigger, effective/review
+/// dates and controls/aspects/sites/entities scope (spec §5). Only created
+/// from an `APPLICABLE` `ApplicabilityAssessment` (T44 acceptance: "create
+/// obligations from applicable sources") — `applicabilityAssessmentId` is
+/// required, not optional, so that link can never be skipped.
+model ComplianceObligationVersion {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  obligationId String
+  obligation   ComplianceObligation @relation("ComplianceObligationVersions", fields: [organisationId, obligationId], references: [organisationId, id])
+  version      Int
+
+  title              String
+  requirementSummary String
+
+  // Source/provisions this obligation traces to (spec §5).
+  instrumentId String
+  instrument   LegalInstrument @relation(fields: [instrumentId], references: [id])
+
+  provisionReferenceId String?
+  provisionReference   LegalProvisionReference? @relation(fields: [provisionReferenceId], references: [id])
+
+  applicabilityAssessmentId String
+  applicabilityAssessment   ApplicabilityAssessment @relation(fields: [organisationId, applicabilityAssessmentId], references: [organisationId, id], onDelete: Restrict)
+
+  ownerMembershipId String
+  owner             OrganisationMembership @relation("ComplianceObligationVersionOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  frequency          String?
+  triggerDescription String?
+
+  effectiveFrom DateTime?
+  reviewDueDate DateTime?
+
+  status ComplianceObligationVersionStatus @default(DRAFT)
+
+  preparedByUserId String
+  preparedAt       DateTime @default(now())
+
+  // Denormalised for fast reads — the authoritative decision history lives
+  // in `ComplianceObligationApproval` (append-only, includes REJECTED/
+  // RETURNED decisions this pair of columns cannot represent).
+  approvedByUserId String?
+  approvedAt       DateTime?
+
+  supersedesVersionId String?
+  supersedesVersion   ComplianceObligationVersion? @relation("ComplianceObligationVersionSuccessor", fields: [organisationId, supersedesVersionId], references: [organisationId, id])
+  successorVersion    ComplianceObligationVersion? @relation("ComplianceObligationVersionSuccessor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activeForObligation ComplianceObligation? @relation("ComplianceObligationActiveVersion")
+
+  scopes           ComplianceObligationVersionScope[]
+  controlLinks     ComplianceObligationVersionControl[]
+  approvals        ComplianceObligationApproval[]
+  changeReviews    ObligationChangeReview[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, obligationId, version])
+  @@unique([organisationId, supersedesVersionId])
+  @@index([organisationId, obligationId, status])
+  @@index([organisationId, status])
+  @@index([organisationId, instrumentId])
+  @@index([organisationId, ownerMembershipId])
+}
+
+/// One Entity/Site/Aspect a compliance obligation version applies to (spec
+/// §5 "controls/aspects/sites/entities"). Exactly one of the three columns
+/// is set per row, the same one-of-N shape as `ApplicabilityAssessmentScope`.
+model ComplianceObligationVersionScope {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  obligationVersionId String
+  obligationVersion   ComplianceObligationVersion @relation(fields: [organisationId, obligationVersionId], references: [organisationId, id], onDelete: Cascade)
+
+  entityId String?
+  entity   Entity?              @relation(fields: [organisationId, entityId], references: [organisationId, id], onDelete: Restrict)
+  siteId   String?
+  site     Site?                @relation(fields: [organisationId, siteId], references: [organisationId, id], onDelete: Restrict)
+  aspectId String?
+  aspect   EnvironmentalAspect? @relation(fields: [organisationId, aspectId], references: [organisationId, id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, obligationVersionId, entityId, siteId, aspectId], map: "ComplianceObligationVersionScope_scope_key")
+  @@index([organisationId, obligationVersionId])
+  @@index([organisationId, entityId])
+  @@index([organisationId, siteId])
+  @@index([organisationId, aspectId])
+}
+
+/// Links a compliance obligation version to the T33 operational control(s)
+/// that discharge it (spec §5 "controls").
+model ComplianceObligationVersionControl {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  obligationVersionId String
+  obligationVersion   ComplianceObligationVersion @relation(fields: [organisationId, obligationVersionId], references: [organisationId, id], onDelete: Cascade)
+
+  controlId String
+  control   OperationalControl @relation(fields: [organisationId, controlId], references: [organisationId, id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, obligationVersionId, controlId], map: "ComplianceObligationVersionControl_link_key")
+  @@index([organisationId, obligationVersionId])
+  @@index([organisationId, controlId])
+}
+
+/// Append-only exact-version approval decision (spec §5). Never updated or
+/// deleted — a returned-for-revision or rejected decision stays visible
+/// history alongside whichever later decision eventually approves a
+/// successor version. `permissionCode` snapshots which permission gated
+/// this decision at the time it was made, independent of later catalogue
+/// changes.
+model ComplianceObligationApproval {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  obligationVersionId String
+  obligationVersion   ComplianceObligationVersion @relation(fields: [organisationId, obligationVersionId], references: [organisationId, id], onDelete: Cascade)
+
+  decision       ComplianceObligationApprovalDecision
+  permissionCode String
+  comment        String?
+
+  approverMembershipId String
+  approver              OrganisationMembership @relation("ComplianceObligationApprovalApprover", fields: [organisationId, approverMembershipId], references: [organisationId, id], onDelete: Restrict)
+  decidedAt             DateTime               @default(now())
+
+  @@index([organisationId, obligationVersionId])
+  @@index([organisationId, approverMembershipId])
+}
+
+/// Records a competent user's review of the impact of one `LegalChangeEvent`
+/// on one existing compliance obligation version (spec §5, and spec §1
+/// "an upstream amendment never silently edits an approved obligation; it
+/// opens a review candidate"). This table is that review candidate: a
+/// REVISE/RETIRE/SEEK_ADVICE decision here never itself edits the obligation
+/// version — a human still has to act on it through the normal successor-
+/// version/retire functions, so the source change never directly changes an
+/// active obligation.
+model ObligationChangeReview {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  changeEventId String
+  changeEvent   LegalChangeEvent @relation(fields: [changeEventId], references: [id])
+
+  obligationVersionId String
+  obligationVersion   ComplianceObligationVersion @relation(fields: [organisationId, obligationVersionId], references: [organisationId, id], onDelete: Cascade)
+
+  impactAssessment String
+  decision         ObligationChangeReviewDecision?
+
+  reviewerMembershipId String
+  reviewer              OrganisationMembership @relation("ObligationChangeReviewReviewer", fields: [organisationId, reviewerMembershipId], references: [organisationId, id], onDelete: Restrict)
+  reviewedAt            DateTime               @default(now())
+  followUpDate          DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([organisationId, obligationVersionId])
+  @@index([organisationId, changeEventId])
 }
