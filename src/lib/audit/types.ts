@@ -88,6 +88,19 @@ export const AUDIT_EVENT_TYPES = [
   "operational_control.revised",
   "operational_control.retired",
   "control_check.recorded",
+  // External providers, communications and emergency preparedness (task T35).
+  "external_provider_control.created",
+  "external_provider_control.status_changed",
+  "external_provider_evaluation.recorded",
+  "communication_plan.created",
+  "communication_plan.status_changed",
+  "communication_record.created",
+  "emergency_scenario.created",
+  "emergency_scenario.status_changed",
+  "emergency_plan.created",
+  "emergency_plan.revised",
+  "emergency_exercise.recorded",
+  "emergency_exercise_action.recorded",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -120,7 +133,14 @@ export type AuditResourceType =
   | "significance_method"
   | "aspect_assessment"
   | "operational_control"
-  | "control_check";
+  | "control_check"
+  | "external_provider_control"
+  | "external_provider_evaluation"
+  | "communication_plan"
+  | "communication_record"
+  | "emergency_scenario"
+  | "emergency_plan"
+  | "emergency_exercise";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

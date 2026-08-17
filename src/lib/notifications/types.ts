@@ -47,6 +47,8 @@ const RESOURCE_TYPE_LABELS: Record<string, string> = {
   audit_report: "an internal audit report",
   competence_record: "a competence record",
   operational_control: "an operational control",
+  external_provider_control: "an external-provider control",
+  emergency_plan: "an emergency plan",
 };
 
 function resourceLabel(resourceType: string): string {

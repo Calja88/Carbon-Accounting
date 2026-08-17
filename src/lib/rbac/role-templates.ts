@@ -50,6 +50,17 @@
  *    to withhold. Worth confirming with the product owner given the
  *    maker-checker pattern used elsewhere (LCA versions, compliance
  *    obligations).
+ *  - T35 (external providers/communications/emergency preparedness) added
+ *    three permission codes at T31 catalogue time that no template granted
+ *    yet: `ems.communication.manage`, `ems.emergency_plan.manage`,
+ *    `ems.emergency_exercise.record`. Following the same "manage vs
+ *    contribute" split used for EMS_ASPECTS_EDIT/EMS_ASPECTS_APPROVE, the
+ *    two "manage" codes (communications, plans) are granted only to
+ *    Sustainability Lead; `ems.emergency_exercise.record` — day-to-day
+ *    drill recording — is also granted to EMS Contributor and Site Manager.
+ *    Provider controls reuse `ems.control.manage` per Phase 3 spec §4, so no
+ *    new code or template change was needed for that part. Flagged here as
+ *    an owner decision to confirm, same as the AI-governance note above.
  */
 
 // Type-only: RoleTemplateKey is never read as a runtime value in this file —
@@ -85,6 +96,9 @@ const EMS_INCIDENT_WORK = ["ems.incident.report", "ems.nonconformity.manage", "e
 const EMS_INCIDENT_MANAGE = [...EMS_INCIDENT_WORK, "ems.incident.manage", "ems.corrective_action.effectiveness_review"];
 const EMS_AUDIT_MANAGE = ["ems.audit_programme.manage", "ems.audit.perform", "ems.audit_report.issue"];
 const EMS_DOCUMENT_MANAGE = ["ems.controlled_document.manage"];
+// T35: provider controls reuse ems.control.manage per Phase 3 spec §4 — no
+// separate provider permission code exists.
+const EMS_COMMUNICATIONS_EMERGENCY_MANAGE = ["ems.communication.manage", "ems.emergency_plan.manage", "ems.emergency_exercise.record"];
 
 export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
   {
@@ -116,6 +130,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       "ems.management_review.approve",
       ...EMS_DOCUMENT_MANAGE,
       "ems.controlled_document.approve",
+      ...EMS_COMMUNICATIONS_EMERGENCY_MANAGE,
       "ems.notification.manage",
       "audit.view",
       "ai.use",
@@ -141,6 +156,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       ...EMS_INCIDENT_WORK,
       "ems.competence.view",
       ...EMS_DOCUMENT_MANAGE,
+      "ems.emergency_exercise.record",
       "ems.notification.manage",
       "ai.use",
     ],
@@ -164,6 +180,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       ...EMS_INCIDENT_WORK,
       "ems.competence.view",
       ...EMS_DOCUMENT_MANAGE,
+      "ems.emergency_exercise.record",
       "ai.use",
     ],
   },
