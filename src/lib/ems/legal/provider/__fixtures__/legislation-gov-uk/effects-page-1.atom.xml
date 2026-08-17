@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:leg="https://www.legislation.gov.uk/namespaces/legislation">
+  <id>https://www.legislation.gov.uk/changes/data.feed</id>
+  <title>Changes to legislation</title>
+  <updated>2026-01-06T00:00:00Z</updated>
+  <link rel="self" href="https://www.legislation.gov.uk/changes/data.feed?page=1"/>
+  <entry>
+    <id>https://www.legislation.gov.uk/changes/effect/77001</id>
+    <title>reg. 4 amended</title>
+    <updated>2026-01-06T08:00:00Z</updated>
+    <leg:affectedURI>https://www.legislation.gov.uk/id/uksi/2020/1</leg:affectedURI>
+    <leg:affectingURI>https://www.legislation.gov.uk/id/ukpga/2026/2</leg:affectingURI>
+    <leg:type>amendment</leg:type>
+    <leg:appliedDate>2026-02-01</leg:appliedDate>
+  </entry>
+  <entry>
+    <id>https://www.legislation.gov.uk/changes/effect/77002</id>
+    <title>reg. 7 commencement</title>
+    <updated>2026-01-06T09:00:00Z</updated>
+    <leg:affectedURI>https://www.legislation.gov.uk/id/uksi/2026/1</leg:affectedURI>
+    <leg:affectingURI>https://www.legislation.gov.uk/id/uksi/2026/1</leg:affectingURI>
+    <leg:type>commencement</leg:type>
+    <leg:appliedDate>2026-03-01</leg:appliedDate>
+  </entry>
+</feed>

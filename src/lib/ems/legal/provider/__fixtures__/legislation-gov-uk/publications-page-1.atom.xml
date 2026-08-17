@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <id>https://www.legislation.gov.uk/new/data.feed</id>
+  <title>New legislation</title>
+  <updated>2026-01-05T00:00:00Z</updated>
+  <link rel="self" href="https://www.legislation.gov.uk/new/data.feed?page=1"/>
+  <link rel="next" href="https://www.legislation.gov.uk/new/data.feed?page=2"/>
+  <entry>
+    <id>https://www.legislation.gov.uk/id/uksi/2026/1</id>
+    <title>The Example (Amendment) Regulations 2026</title>
+    <updated>2026-01-04T10:00:00Z</updated>
+    <published>2026-01-02T00:00:00Z</published>
+    <link rel="alternate" href="https://www.legislation.gov.uk/uksi/2026/1"/>
+    <dc:type>UnitedKingdomStatutoryInstrument</dc:type>
+    <dc:identifier>https://www.legislation.gov.uk/id/uksi/2026/1</dc:identifier>
+  </entry>
+  <entry>
+    <id>https://www.legislation.gov.uk/id/ukpga/2026/2</id>
+    <title>Example Act 2026</title>
+    <updated>2026-01-05T09:00:00Z</updated>
+    <published>2026-01-05T00:00:00Z</published>
+    <link rel="alternate" href="https://www.legislation.gov.uk/ukpga/2026/2"/>
+    <dc:type>UnitedKingdomPublicGeneralAct</dc:type>
+    <dc:identifier>https://www.legislation.gov.uk/id/ukpga/2026/2</dc:identifier>
+  </entry>
+</feed>
