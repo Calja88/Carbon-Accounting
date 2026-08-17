@@ -1,0 +1,6 @@
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>https://www.legislation.gov.uk/new/data.feed</id>
+  <title>New legislation</title>
+  <entry>
+    <id>https://www.legislation.gov.uk/id/uksi/2026/9
+    <title>Truncated entry with an unclosed tag

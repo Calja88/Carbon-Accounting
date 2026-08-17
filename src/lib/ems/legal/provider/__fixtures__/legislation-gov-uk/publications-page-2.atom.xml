@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <id>https://www.legislation.gov.uk/new/data.feed?page=2</id>
+  <title>New legislation</title>
+  <updated>2026-01-01T00:00:00Z</updated>
+  <link rel="self" href="https://www.legislation.gov.uk/new/data.feed?page=2"/>
+  <entry>
+    <id>https://www.legislation.gov.uk/id/ssi/2025/300</id>
+    <title>The Example (Scotland) Regulations 2025</title>
+    <updated>2025-12-30T12:00:00Z</updated>
+    <published>2025-12-29T00:00:00Z</published>
+    <link rel="alternate" href="https://www.legislation.gov.uk/ssi/2025/300"/>
+    <dc:type>ScottishStatutoryInstrument</dc:type>
+    <dc:identifier>https://www.legislation.gov.uk/id/ssi/2025/300</dc:identifier>
+  </entry>
+</feed>
