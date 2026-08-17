@@ -106,6 +106,15 @@ export const AUDIT_EVENT_TYPES = [
   "applicability_assessment.submitted_for_review",
   "applicability_assessment.decided",
   "applicability_assessment.superseded",
+  // Compliance obligation versioning and approval (task T44).
+  "compliance_obligation_version.created",
+  "compliance_obligation_version.submitted_for_review",
+  "compliance_obligation_version.approved",
+  "compliance_obligation_version.rejected",
+  "compliance_obligation_version.returned",
+  "compliance_obligation_version.superseded",
+  "compliance_obligation_version.retired",
+  "obligation_change_review.recorded",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -146,7 +155,9 @@ export type AuditResourceType =
   | "emergency_scenario"
   | "emergency_plan"
   | "emergency_exercise"
-  | "applicability_assessment";
+  | "applicability_assessment"
+  | "compliance_obligation_version"
+  | "obligation_change_review";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept
