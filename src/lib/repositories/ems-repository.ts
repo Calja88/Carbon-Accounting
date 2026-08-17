@@ -131,6 +131,57 @@ export async function findTenantControlCheck(ctx: TenantRepositoryContext, id: s
   return assertOwned(ctx, row);
 }
 
+/** Loads a T35 external-provider control only inside the current organisation. */
+export async function findTenantExternalProviderControl(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.externalProviderControl.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/** Loads a T35 external-provider evaluation only inside the current organisation. */
+export async function findTenantExternalProviderEvaluation(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.externalProviderEvaluation.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/** Loads a T35 communication plan only inside the current organisation. */
+export async function findTenantCommunicationPlan(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.communicationPlan.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/** Loads a T35 communication record only inside the current organisation. */
+export async function findTenantCommunicationRecord(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.communicationRecord.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/** Loads a T35 emergency scenario only inside the current organisation. */
+export async function findTenantEmergencyScenario(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.emergencyScenario.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads one exact T35 emergency-plan version only inside the current
+ * organisation, and (when `expectedScenarioId` is supplied) attached to that
+ * exact scenario — the nested-parent-substitution guard.
+ */
+export async function findTenantEmergencyPlan(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedScenarioId?: string,
+) {
+  const row = await prisma.emergencyPlan.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedScenarioId, "scenarioId");
+}
+
+/** Loads a T35 emergency exercise only inside the current organisation. */
+export async function findTenantEmergencyExercise(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.emergencyExercise.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain

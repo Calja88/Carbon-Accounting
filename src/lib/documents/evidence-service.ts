@@ -67,6 +67,12 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   // Operational-control review evidence (task T33). Callers resolve the
   // check in the tenant repository before linking.
   "control_check",
+  // External providers, communications and emergency preparedness (task
+  // T35). Callers resolve each record in the tenant repository before
+  // linking.
+  "external_provider_evaluation",
+  "communication_record",
+  "emergency_exercise",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 

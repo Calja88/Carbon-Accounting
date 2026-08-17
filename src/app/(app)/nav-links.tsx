@@ -20,6 +20,8 @@ import {
   Workflow,
   Leaf,
   ShieldCheck,
+  MessageSquare,
+  Siren,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -55,6 +57,9 @@ const MORE_ITEMS: NavItem[] = [
   { href: "/ems/processes", label: "EMS process profiles", icon: Workflow },
   { href: "/ems/aspects", label: "EMS aspect register", icon: Leaf },
   { href: "/ems/controls", label: "EMS operational controls", icon: ShieldCheck },
+  { href: "/ems/providers", label: "EMS external providers", icon: Truck },
+  { href: "/ems/communications", label: "EMS communications", icon: MessageSquare },
+  { href: "/ems/emergency", label: "EMS emergency preparedness", icon: Siren },
   { href: "/help/lca", label: "Product LCA guidance", icon: HelpCircle },
 ];
 

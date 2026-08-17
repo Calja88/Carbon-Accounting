@@ -223,6 +223,17 @@ model Organisation {
   controlApplicabilities    ControlApplicability[]
   controlChecks             ControlCheck[]
 
+  // External providers, communications and emergency preparedness (T35).
+  externalProviderControls       ExternalProviderControl[]
+  externalProviderControlAspects ExternalProviderControlAspect[]
+  externalProviderEvaluations    ExternalProviderEvaluation[]
+  communicationPlans             CommunicationPlan[]
+  communicationRecords           CommunicationRecord[]
+  emergencyScenarios             EmergencyScenario[]
+  emergencyPlans                 EmergencyPlan[]
+  emergencyExercises             EmergencyExercise[]
+  emergencyExerciseActions       EmergencyExerciseAction[]
+
   @@index([status])
 }
 
@@ -278,6 +289,14 @@ model OrganisationMembership {
   // Operational-control ownership and check review (T33).
   ownedOperationalControls OperationalControl[] @relation("OperationalControlOwner")
   reviewedControlChecks    ControlCheck[]       @relation("ControlCheckReviewer")
+
+  // External providers, communications and emergency preparedness (T35).
+  ownedExternalProviderControls ExternalProviderControl[]    @relation("ExternalProviderControlOwner")
+  reviewedExternalProviderEvals ExternalProviderEvaluation[] @relation("ExternalProviderEvaluationReviewer")
+  ownedCommunicationPlans       CommunicationPlan[]          @relation("CommunicationPlanOwner")
+  sentCommunicationRecords      CommunicationRecord[]        @relation("CommunicationRecordSender")
+  approvedCommunicationRecords  CommunicationRecord[]        @relation("CommunicationRecordApprover")
+  ownedEmergencyExerciseActions EmergencyExerciseAction[]    @relation("EmergencyExerciseActionOwner")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -454,6 +473,9 @@ model Site {
   // Operational-control applicability (T33).
   controlApplicabilities ControlApplicability[]
 
+  // Emergency preparedness scenarios (T35).
+  emergencyScenarios EmergencyScenario[]
+
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy [entityId, name] unique —
   // now organisation-scoped too, matching Entity's own constraint above.
@@ -520,6 +542,11 @@ model User {
   approvedChangeAssessments     ChangeAssessment[]          @relation("ChangeAssessmentApprovedBy")
   approvedEnvironmentalPolicies EnvironmentalPolicyRecord[] @relation("EnvironmentalPolicyRecordApprovedBy")
   operationalControls           OperationalControl[]
+
+  // External providers, communications and emergency preparedness (T35).
+  createdExternalProviderControls ExternalProviderControl[]
+  createdEmergencyPlans           EmergencyPlan[]
+  recordedEmergencyExercises      EmergencyExercise[]
 }
 
 // ---------------------------------------------------------------------------
@@ -2349,6 +2376,11 @@ model ControlledDocumentRevision {
   // Exact procedure revision pinned by an operational-control version (T33).
   operationalControls OperationalControl[]
 
+  // Exact revision pinned by an emergency-plan version, and approved-content
+  // references from external communication records (T35).
+  emergencyPlans       EmergencyPlan[]
+  communicationRecords CommunicationRecord[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -3249,6 +3281,7 @@ model ActivityProcess {
 
   environmentalAspects   EnvironmentalAspect[]
   controlApplicabilities ControlApplicability[]
+  emergencyScenarios     EmergencyScenario[]
 
   @@unique([organisationId, id])
   @@index([organisationId, programmeId, status])
@@ -3286,6 +3319,10 @@ model EnvironmentalAspect {
   impactLinks             AspectImpactLink[]
   assessments             AspectAssessment[]
   operationalControlLinks OperationalControlAspect[]
+
+  // External providers and emergency preparedness (T35).
+  externalProviderControlLinks ExternalProviderControlAspect[]
+  emergencyScenarios           EmergencyScenario[]
 
   @@unique([organisationId, id])
   @@index([organisationId, processId])
@@ -3585,6 +3622,361 @@ model ControlCheck {
   @@unique([organisationId, id])
   @@index([organisationId, controlId, scheduledAt])
   @@index([organisationId, result])
+}
+
+// ---------------------------------------------------------------------------
+// External providers, communications and emergency preparedness (task T35,
+// Docs/PHASE3_ASPECTS_OPERATIONS_SPEC.md §2 "Communications and emergency
+// preparedness", §5 "External-provider controls/evaluations"). Continues the
+// T33 pattern exactly: a provider control/emergency plan is a versioned,
+// owner-reviewed record; an emergency plan revision is always a controlled
+// document; exercise records never fabricate real contact details and never
+// auto-create an incident/nonconformity — Phase 6 (T60-T64) owns those
+// models, so any such link here stays a plain task-local text reference,
+// same convention as ControlCheck.actionReference above.
+// ---------------------------------------------------------------------------
+
+enum ExternalProviderControlStatus {
+  ACTIVE
+  SUSPENDED
+  RETIRED
+}
+
+enum ExternalProviderEvaluationResult {
+  PASS
+  CONDITIONAL
+  FAIL
+}
+
+enum CommunicationAudience {
+  INTERNAL
+  EXTERNAL
+  BOTH
+}
+
+enum CommunicationPlanStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum EmergencyScenarioPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum EmergencyScenarioStatus {
+  ACTIVE
+  RETIRED
+}
+
+enum EmergencyPlanStatus {
+  DRAFT
+  ACTIVE
+  SUPERSEDED
+  RETIRED
+}
+
+enum EmergencyExerciseType {
+  TABLETOP
+  DRILL
+  FULL_SCALE
+}
+
+enum EmergencyExerciseOutcome {
+  SUCCESSFUL
+  PARTIAL
+  FAILED
+}
+
+enum EmergencyExerciseActionStatus {
+  OPEN
+  COMPLETE
+}
+
+/// A value-chain provider whose activity affects an aspect, and the
+/// communicated environmental requirements/evaluation cadence for it.
+/// `providerReference` is the same stable identifier T33's
+/// `ControlApplicability.externalProviderReference` was left as a
+/// task-local text hook for — this is where that reference now resolves to
+/// a real, permission-checked record.
+model ExternalProviderControl {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  providerReference        String
+  providerName             String
+  providedDescription      String
+  communicatedRequirements String
+  evaluationFrequency      String
+  status                   ExternalProviderControlStatus @default(ACTIVE)
+
+  ownerMembershipId String
+  owner             OrganisationMembership @relation("ExternalProviderControlOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id])
+
+  lastReviewedAt    DateTime?
+  nextReviewDueDate DateTime
+
+  createdByUserId String?
+  createdBy       User?    @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  aspectLinks ExternalProviderControlAspect[]
+  evaluations ExternalProviderEvaluation[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, providerReference])
+  @@index([organisationId, status, nextReviewDueDate])
+}
+
+model ExternalProviderControlAspect {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  providerControlId String
+  providerControl   ExternalProviderControl @relation(fields: [organisationId, providerControlId], references: [organisationId, id], onDelete: Cascade)
+  aspectId          String
+  aspect            EnvironmentalAspect     @relation(fields: [organisationId, aspectId], references: [organisationId, id], onDelete: Cascade)
+  createdAt         DateTime                @default(now())
+
+  @@unique([organisationId, providerControlId, aspectId], map: "ExternalProviderControlAspect_provider_aspect_key")
+  @@index([organisationId, aspectId])
+}
+
+/// One evaluation event against a snapshot of the provider's criteria at
+/// evaluation time — never overwrites a prior evaluation.
+model ExternalProviderEvaluation {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  providerControlId String
+  providerControl   ExternalProviderControl @relation(fields: [organisationId, providerControlId], references: [organisationId, id])
+
+  evaluatedAt      DateTime
+  criteriaSnapshot Json
+  result           ExternalProviderEvaluationResult
+  notes            String?
+  actionReference  String?
+
+  reviewerMembershipId String
+  reviewer             OrganisationMembership @relation("ExternalProviderEvaluationReviewer", fields: [organisationId, reviewerMembershipId], references: [organisationId, id], onDelete: Restrict)
+  createdAt            DateTime               @default(now())
+
+  @@unique([organisationId, id])
+  @@index([organisationId, providerControlId, evaluatedAt])
+}
+
+/// A planned internal/external environmental communication — subject,
+/// audience, method, and whether content requires approval before an
+/// actual CommunicationRecord may reference it.
+model CommunicationPlan {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  subject            String
+  audience           CommunicationAudience
+  triggerFrequency   String
+  method             String
+  approvalRequired   Boolean                 @default(false)
+  sourceRequirements String?
+  status             CommunicationPlanStatus @default(ACTIVE)
+
+  ownerMembershipId String
+  owner             OrganisationMembership @relation("CommunicationPlanOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  records        CommunicationRecord[]
+  emergencyPlans EmergencyPlan[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, status])
+}
+
+/// A single occurred communication. When the linked plan requires approval
+/// (T35 acceptance: "external communications follow configured approval"),
+/// the service layer requires `approverMembershipId`/`approvedAt` to be set
+/// before the record may be created — never mutated onto an existing row.
+model CommunicationRecord {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  planId String?
+  plan   CommunicationPlan? @relation(fields: [organisationId, planId], references: [organisationId, id], onDelete: Restrict)
+
+  occurredAt     DateTime
+  audience       CommunicationAudience
+  parties        String
+  contentSummary String
+
+  approvedContentRevisionId String?
+  approvedContentRevision   ControlledDocumentRevision? @relation(fields: [organisationId, approvedContentRevisionId], references: [organisationId, id], onDelete: Restrict)
+
+  senderMembershipId String
+  sender             OrganisationMembership @relation("CommunicationRecordSender", fields: [organisationId, senderMembershipId], references: [organisationId, id])
+
+  approverMembershipId String?
+  approver             OrganisationMembership? @relation("CommunicationRecordApprover", fields: [organisationId, approverMembershipId], references: [organisationId, id], onDelete: Restrict)
+  approvedAt           DateTime?
+
+  responseFollowUp String?
+  createdAt        DateTime @default(now())
+
+  @@unique([organisationId, id])
+  @@index([organisationId, planId])
+  @@index([organisationId, occurredAt])
+}
+
+/// A credible emergency scenario linked to the aspect/process/site it
+/// arises from. `controlsSummary` is a plain description — the scenario's
+/// actual operational controls remain queryable through its linked aspect's
+/// own OperationalControlAspect links rather than a duplicate join table.
+model EmergencyScenario {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  aspectId  String?
+  aspect    EnvironmentalAspect? @relation(fields: [organisationId, aspectId], references: [organisationId, id], onDelete: Restrict)
+  processId String?
+  process   ActivityProcess?     @relation(fields: [organisationId, processId], references: [organisationId, id], onDelete: Restrict)
+  siteId    String?
+  site      Site?                @relation(fields: [organisationId, siteId], references: [organisationId, id], onDelete: Restrict)
+
+  name                String
+  triggerDescription  String
+  receptors           String
+  credibleConsequence String
+  priority            EmergencyScenarioPriority
+  controlsSummary     String?
+  reviewDueDate       DateTime
+  status              EmergencyScenarioStatus   @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plans     EmergencyPlan[]
+  exercises EmergencyExercise[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, status, reviewDueDate])
+}
+
+/// A versioned emergency plan for a scenario. Follows the OperationalControl
+/// versioning pattern exactly: `controlledDocumentRevisionId` is mandatory
+/// (T35 acceptance: "emergency plan revisions are controlled documents") and
+/// a revision creates a new row via `supersedesPlanId`, never a mutation.
+/// `roles` records role labels/responsibilities only — never a real name,
+/// phone number or address, per the "no fabricated contact details" rule.
+model EmergencyPlan {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  scenarioId String
+  scenario   EmergencyScenario @relation(fields: [organisationId, scenarioId], references: [organisationId, id])
+
+  version Int
+  status  EmergencyPlanStatus @default(ACTIVE)
+
+  controlledDocumentRevisionId String
+  controlledDocumentRevision   ControlledDocumentRevision @relation(fields: [organisationId, controlledDocumentRevisionId], references: [organisationId, id], onDelete: Restrict)
+
+  roles     String
+  resources String
+
+  communicationPlanId String?
+  communicationPlan   CommunicationPlan? @relation(fields: [organisationId, communicationPlanId], references: [organisationId, id], onDelete: Restrict)
+
+  effectiveDate DateTime
+  reviewDueDate DateTime
+
+  supersedesPlanId String?
+  supersedesPlan   EmergencyPlan? @relation("EmergencyPlanSuccessor", fields: [organisationId, supersedesPlanId], references: [organisationId, id], onDelete: Restrict)
+  successorPlan    EmergencyPlan? @relation("EmergencyPlanSuccessor")
+
+  createdByUserId String?
+  createdBy       User?    @relation(fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  exercises EmergencyExercise[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, scenarioId, version])
+  @@unique([organisationId, supersedesPlanId])
+  @@index([organisationId, status, reviewDueDate])
+}
+
+/// One exercise event against one exact, pinned plan version.
+/// `participantMembershipIds` is a snapshot taken at recording time, so the
+/// exercise's history stays traceable even if a participant's membership is
+/// later suspended or removed.
+model EmergencyExercise {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  scenarioId String
+  scenario   EmergencyScenario @relation(fields: [organisationId, scenarioId], references: [organisationId, id])
+  planId     String
+  plan       EmergencyPlan     @relation(fields: [organisationId, planId], references: [organisationId, id], onDelete: Restrict)
+
+  type                     EmergencyExerciseType
+  exerciseDate             DateTime
+  participantMembershipIds String[]
+  objectives               String
+  outcome                  EmergencyExerciseOutcome
+  observations             String?
+  lessons                  String?
+
+  recordedByUserId String
+  recordedBy       User     @relation(fields: [recordedByUserId], references: [id])
+  createdAt        DateTime @default(now())
+
+  actions EmergencyExerciseAction[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, scenarioId, exerciseDate])
+  @@index([organisationId, planId])
+}
+
+/// A follow-up action from a (typically failed/partial) exercise.
+/// `actionReference`/`incidentReference`/`nonconformityReference` are plain
+/// task-local text — Phase 5/6 (T52/T62-T64) own the real Action/Incident/
+/// Nonconformity models; linking one here is always an explicit, separate
+/// step the service layer never performs automatically.
+model EmergencyExerciseAction {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  exerciseId  String
+  exercise    EmergencyExercise @relation(fields: [organisationId, exerciseId], references: [organisationId, id], onDelete: Cascade)
+  description String
+
+  ownerMembershipId String?
+  owner             OrganisationMembership?       @relation("EmergencyExerciseActionOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id], onDelete: Restrict)
+  dueDate           DateTime?
+  status            EmergencyExerciseActionStatus @default(OPEN)
+
+  actionReference        String?
+  incidentReference      String?
+  nonconformityReference String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, id])
+  @@index([organisationId, exerciseId])
 }
 
 // ---------------------------------------------------------------------------
