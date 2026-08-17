@@ -21,8 +21,15 @@ export const PLATFORM_JOB_TOPIC_PREFIX = "platform.";
  * The only topics allowed to enqueue a platform-wide job (no organisation).
  * Declared explicitly rather than inferred from the prefix alone, so adding
  * a new platform job is a visible, reviewable change.
+ *
+ * `legal.sync` (task T42, `src/lib/ems/legal/legal-sync-worker.ts`) is a
+ * deliberate exception to the `platform.` naming convention above: it was
+ * already named without the prefix when this file first documented it (see
+ * the `OutboxMessage.topic` schema comment), and `LegalSourceProvider`/
+ * `LegalSyncCursor` are platform-global reference data with no organisation
+ * to scope the job to — same reasoning as `platform.outbox_backlog_sweep`.
  */
-export const PLATFORM_JOB_TOPICS = ["platform.outbox_backlog_sweep"] as const;
+export const PLATFORM_JOB_TOPICS = ["platform.outbox_backlog_sweep", "legal.sync"] as const;
 
 export type PlatformJobTopic = (typeof PLATFORM_JOB_TOPICS)[number];
 
