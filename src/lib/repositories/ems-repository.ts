@@ -209,6 +209,42 @@ export async function findTenantComplianceObligationVersion(
   return assertChildOwnership(ctx, row, expectedObligationId, "obligationId");
 }
 
+/** Loads a T45 compliance evaluation programme only inside the current organisation. */
+export async function findTenantComplianceEvaluationProgramme(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.complianceEvaluationProgramme.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads one exact T45 compliance evaluation only inside the current
+ * organisation, and (when `expectedProgrammeId` is supplied) attached to
+ * that exact programme — the nested-parent-substitution guard.
+ */
+export async function findTenantComplianceEvaluation(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedProgrammeId?: string,
+) {
+  const row = await prisma.complianceEvaluation.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedProgrammeId, "programmeId");
+}
+
+/**
+ * Loads one exact T45 compliance evaluation item only inside the current
+ * organisation, and (when `expectedEvaluationId` is supplied) attached to
+ * that exact evaluation — the nested-parent-substitution guard.
+ */
+export async function findTenantComplianceEvaluationItem(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedEvaluationId?: string,
+) {
+  const row = await prisma.complianceEvaluationItem.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedEvaluationId, "evaluationId");
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain

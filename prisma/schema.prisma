@@ -246,6 +246,13 @@ model Organisation {
   complianceObligationApprovals       ComplianceObligationApproval[]
   obligationChangeReviews             ObligationChangeReview[]
 
+  // Compliance evaluation (T45).
+  complianceEvaluationProgrammes   ComplianceEvaluationProgramme[]
+  complianceEvaluations            ComplianceEvaluation[]
+  complianceEvaluationScopes       ComplianceEvaluationScope[]
+  complianceEvaluationItems        ComplianceEvaluationItem[]
+  complianceEvaluationFindingLinks ComplianceEvaluationFindingLink[]
+
   @@index([status])
 }
 
@@ -319,6 +326,12 @@ model OrganisationMembership {
   ownedComplianceObligationVersions ComplianceObligationVersion[]  @relation("ComplianceObligationVersionOwner")
   complianceObligationApprovals     ComplianceObligationApproval[] @relation("ComplianceObligationApprovalApprover")
   obligationChangeReviews           ObligationChangeReview[]       @relation("ObligationChangeReviewReviewer")
+
+  // Compliance evaluation (T45).
+  ledComplianceEvaluationProgrammes         ComplianceEvaluationProgramme[]   @relation("ComplianceEvaluationProgrammeLead")
+  ledComplianceEvaluations                  ComplianceEvaluation[]            @relation("ComplianceEvaluationLead")
+  evaluatedComplianceEvaluationItems        ComplianceEvaluationItem[]        @relation("ComplianceEvaluationItemEvaluator")
+  requestedComplianceEvaluationFindingLinks ComplianceEvaluationFindingLink[] @relation("ComplianceEvaluationFindingLinkRequestedBy")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -456,6 +469,9 @@ model Entity {
   // Compliance obligation version scopes (T44).
   complianceObligationVersionScopes ComplianceObligationVersionScope[]
 
+  // Compliance evaluation scopes (T45).
+  complianceEvaluationScopes ComplianceEvaluationScope[]
+
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy global-unique Entity name —
   // two organisations may now use the same Entity name.
@@ -509,6 +525,9 @@ model Site {
 
   // Compliance obligation version scopes (T44).
   complianceObligationVersionScopes ComplianceObligationVersionScope[]
+
+  // Compliance evaluation scopes (T45).
+  complianceEvaluationScopes ComplianceEvaluationScope[]
 
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy [entityId, name] unique —
@@ -4890,7 +4909,7 @@ model ComplianceObligation {
   organisationId String
   organisation   Organisation @relation(fields: [organisationId], references: [id])
 
-  activeVersionId String?                   @unique
+  activeVersionId String?                      @unique
   activeVersion   ComplianceObligationVersion? @relation("ComplianceObligationActiveVersion", fields: [organisationId, activeVersionId], references: [organisationId, id])
 
   createdAt DateTime @default(now())
@@ -4960,10 +4979,14 @@ model ComplianceObligationVersion {
 
   activeForObligation ComplianceObligation? @relation("ComplianceObligationActiveVersion")
 
-  scopes           ComplianceObligationVersionScope[]
-  controlLinks     ComplianceObligationVersionControl[]
-  approvals        ComplianceObligationApproval[]
-  changeReviews    ObligationChangeReview[]
+  scopes        ComplianceObligationVersionScope[]
+  controlLinks  ComplianceObligationVersionControl[]
+  approvals     ComplianceObligationApproval[]
+  changeReviews ObligationChangeReview[]
+
+  // Compliance evaluation (T45): every ComplianceEvaluationItem that pins
+  // this exact version.
+  evaluationItems ComplianceEvaluationItem[]
 
   @@unique([organisationId, id])
   @@unique([organisationId, obligationId, version])
@@ -5040,8 +5063,8 @@ model ComplianceObligationApproval {
   comment        String?
 
   approverMembershipId String
-  approver              OrganisationMembership @relation("ComplianceObligationApprovalApprover", fields: [organisationId, approverMembershipId], references: [organisationId, id], onDelete: Restrict)
-  decidedAt             DateTime               @default(now())
+  approver             OrganisationMembership @relation("ComplianceObligationApprovalApprover", fields: [organisationId, approverMembershipId], references: [organisationId, id], onDelete: Restrict)
+  decidedAt            DateTime               @default(now())
 
   @@index([organisationId, obligationVersionId])
   @@index([organisationId, approverMembershipId])
@@ -5070,12 +5093,244 @@ model ObligationChangeReview {
   decision         ObligationChangeReviewDecision?
 
   reviewerMembershipId String
-  reviewer              OrganisationMembership @relation("ObligationChangeReviewReviewer", fields: [organisationId, reviewerMembershipId], references: [organisationId, id], onDelete: Restrict)
-  reviewedAt            DateTime               @default(now())
-  followUpDate          DateTime?
+  reviewer             OrganisationMembership @relation("ObligationChangeReviewReviewer", fields: [organisationId, reviewerMembershipId], references: [organisationId, id], onDelete: Restrict)
+  reviewedAt           DateTime               @default(now())
+  followUpDate         DateTime?
 
   createdAt DateTime @default(now())
 
   @@index([organisationId, obligationVersionId])
   @@index([organisationId, changeEventId])
+}
+
+// ---------------------------------------------------------------------------
+// Compliance evaluation (task T45, Docs/PHASE4_LEGAL_COMPLIANCE_SPEC.md §§1-2,
+// 6, 9). Schedules and evidences the human, evidenced check of whether this
+// organisation is actually meeting each of its ACTIVE `ComplianceObligation`
+// versions — a distinct step from T44's approval (which only ever decides
+// what the obligation *requires*, never whether it is being met).
+//
+// State machine (spec §2):
+//   ComplianceEvaluation: PLANNED -> IN_PROGRESS -> COMPLETED -> ISSUED
+//   ComplianceEvaluationItem: NOT_EVALUATED -> COMPLIANT / PARTIALLY_COMPLIANT
+//                              / NONCOMPLIANT / NOT_APPLICABLE
+//
+// Fixed decisions this section/evaluation-service.ts enforce (spec §§1,9):
+//  - `ComplianceEvaluationItem.obligationVersionId` pins one *exact*
+//    `ComplianceObligationVersion` row — since that row is itself immutable
+//    once it leaves DRAFT/IN_REVIEW (T44's trigger), pinning the id is
+//    already enough to "freeze" the obligation content an issued report
+//    describes; `ComplianceEvaluation.reportPayload` additionally snapshots
+//    that content into JSON at issue time (the same pattern
+//    `LcaAssessmentVersion.payload` uses), so the report reads correctly
+//    even if a much later phase ever changes how obligation content is
+//    joined/displayed.
+//  - only `evaluation-service.ts`'s `recordComplianceEvaluationItemResult`
+//    writes an item's status, and only while the parent evaluation is
+//    IN_PROGRESS — there is no default/inferred outcome, so "results never
+//    auto-decided" holds by construction, not convention.
+//  - `completeComplianceEvaluation` refuses to move an evaluation to
+//    COMPLETED while any item is still NOT_EVALUATED — every item must have
+//    an explicit human decision (including NOT_APPLICABLE) before the
+//    evaluation can be completed, let alone issued.
+//  - once COMPLETED, an evaluation's items are frozen (the
+//    `compliance_evaluation_item_immutable_once_locked` trigger below); once
+//    ISSUED, the evaluation row itself is fully frozen (the
+//    `compliance_evaluation_immutable_once_issued` trigger) — "issued
+//    evaluation pins exact obligation versions and is immutable" (spec §9).
+//  - `ComplianceEvaluationFindingLink` only ever records a *request* to link
+//    a NONCOMPLIANT/PARTIALLY_COMPLIANT item to a nonconformity or
+//    corrective action — the Nonconformity/CorrectiveAction models
+//    themselves belong to T63/T64 and do not exist yet. This mirrors T35's
+//    `EmergencyExerciseAction.nonconformityReference` plain-reference
+//    pattern, but as its own append-only table rather than a text column, so
+//    "noncompliance link creates a request/interface call; it does not
+//    auto-close or fabricate NC details" (spec §9) is enforced by there
+//    being no write path from this module into any NC/CAPA table.
+// ---------------------------------------------------------------------------
+
+enum ComplianceEvaluationProgrammeStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum ComplianceEvaluationStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  ISSUED
+}
+
+enum ComplianceEvaluationItemStatus {
+  NOT_EVALUATED
+  COMPLIANT
+  PARTIALLY_COMPLIANT
+  NONCOMPLIANT
+  NOT_APPLICABLE
+}
+
+enum ComplianceEvaluationFindingLinkType {
+  NONCONFORMITY
+  CORRECTIVE_ACTION
+}
+
+/// A standing programme of periodic compliance evaluations (spec §6: "period,
+/// scope, evaluator assignment, schedule, status"). Individual
+/// `ComplianceEvaluation` cycles are created under a programme; the
+/// programme itself carries no obligation content.
+model ComplianceEvaluationProgramme {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  name        String
+  description String?
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  // Plain string, not an enum, matching `ReminderRule.recurrence` (T24) —
+  // "ONCE" or a simple recurrence key evaluated by the service layer.
+  recurrence String @default("ONCE")
+
+  leadMembershipId String
+  lead             OrganisationMembership @relation("ComplianceEvaluationProgrammeLead", fields: [organisationId, leadMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  status ComplianceEvaluationProgrammeStatus @default(ACTIVE)
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  evaluations ComplianceEvaluation[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, status])
+}
+
+/// One evaluation cycle under a programme (spec §6: "programme, date/range,
+/// entities/sites, lead, status, issued snapshot and evidence").
+model ComplianceEvaluation {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  programmeId String
+  programme   ComplianceEvaluationProgramme @relation(fields: [organisationId, programmeId], references: [organisationId, id], onDelete: Restrict)
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  leadMembershipId String
+  lead             OrganisationMembership @relation("ComplianceEvaluationLead", fields: [organisationId, leadMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  status ComplianceEvaluationStatus @default(PLANNED)
+
+  // Populated only by `issueComplianceEvaluation`, in the same transaction
+  // that moves status to ISSUED — a snapshot of every item's pinned
+  // obligation-version content and outcome, so "report freezes source
+  // obligation versions" holds even independent of the version rows'
+  // already-immutable content (spec §9, definition of done §11).
+  reportPayload  Json?
+  issuedAt       DateTime?
+  issuedByUserId String?
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  scopes ComplianceEvaluationScope[]
+  items  ComplianceEvaluationItem[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, programmeId, status])
+  @@index([organisationId, status])
+}
+
+/// One Entity/Site an evaluation cycle's scope covers (spec §6
+/// "entities/sites"). No rows at all means the evaluation is organisation-
+/// wide, the same "empty scope = unscoped" reading `ComplianceObligationVersionScope`
+/// does not use (that model requires at least one row) but which this model
+/// does, since an evaluation programme legitimately covers "everything
+/// currently active" without an evaluator hand-picking every Entity/Site.
+model ComplianceEvaluationScope {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  evaluationId String
+  evaluation   ComplianceEvaluation @relation(fields: [organisationId, evaluationId], references: [organisationId, id], onDelete: Cascade)
+
+  entityId String?
+  entity   Entity? @relation(fields: [organisationId, entityId], references: [organisationId, id], onDelete: Restrict)
+  siteId   String?
+  site     Site?   @relation(fields: [organisationId, siteId], references: [organisationId, id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, evaluationId, entityId, siteId], map: "ComplianceEvaluationScope_scope_key")
+  @@index([organisationId, evaluationId])
+  @@index([organisationId, entityId])
+  @@index([organisationId, siteId])
+}
+
+/// One ACTIVE `ComplianceObligationVersion`, pinned by id, evaluated once
+/// within one evaluation cycle (spec §6: "evaluation, exact obligation
+/// version, status, rationale, evaluator, evaluated time, evidence,
+/// follow-up date"). `status` starts NOT_EVALUATED and is only ever written
+/// by `recordComplianceEvaluationItemResult` while the parent evaluation is
+/// IN_PROGRESS.
+model ComplianceEvaluationItem {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  evaluationId String
+  evaluation   ComplianceEvaluation @relation(fields: [organisationId, evaluationId], references: [organisationId, id], onDelete: Cascade)
+
+  obligationVersionId String
+  obligationVersion   ComplianceObligationVersion @relation(fields: [organisationId, obligationVersionId], references: [organisationId, id], onDelete: Restrict)
+
+  status ComplianceEvaluationItemStatus @default(NOT_EVALUATED)
+
+  rationale String?
+
+  evaluatorMembershipId String?
+  evaluator             OrganisationMembership? @relation("ComplianceEvaluationItemEvaluator", fields: [organisationId, evaluatorMembershipId], references: [organisationId, id], onDelete: Restrict)
+  evaluatedAt           DateTime?
+
+  followUpDate DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  findingLinks ComplianceEvaluationFindingLink[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, evaluationId, obligationVersionId], map: "ComplianceEvaluationItem_unique_per_evaluation")
+  @@index([organisationId, evaluationId, status])
+  @@index([organisationId, obligationVersionId])
+}
+
+/// Append-only record that an evaluator has requested a NONCOMPLIANT/
+/// PARTIALLY_COMPLIANT item be linked to a nonconformity or corrective
+/// action (spec §6 "item to NC/action interface"). This is the T63/T64
+/// interface itself: it never creates, closes, or otherwise reaches into an
+/// NC/CAPA record, because those models do not exist until Phase 6.
+model ComplianceEvaluationFindingLink {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  evaluationItemId String
+  evaluationItem   ComplianceEvaluationItem @relation(fields: [organisationId, evaluationItemId], references: [organisationId, id], onDelete: Cascade)
+
+  linkType      ComplianceEvaluationFindingLinkType
+  referenceNote String
+
+  requestedByMembershipId String
+  requestedBy             OrganisationMembership @relation("ComplianceEvaluationFindingLinkRequestedBy", fields: [organisationId, requestedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  requestedAt             DateTime               @default(now())
+
+  @@index([organisationId, evaluationItemId])
 }
