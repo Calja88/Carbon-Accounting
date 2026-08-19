@@ -81,6 +81,7 @@ export const PERMISSION_CATALOGUE: PermissionCatalogueEntry[] = [
   entry("ems.compliance_obligation.approve", "Approve a compliance obligation", true),
   entry("ems.compliance_evaluation.perform", "Perform a compliance evaluation"),
   entry("ems.objective.manage", "Manage EMS objectives"),
+  entry("ems.objective.approve", "Approve an EMS objective or metric definition", true),
   entry("ems.action.manage", "Manage EMS actions"),
   entry("ems.audit_programme.manage", "Manage the internal audit programme"),
   entry("ems.audit.perform", "Perform an internal audit"),

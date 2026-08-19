@@ -251,6 +251,49 @@ export async function findTenantOtherRequirementSource(ctx: TenantRepositoryCont
   return assertOwned(ctx, row);
 }
 
+/** Loads a T50 environmental objective only inside the current organisation. */
+export async function findTenantEnvironmentalObjective(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.environmentalObjective.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads one exact T50 environmental objective version only inside the
+ * current organisation, and (when `expectedObjectiveId` is supplied)
+ * attached to that exact objective — the nested-parent-substitution guard.
+ */
+export async function findTenantEnvironmentalObjectiveVersion(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedObjectiveId?: string,
+) {
+  const row = await prisma.environmentalObjectiveVersion.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedObjectiveId, "objectiveId");
+}
+
+/** Loads a T50 objective metric definition only inside the current organisation. */
+export async function findTenantObjectiveMetricDefinition(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.objectiveMetricDefinition.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads one exact T50 objective metric version only inside the current
+ * organisation, and (when `expectedMetricDefinitionId` is supplied)
+ * attached to that exact metric definition — the nested-parent-substitution
+ * guard.
+ */
+export async function findTenantObjectiveMetricVersion(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedMetricDefinitionId?: string,
+) {
+  const row = await prisma.objectiveMetricVersion.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedMetricDefinitionId, "metricDefinitionId");
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain

@@ -122,6 +122,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       "ems.compliance_obligation.approve",
       "ems.compliance_evaluation.perform",
       ...EMS_OBJECTIVES_MANAGE,
+      "ems.objective.approve",
       ...EMS_AUDIT_MANAGE,
       ...EMS_INCIDENT_MANAGE,
       "ems.competence.view",

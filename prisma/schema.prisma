@@ -256,6 +256,14 @@ model Organisation {
   // Other requirements and manual legal sources (T46).
   otherRequirementSources OtherRequirementSource[]
 
+  // Objectives and metric definitions (T50).
+  environmentalObjectives        EnvironmentalObjective[]
+  environmentalObjectiveVersions EnvironmentalObjectiveVersion[]
+  objectiveSourceLinks           ObjectiveSourceLink[]
+  objectiveApprovals             ObjectiveApproval[]
+  objectiveMetricDefinitions     ObjectiveMetricDefinition[]
+  objectiveMetricVersions        ObjectiveMetricVersion[]
+
   @@index([status])
 }
 
@@ -338,6 +346,10 @@ model OrganisationMembership {
   ledComplianceEvaluations                  ComplianceEvaluation[]            @relation("ComplianceEvaluationLead")
   evaluatedComplianceEvaluationItems        ComplianceEvaluationItem[]        @relation("ComplianceEvaluationItemEvaluator")
   requestedComplianceEvaluationFindingLinks ComplianceEvaluationFindingLink[] @relation("ComplianceEvaluationFindingLinkRequestedBy")
+
+  // Objectives and metric definitions (T50).
+  ownedEnvironmentalObjectiveVersions EnvironmentalObjectiveVersion[] @relation("EnvironmentalObjectiveVersionOwner")
+  objectiveApprovals                  ObjectiveApproval[]             @relation("ObjectiveApprovalApprover")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -2957,6 +2969,9 @@ model EmsRiskOpportunity {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Objective source links (T50).
+  objectiveSourceLinks ObjectiveSourceLink[]
+
   @@unique([organisationId, id])
   @@index([organisationId, programmeId, status])
 }
@@ -3025,6 +3040,9 @@ model EnvironmentalPolicyRecord {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Objective source links (T50).
+  objectiveSourceLinks ObjectiveSourceLink[]
 
   @@unique([organisationId, id])
   @@index([organisationId, programmeId])
@@ -3544,6 +3562,9 @@ model AspectAssessment {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Objective source links (T50).
+  objectiveSourceLinks ObjectiveSourceLink[]
 
   @@unique([organisationId, id])
   @@unique([organisationId, aspectId, assessmentVersion])
@@ -5013,6 +5034,9 @@ model ComplianceObligationVersion {
   // this exact version.
   evaluationItems ComplianceEvaluationItem[]
 
+  // Objective source links (T50).
+  objectiveSourceLinks ObjectiveSourceLink[]
+
   @@unique([organisationId, id])
   @@unique([organisationId, obligationId, version])
   @@unique([organisationId, supersedesVersionId])
@@ -5449,4 +5473,305 @@ model ComplianceEvaluationFindingLink {
   requestedAt             DateTime               @default(now())
 
   @@index([organisationId, evaluationItemId])
+}
+
+// ---------------------------------------------------------------------------
+// Objectives and metric definitions (task T50, Docs/PHASE5_OBJECTIVES_ACTIONS_SPEC.md
+// §§1-3). Depends on T23 (EMS programme), T31 (aspect/impact register) and
+// T44 (compliance obligation versioning/approval).
+//
+// `EnvironmentalObjective` is the stable reference; `EnvironmentalObjectiveVersion`
+// carries all content and follows the exact DRAFT -> IN_REVIEW ->
+// APPROVED -> ACTIVE -> ACHIEVED/NOT_ACHIEVED/CANCELLED/SUPERSEDED state
+// machine from spec §2, gated the same way T44 gates
+// `ComplianceObligationVersion`: `ems.objective.manage` drafts/edits/submits,
+// `ems.objective.approve` (Sustainability Lead default) is the only
+// permission that can move a version out of IN_REVIEW or retire/close an
+// ACTIVE one, and approval is denied to the version's own preparer whenever
+// four-eyes is enabled (same interim decision T22/T23/T44 made). A version
+// that has left DRAFT/IN_REVIEW is immutable at the database layer via the
+// same trigger pattern as `controlled_document_revision_immutable` /
+// `compliance_obligation_version_immutable_once_approved`; content changes
+// only ever happen through a successor version linked by
+// `supersedesVersionId`. Objective achievement is decided only through an
+// explicit review transition on the version itself — no function in this
+// module infers it from linked action completion (spec §1 "completing
+// actions does not automatically mark an objective achieved" — enforced
+// architecturally by T52's action model never writing to this table).
+//
+// `ObjectiveSourceLink` links a version to the policy, significant aspect,
+// compliance obligation or risk/opportunity context it responds to — the
+// four source types with an existing backing model today. Spec §3 also
+// names a "management-review decision" source type; that link is not
+// modelled yet because the management-review record (T70-73, Phase 7) does
+// not exist in this codebase, mirroring how `EmsRiskOpportunity.sourceType`/
+// `sourceId` already defers to phases not yet built. Adding it is an owner
+// decision for whenever Phase 7 lands, not a T50 change.
+//
+// `ObjectiveMetricDefinition`/`ObjectiveMetricVersion` are deliberately
+// separate from measurement values (spec §1 "a metric definition is
+// versioned and separate from measurement values") — this task defines what
+// a metric *is* (name, source type, unit, frequency, boundary, data-quality
+// rules) and versions/approves that definition; resolving actual
+// observations through the manual/corporate-carbon/product-LCA/monitoring
+// adapters is T51, not built here.
+// ---------------------------------------------------------------------------
+
+enum EnvironmentalObjectiveVersionStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  ACTIVE
+  ACHIEVED
+  NOT_ACHIEVED
+  CANCELLED
+  SUPERSEDED
+}
+
+enum ObjectiveApprovalDecision {
+  APPROVED
+  REJECTED
+  RETURNED
+}
+
+enum ObjectiveSourceLinkType {
+  POLICY
+  ASPECT_ASSESSMENT
+  OBLIGATION_VERSION
+  RISK_OPPORTUNITY
+}
+
+enum ObjectiveMetricSourceType {
+  MANUAL
+  CORPORATE_CARBON
+  PRODUCT_LCA
+  MONITORING
+  DERIVED_APPROVED_FORMULA
+}
+
+enum ObjectiveMetricVersionStatus {
+  DRAFT
+  APPROVED
+  ACTIVE
+  SUPERSEDED
+}
+
+/// Stable reference to one environmental objective. Never carries objective
+/// content itself — only the pointer to whichever `EnvironmentalObjectiveVersion`
+/// is currently ACTIVE, the same single-write-site shape as
+/// `ComplianceObligation.activeVersionId`.
+model EnvironmentalObjective {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  activeVersionId String?                        @unique
+  activeVersion   EnvironmentalObjectiveVersion? @relation("EnvironmentalObjectiveActiveVersion", fields: [organisationId, activeVersionId], references: [organisationId, id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions          EnvironmentalObjectiveVersion[] @relation("EnvironmentalObjectiveVersions")
+  metricDefinitions ObjectiveMetricDefinition[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, activeVersionId])
+  @@index([organisationId])
+}
+
+/// One version of one environmental objective's content — owner, target,
+/// unit, baseline description/date, target date and evaluation method are
+/// all required (T50 acceptance), plus revision rationale on a successor.
+model EnvironmentalObjectiveVersion {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  objectiveId String
+  objective   EnvironmentalObjective @relation("EnvironmentalObjectiveVersions", fields: [organisationId, objectiveId], references: [organisationId, id])
+  version     Int
+
+  title  String
+  intent String
+
+  ownerMembershipId String
+  owner             OrganisationMembership @relation("EnvironmentalObjectiveVersionOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  baselineDescription String
+  baselineDate        DateTime?
+
+  // Exactly one of targetValue/targetQualitative is set — a numeric target
+  // (with unit) or a qualitative target description.
+  targetValue       Decimal? @db.Decimal(24, 10)
+  targetQualitative String?
+  unit              String?
+  targetDate        DateTime
+
+  evaluationMethod String
+
+  status EnvironmentalObjectiveVersionStatus @default(DRAFT)
+
+  preparedByUserId String
+  preparedAt       DateTime @default(now())
+
+  // Denormalised for fast reads — the authoritative decision history lives
+  // in `ObjectiveApproval` (append-only, includes REJECTED/RETURNED
+  // decisions this pair of columns cannot represent).
+  approvedByUserId String?
+  approvedAt       DateTime?
+
+  // Set only on the transition into ACHIEVED/NOT_ACHIEVED — the objective
+  // review, not action completion, decides this (spec §2).
+  achievementDecidedByUserId String?
+  achievementDecidedAt       DateTime?
+  achievementRationale       String?
+
+  revisionRationale String?
+
+  supersedesVersionId String?
+  supersedesVersion   EnvironmentalObjectiveVersion? @relation("EnvironmentalObjectiveVersionSuccessor", fields: [organisationId, supersedesVersionId], references: [organisationId, id])
+  successorVersion    EnvironmentalObjectiveVersion? @relation("EnvironmentalObjectiveVersionSuccessor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activeForObjective EnvironmentalObjective? @relation("EnvironmentalObjectiveActiveVersion")
+
+  sourceLinks ObjectiveSourceLink[]
+  approvals   ObjectiveApproval[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, objectiveId, version])
+  @@unique([organisationId, supersedesVersionId])
+  @@index([organisationId, objectiveId, status])
+  @@index([organisationId, status])
+  @@index([organisationId, ownerMembershipId])
+}
+
+/// Links an objective version to the policy, significant aspect, compliance
+/// obligation or risk/opportunity it responds to (spec §3). Exactly one of
+/// the four target columns is set per row; links do not determine priority
+/// automatically (spec §1).
+model ObjectiveSourceLink {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  objectiveVersionId String
+  objectiveVersion   EnvironmentalObjectiveVersion @relation(fields: [organisationId, objectiveVersionId], references: [organisationId, id], onDelete: Cascade)
+
+  linkType ObjectiveSourceLinkType
+
+  policyRecordId String?
+  policyRecord   EnvironmentalPolicyRecord? @relation(fields: [organisationId, policyRecordId], references: [organisationId, id], onDelete: Restrict)
+
+  aspectAssessmentId String?
+  aspectAssessment   AspectAssessment? @relation(fields: [organisationId, aspectAssessmentId], references: [organisationId, id], onDelete: Restrict)
+
+  obligationVersionId String?
+  obligationVersion   ComplianceObligationVersion? @relation(fields: [organisationId, obligationVersionId], references: [organisationId, id], onDelete: Restrict)
+
+  riskOpportunityId String?
+  riskOpportunity   EmsRiskOpportunity? @relation(fields: [organisationId, riskOpportunityId], references: [organisationId, id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, objectiveVersionId, linkType, policyRecordId, aspectAssessmentId, obligationVersionId, riskOpportunityId], map: "ObjectiveSourceLink_link_key")
+  @@index([organisationId, objectiveVersionId])
+  @@index([organisationId, policyRecordId])
+  @@index([organisationId, aspectAssessmentId])
+  @@index([organisationId, obligationVersionId])
+  @@index([organisationId, riskOpportunityId])
+}
+
+/// Append-only exact-version approval decision — the same shape and rules
+/// as `ComplianceObligationApproval`. Never updated or deleted.
+model ObjectiveApproval {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  objectiveVersionId String
+  objectiveVersion   EnvironmentalObjectiveVersion @relation(fields: [organisationId, objectiveVersionId], references: [organisationId, id], onDelete: Cascade)
+
+  decision       ObjectiveApprovalDecision
+  permissionCode String
+  comment        String?
+
+  approverMembershipId String
+  approver             OrganisationMembership @relation("ObjectiveApprovalApprover", fields: [organisationId, approverMembershipId], references: [organisationId, id], onDelete: Restrict)
+  decidedAt            DateTime               @default(now())
+
+  @@index([organisationId, objectiveVersionId])
+  @@index([organisationId, approverMembershipId])
+}
+
+/// Stable reference to one metric definition, owned by one objective.
+/// Never carries metric content itself — only the pointer to whichever
+/// `ObjectiveMetricVersion` is currently ACTIVE.
+model ObjectiveMetricDefinition {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  objectiveId String
+  objective   EnvironmentalObjective @relation(fields: [organisationId, objectiveId], references: [organisationId, id], onDelete: Restrict)
+
+  activeVersionId String?                 @unique
+  activeVersion   ObjectiveMetricVersion? @relation("ObjectiveMetricDefinitionActiveVersion", fields: [organisationId, activeVersionId], references: [organisationId, id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions ObjectiveMetricVersion[] @relation("ObjectiveMetricDefinitionVersions")
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, activeVersionId])
+  @@index([organisationId, objectiveId])
+}
+
+/// One version of one metric definition's content (spec §1 "a metric
+/// definition is versioned and separate from measurement values"). No
+/// `ObjectiveMeasurement` model is added here — resolving observations
+/// through the manual/corporate-carbon/product-LCA/monitoring adapters is
+/// T51.
+model ObjectiveMetricVersion {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  metricDefinitionId String
+  metricDefinition   ObjectiveMetricDefinition @relation("ObjectiveMetricDefinitionVersions", fields: [organisationId, metricDefinitionId], references: [organisationId, id])
+  version            Int
+
+  name       String
+  sourceType ObjectiveMetricSourceType
+
+  aggregationConfig   Json?
+  unit                String
+  frequency           String
+  boundaryDescription String?
+  dataQualityRules    Json?
+
+  status ObjectiveMetricVersionStatus @default(DRAFT)
+
+  preparedByUserId String
+  preparedAt       DateTime  @default(now())
+  approvedByUserId String?
+  approvedAt       DateTime?
+
+  supersedesVersionId String?
+  supersedesVersion   ObjectiveMetricVersion? @relation("ObjectiveMetricVersionSuccessor", fields: [organisationId, supersedesVersionId], references: [organisationId, id])
+  successorVersion    ObjectiveMetricVersion? @relation("ObjectiveMetricVersionSuccessor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activeForDefinition ObjectiveMetricDefinition? @relation("ObjectiveMetricDefinitionActiveVersion")
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, metricDefinitionId, version])
+  @@unique([organisationId, supersedesVersionId])
+  @@index([organisationId, metricDefinitionId, status])
+  @@index([organisationId, status])
 }
