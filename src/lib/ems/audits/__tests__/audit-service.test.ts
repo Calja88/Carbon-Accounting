@@ -186,6 +186,12 @@ vi.mock("@/lib/prisma", () => {
     }),
   };
 
+  // T61 startAuditExecution freezes any DRAFT checklist in the same
+  // transaction; these T60 tests never create one, so a stub returning "no
+  // checklist" is enough to keep freezeActiveChecklistVersionInTransaction
+  // a no-op here (see checklist-finding-report.test.ts for T61 coverage).
+  const auditChecklistVersion = { findFirst: vi.fn(async () => null) };
+
   const prismaClient = {
     entity,
     site,
@@ -200,6 +206,7 @@ vi.mock("@/lib/prisma", () => {
     emsAudit,
     emsAuditScope,
     auditTeamMember,
+    auditChecklistVersion,
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prismaClient)),
   };
   return { prisma: prismaClient };

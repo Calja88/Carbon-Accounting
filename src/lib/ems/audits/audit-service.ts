@@ -3,8 +3,10 @@
  * §§1-3,6-9). Creates and schedules an `EmsAudit` under an `AuditProgramme`,
  * assigns its team with an explicit independence declaration, and validates
  * assigned auditors' scope access. Checklist versioning, question responses,
- * findings and the frozen issued report are T61 — this module never writes
- * past `IN_PROGRESS` (see schema module note).
+ * findings and the frozen issued report belong to `checklist-service.ts`,
+ * `finding-service.ts` and `report-service.ts` (T61) — this module only ever
+ * writes `EmsAudit.status` up to `IN_PROGRESS` (`REPORT_DRAFT`/
+ * `REPORT_ISSUED`/`CLOSED` are those modules' concern).
  *
  * Fixed decisions this module enforces (spec §§1,8):
  *  - independence is represented, never assumed from `role` —
@@ -20,7 +22,9 @@
  *  - `startAuditExecution` re-validates that every assigned auditor's
  *    entity/site access (for a restricted-access membership) covers the
  *    audit's own entity/site scope before the audit can begin (T60
- *    acceptance: "auditor scope validated").
+ *    acceptance: "auditor scope validated"), then freezes the audit's
+ *    active checklist version, if any, in the same transaction (T61
+ *    acceptance: "checklist version frozen at audit start").
  */
 
 import type { AuditTeamRole } from "@prisma/client";
@@ -38,9 +42,10 @@ import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-sco
 import { runInTenantTransaction } from "@/lib/repositories/transaction";
 import { recordAuditEvent } from "@/lib/repositories/audit-repository";
 import { validateAuditScopeEntries, type AuditScopeEntryInput, AuditProgrammeError } from "./programme-service";
+import { freezeActiveChecklistVersionInTransaction, AuditChecklistError } from "./checklist-service";
 import type { ReminderSubject } from "@/lib/notifications/types";
 
-export { TenantOwnershipError, AuditProgrammeError };
+export { TenantOwnershipError, AuditProgrammeError, AuditChecklistError };
 
 export const PROGRAMME_MANAGE_PERMISSION = "ems.audit_programme.manage" as const;
 export const AUDIT_PERFORM_PERMISSION = "ems.audit.perform" as const;
@@ -403,6 +408,7 @@ export async function startAuditExecution(context: OrganisationContext, auditId:
   await validateAuditorScope(context, audit.id);
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await freezeActiveChecklistVersionInTransaction(tx, txCtx, audit.id, actorUserId);
     const updated = await tx.emsAudit.update({
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: audit.id } },
       data: { status: "IN_PROGRESS" },

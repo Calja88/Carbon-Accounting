@@ -91,6 +91,12 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   // criteria references and auditor competence/independence evidence.
   "ems_audit",
   "audit_team_member",
+  // Checklists, evidence, findings and frozen report (task T61). Callers
+  // resolve the response/finding in the tenant repository before linking —
+  // objective evidence gathered while answering a checklist item, and
+  // supporting evidence for a finding.
+  "audit_question_response",
+  "audit_finding",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 

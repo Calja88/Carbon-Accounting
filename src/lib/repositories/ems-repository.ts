@@ -355,6 +355,68 @@ export async function findTenantAuditTeamMember(ctx: TenantRepositoryContext, id
 }
 
 /**
+ * Loads a T61 audit checklist version only inside the current organisation,
+ * and (when `expectedAuditId` is supplied) attached to that exact audit —
+ * the nested-parent-substitution guard.
+ */
+export async function findTenantAuditChecklistVersion(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedAuditId?: string,
+) {
+  const row = await prisma.auditChecklistVersion.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedAuditId, "auditId");
+}
+
+/**
+ * Loads a T61 checklist item only inside the current organisation, and
+ * (when `expectedChecklistVersionId` is supplied) attached to that exact
+ * checklist version — the nested-parent-substitution guard.
+ */
+export async function findTenantAuditChecklistItem(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedChecklistVersionId?: string,
+) {
+  const row = await prisma.auditChecklistItem.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedChecklistVersionId, "checklistVersionId");
+}
+
+/**
+ * Loads a T61 question response only inside the current organisation, and
+ * (when `expectedChecklistItemId` is supplied) attached to that exact
+ * checklist item — the nested-parent-substitution guard.
+ */
+export async function findTenantAuditQuestionResponse(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedChecklistItemId?: string,
+) {
+  const row = await prisma.auditQuestionResponse.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedChecklistItemId, "checklistItemId");
+}
+
+/**
+ * Loads a T61 audit finding only inside the current organisation, and (when
+ * `expectedAuditId` is supplied) attached to that exact audit — the
+ * nested-parent-substitution guard.
+ */
+export async function findTenantAuditFinding(ctx: TenantRepositoryContext, id: string, expectedAuditId?: string) {
+  const row = await prisma.auditFinding.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedAuditId, "auditId");
+}
+
+/** Loads a T61 audit report revision only inside the current organisation. */
+export async function findTenantAuditReportRevision(ctx: TenantRepositoryContext, auditId: string) {
+  const row = await prisma.auditReportRevision.findFirst({ where: tenantWhere(ctx, { auditId }) });
+  return assertOwned(ctx, row);
+}
+
+/**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain
  * lookup rather than a tenant-scoped one; callers still go through this

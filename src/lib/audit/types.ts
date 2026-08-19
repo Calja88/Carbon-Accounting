@@ -162,6 +162,17 @@ export const AUDIT_EVENT_TYPES = [
   "ems_audit.started",
   "audit_team_member.assigned",
   "audit_team_member.removed",
+  // Checklists, evidence, findings and frozen report (task T61).
+  "audit_checklist_version.frozen",
+  "audit_question_response.recorded",
+  "audit_question_response.updated",
+  "audit_finding.created",
+  "audit_finding.confirmed",
+  "audit_finding.action_required",
+  "audit_finding.accepted_observation",
+  "audit_finding.closed",
+  "ems_audit.report_draft_started",
+  "ems_audit.report_issued",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -217,7 +228,10 @@ export type AuditResourceType =
   | "audit_programme"
   | "audit_programme_item"
   | "ems_audit"
-  | "audit_team_member";
+  | "audit_team_member"
+  | "audit_checklist_version"
+  | "audit_question_response"
+  | "audit_finding";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept
