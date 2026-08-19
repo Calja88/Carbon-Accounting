@@ -294,6 +294,23 @@ export async function findTenantObjectiveMetricVersion(
   return assertChildOwnership(ctx, row, expectedMetricDefinitionId, "metricDefinitionId");
 }
 
+/** Loads a T52 action programme only inside the current organisation. */
+export async function findTenantActionProgramme(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.actionProgramme.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads one exact T52 action item only inside the current organisation, and
+ * (when `expectedProgrammeId` is supplied) attached to that exact
+ * programme — the nested-parent-substitution guard.
+ */
+export async function findTenantActionItem(ctx: TenantRepositoryContext, id: string, expectedProgrammeId?: string) {
+  const row = await prisma.actionItem.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedProgrammeId, "programmeId");
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain

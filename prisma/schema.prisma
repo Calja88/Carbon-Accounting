@@ -264,6 +264,13 @@ model Organisation {
   objectiveMetricDefinitions     ObjectiveMetricDefinition[]
   objectiveMetricVersions        ObjectiveMetricVersion[]
 
+  // Action programmes and reminders (T52).
+  actionProgrammes    ActionProgramme[]
+  actionItems         ActionItem[]
+  actionDependencies  ActionDependency[]
+  actionProgressUpdates ActionProgressUpdate[]
+  actionStatusHistory ActionStatusHistory[]
+
   @@index([status])
 }
 
@@ -350,6 +357,10 @@ model OrganisationMembership {
   // Objectives and metric definitions (T50).
   ownedEnvironmentalObjectiveVersions EnvironmentalObjectiveVersion[] @relation("EnvironmentalObjectiveVersionOwner")
   objectiveApprovals                  ObjectiveApproval[]             @relation("ObjectiveApprovalApprover")
+
+  // Action programmes and reminders (T52).
+  ownedActionProgrammes ActionProgramme[] @relation("ActionProgrammeOwner")
+  ownedActionItems      ActionItem[]      @relation("ActionItemOwner")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -5573,6 +5584,7 @@ model EnvironmentalObjective {
 
   versions          EnvironmentalObjectiveVersion[] @relation("EnvironmentalObjectiveVersions")
   metricDefinitions ObjectiveMetricDefinition[]
+  actionProgrammes  ActionProgramme[]
 
   @@unique([organisationId, id])
   @@unique([organisationId, activeVersionId])
@@ -5774,4 +5786,220 @@ model ObjectiveMetricVersion {
   @@unique([organisationId, supersedesVersionId])
   @@index([organisationId, metricDefinitionId, status])
   @@index([organisationId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Action programmes and reminders (task T52,
+// Docs/PHASE5_OBJECTIVES_ACTIONS_SPEC.md §§1-3). Depends on T50 (objectives)
+// and T24 (notifications/reminders, both already on this branch).
+//
+// `ActionProgramme` optionally links to an `EnvironmentalObjective` — a
+// programme need not support an objective (spec §3 "programme/source ...
+// links"; NC/review source links are deferred the same way
+// `ObjectiveSourceLink`'s management-review link is, because those models
+// don't exist yet in this codebase).
+//
+// `ActionItem` follows the exact state machine from spec §2: OPEN ->
+// IN_PROGRESS -> BLOCKED -> COMPLETED -> VERIFIED / REOPENED / CANCELLED.
+// COMPLETED/VERIFIED/CANCELLED are the "closed" statuses the T52 acceptance
+// criterion means by "closed action immutable except reopen event": the
+// `action_item_immutable_once_closed` trigger below makes every content
+// column read-only once an item reaches one of those three statuses, and
+// allows exactly one further transition out of that state — into REOPENED,
+// which is not itself closed, so an item explicitly reopened behaves like a
+// normal in-flight action again (spec's own diagram treats REOPENED as a
+// sibling of VERIFIED/CANCELLED reachable from COMPLETED, not a pass-through
+// state). Completing an action never touches `EnvironmentalObjective`/
+// `EnvironmentalObjectiveVersion` — the objective review, not action
+// completion, decides achievement (spec §1, enforced architecturally: this
+// module never imports the objective-service write path).
+//
+// `ActionStatusHistory` is the append-only audit trail the acceptance
+// criterion "reassignment/history audited" asks for, in the same shape as
+// `ObjectiveApproval`: never updated or deleted, one row per status change,
+// reassignment or reopen event.
+// ---------------------------------------------------------------------------
+
+enum ActionProgrammeStatus {
+  DRAFT
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum ActionItemStatus {
+  OPEN
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  VERIFIED
+  REOPENED
+  CANCELLED
+}
+
+enum ActionPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ActionStatusHistoryEventType {
+  STATUS_CHANGE
+  REASSIGNED
+  REOPENED
+}
+
+/// One organisation's action programme — a container of related `ActionItem`
+/// rows, optionally supporting one environmental objective.
+model ActionProgramme {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  objectiveId String?
+  objective   EnvironmentalObjective? @relation(fields: [organisationId, objectiveId], references: [organisationId, id], onDelete: Restrict)
+
+  title                String
+  resourcesDescription String?
+
+  ownerMembershipId String
+  owner             OrganisationMembership @relation("ActionProgrammeOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  startDate  DateTime?
+  targetDate DateTime?
+
+  status ActionProgrammeStatus @default(DRAFT)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  actions ActionItem[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, objectiveId])
+  @@index([organisationId, status])
+  @@index([organisationId, ownerMembershipId])
+}
+
+/// One action within a programme. `completionCriteria` is set on creation;
+/// `completedAt`/`completedByUserId` and `verifiedAt`/`verifiedByUserId` are
+/// only ever set by the corresponding explicit transition (spec §5:
+/// "verification follows configured permission/separation" — enforced in
+/// the service layer as the same four-eyes rule T50/T44 use, verifier !=
+/// completor).
+model ActionItem {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  programmeId String
+  programme   ActionProgramme @relation(fields: [organisationId, programmeId], references: [organisationId, id], onDelete: Restrict)
+
+  title       String
+  description String?
+  priority    ActionPriority @default(MEDIUM)
+
+  ownerMembershipId String
+  owner             OrganisationMembership @relation("ActionItemOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  startDate DateTime?
+  dueDate   DateTime
+
+  completionCriteria String?
+
+  status ActionItemStatus @default(OPEN)
+
+  completedAt         DateTime?
+  completedByUserId   String?
+  completionEvidenceNote String?
+
+  verifiedAt       DateTime?
+  verifiedByUserId String?
+
+  reopenedAt       DateTime?
+  reopenedByUserId String?
+  reopenReason     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dependenciesOn  ActionDependency[] @relation("ActionDependencyItem")
+  dependedOnBy    ActionDependency[] @relation("ActionDependencyDependsOn")
+  progressUpdates ActionProgressUpdate[]
+  statusHistory   ActionStatusHistory[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, programmeId])
+  @@index([organisationId, status])
+  @@index([organisationId, ownerMembershipId])
+  @@index([organisationId, dueDate])
+}
+
+/// `actionItemId` cannot proceed/complete until `dependsOnActionItemId` is
+/// COMPLETED/VERIFIED — enforced in the service layer, not by this table
+/// alone.
+model ActionDependency {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  actionItemId String
+  actionItem   ActionItem @relation("ActionDependencyItem", fields: [organisationId, actionItemId], references: [organisationId, id], onDelete: Cascade)
+
+  dependsOnActionItemId String
+  dependsOnActionItem   ActionItem @relation("ActionDependencyDependsOn", fields: [organisationId, dependsOnActionItemId], references: [organisationId, id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, actionItemId, dependsOnActionItemId])
+  @@index([organisationId, actionItemId])
+  @@index([organisationId, dependsOnActionItemId])
+}
+
+/// Append-only progress notes on an action — never updated or deleted.
+model ActionProgressUpdate {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  actionItemId String
+  actionItem   ActionItem @relation(fields: [organisationId, actionItemId], references: [organisationId, id], onDelete: Cascade)
+
+  progressPercent Int?
+  note            String
+
+  recordedByUserId String
+  recordedAt       DateTime @default(now())
+
+  @@index([organisationId, actionItemId])
+}
+
+/// Append-only status/reassignment/reopen history — never updated or
+/// deleted. `previousOwnerMembershipId`/`newOwnerMembershipId` are only set
+/// on a REASSIGNED row; `fromStatus`/`toStatus` are only set on
+/// STATUS_CHANGE/REOPENED rows.
+model ActionStatusHistory {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  actionItemId String
+  actionItem   ActionItem @relation(fields: [organisationId, actionItemId], references: [organisationId, id], onDelete: Cascade)
+
+  eventType ActionStatusHistoryEventType
+
+  fromStatus ActionItemStatus?
+  toStatus   ActionItemStatus?
+
+  previousOwnerMembershipId String?
+  newOwnerMembershipId      String?
+
+  note String?
+
+  actorUserId String
+  occurredAt  DateTime @default(now())
+
+  @@index([organisationId, actionItemId])
 }
