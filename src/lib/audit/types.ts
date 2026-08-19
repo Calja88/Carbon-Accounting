@@ -128,6 +128,18 @@ export const AUDIT_EVENT_TYPES = [
   "other_requirement_source.created",
   "other_requirement_source.updated",
   "other_requirement_source.status_changed",
+  // Objectives and metric definitions (task T50).
+  "environmental_objective_version.created",
+  "environmental_objective_version.submitted_for_review",
+  "environmental_objective_version.approved",
+  "environmental_objective_version.rejected",
+  "environmental_objective_version.returned",
+  "environmental_objective_version.superseded",
+  "environmental_objective_version.achievement_decided",
+  "environmental_objective_version.cancelled",
+  "objective_metric_version.created",
+  "objective_metric_version.approved",
+  "objective_metric_version.superseded",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -175,7 +187,9 @@ export type AuditResourceType =
   | "compliance_evaluation"
   | "compliance_evaluation_item"
   | "compliance_evaluation_finding_link"
-  | "other_requirement_source";
+  | "other_requirement_source"
+  | "environmental_objective_version"
+  | "objective_metric_version";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept
