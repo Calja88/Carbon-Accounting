@@ -265,11 +265,11 @@ model Organisation {
   objectiveMetricVersions        ObjectiveMetricVersion[]
 
   // Action programmes and reminders (T52).
-  actionProgrammes    ActionProgramme[]
-  actionItems         ActionItem[]
-  actionDependencies  ActionDependency[]
+  actionProgrammes      ActionProgramme[]
+  actionItems           ActionItem[]
+  actionDependencies    ActionDependency[]
   actionProgressUpdates ActionProgressUpdate[]
-  actionStatusHistory ActionStatusHistory[]
+  actionStatusHistory   ActionStatusHistory[]
 
   // Audit programme and audit execution (T60).
   auditProgrammes          AuditProgramme[]
@@ -278,6 +278,14 @@ model Organisation {
   emsAudits                EmsAudit[]
   emsAuditScopes           EmsAuditScope[]
   auditTeamMembers         AuditTeamMember[]
+
+  // Checklists, evidence, findings and frozen report (T61).
+  auditChecklistVersions AuditChecklistVersion[]
+  auditChecklistItems    AuditChecklistItem[]
+  auditQuestionResponses AuditQuestionResponse[]
+  auditFindings          AuditFinding[]
+  auditReportRevisions   AuditReportRevision[]
+  auditCoverageSnapshots AuditCoverageSnapshot[]
 
   @@index([status])
 }
@@ -374,6 +382,10 @@ model OrganisationMembership {
   ownedAuditProgrammes AuditProgramme[]  @relation("AuditProgrammeOwner")
   ledEmsAudits         EmsAudit[]        @relation("EmsAuditLead")
   auditTeamMemberships AuditTeamMember[] @relation("AuditTeamMembership")
+
+  // Checklists, evidence, findings and frozen report (T61).
+  auditQuestionResponses AuditQuestionResponse[]
+  ownedAuditFindings     AuditFinding[]
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -5948,8 +5960,8 @@ model ActionItem {
 
   status ActionItemStatus @default(OPEN)
 
-  completedAt         DateTime?
-  completedByUserId   String?
+  completedAt            DateTime?
+  completedByUserId      String?
   completionEvidenceNote String?
 
   verifiedAt       DateTime?
@@ -5962,8 +5974,8 @@ model ActionItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  dependenciesOn  ActionDependency[] @relation("ActionDependencyItem")
-  dependedOnBy    ActionDependency[] @relation("ActionDependencyDependsOn")
+  dependenciesOn  ActionDependency[]     @relation("ActionDependencyItem")
+  dependedOnBy    ActionDependency[]     @relation("ActionDependencyDependsOn")
   progressUpdates ActionProgressUpdate[]
   statusHistory   ActionStatusHistory[]
 
@@ -6146,7 +6158,7 @@ model AuditProgramme {
   supersedesProgramme   AuditProgramme?  @relation("AuditProgrammeSuccessor", fields: [organisationId, supersedesProgrammeId], references: [organisationId, id], onDelete: Restrict)
   supersededBy          AuditProgramme[] @relation("AuditProgrammeSuccessor")
 
-  approvedAt     DateTime?
+  approvedAt       DateTime?
   approvedByUserId String?
 
   createdByUserId String
@@ -6207,14 +6219,14 @@ model AuditProgrammeItemScope {
   site     Site?   @relation(fields: [organisationId, siteId], references: [organisationId, id], onDelete: Restrict)
 
   processId String?
-  process   ActivityProcess? @relation(fields: [organisationId, processId], references: [organisationId, id], onDelete: Restrict)
+  process   ActivityProcess?     @relation(fields: [organisationId, processId], references: [organisationId, id], onDelete: Restrict)
   aspectId  String?
   aspect    EnvironmentalAspect? @relation(fields: [organisationId, aspectId], references: [organisationId, id], onDelete: Restrict)
 
   obligationId     String?
-  obligation       ComplianceObligation?    @relation(fields: [organisationId, obligationId], references: [organisationId, id], onDelete: Restrict)
+  obligation       ComplianceObligation?   @relation(fields: [organisationId, obligationId], references: [organisationId, id], onDelete: Restrict)
   requirementMapId String?
-  requirementMap   StandardRequirementMap?  @relation(fields: [organisationId, requirementMapId], references: [organisationId, id], onDelete: Restrict)
+  requirementMap   StandardRequirementMap? @relation(fields: [organisationId, requirementMapId], references: [organisationId, id], onDelete: Restrict)
 
   createdAt DateTime @default(now())
 
@@ -6268,6 +6280,13 @@ model EmsAudit {
   scopes EmsAuditScope[]
   team   AuditTeamMember[]
 
+  // Checklists, evidence, findings and frozen report (T61).
+  checklistVersions AuditChecklistVersion[]
+  questionResponses AuditQuestionResponse[]
+  findings          AuditFinding[]
+  reportRevision    AuditReportRevision?
+  coverageSnapshot  AuditCoverageSnapshot?
+
   @@unique([organisationId, id])
   @@index([organisationId, programmeId, status])
   @@index([organisationId, status])
@@ -6290,7 +6309,7 @@ model EmsAuditScope {
   site     Site?   @relation(fields: [organisationId, siteId], references: [organisationId, id], onDelete: Restrict)
 
   processId String?
-  process   ActivityProcess? @relation(fields: [organisationId, processId], references: [organisationId, id], onDelete: Restrict)
+  process   ActivityProcess?     @relation(fields: [organisationId, processId], references: [organisationId, id], onDelete: Restrict)
   aspectId  String?
   aspect    EnvironmentalAspect? @relation(fields: [organisationId, aspectId], references: [organisationId, id], onDelete: Restrict)
 
@@ -6337,4 +6356,251 @@ model AuditTeamMember {
   @@unique([organisationId, auditId, membershipId])
   @@index([organisationId, auditId])
   @@index([organisationId, membershipId])
+}
+
+// ---------------------------------------------------------------------------
+// Checklists, evidence, findings and frozen report (task T61,
+// Docs/PHASE6_AUDIT_INCIDENT_CAPA_SPEC.md §§1-3,6-7). Depends on T60
+// (`EmsAudit`/`AuditTeamMember`/independence) and reuses the T22 evidence
+// model (`EvidenceObject`/`EvidenceLink`, resource types
+// `audit_question_response`/`audit_finding`) rather than a second evidence
+// table — see `src/lib/documents/evidence-service.ts`.
+//
+// `AuditChecklistVersion` is mutable only while `status = DRAFT`; freezing
+// (`frozenAt` set, `status -> FROZEN`) happens no later than the audit
+// leaving PREPARATION for IN_PROGRESS (`startAuditExecution` in
+// `audit-service.ts` calls the freeze helper in `checklist-service.ts` in
+// the same transaction) so the plan the auditors execute against cannot
+// change once the audit starts (spec: "checklist version frozen at audit
+// start"). `AuditQuestionResponse` rows stay editable through IN_PROGRESS/
+// REPORT_DRAFT and are copied into `AuditReportRevision.frozenPayload` —
+// itself immutable once `status -> ISSUED` — when the report is issued
+// (spec: "... or issue"; acceptance: "issued report immutable").
+//
+// `AuditFinding.classification` is a stable, generic, non-certification-body
+// category (spec §3 "Do not hard-code certification-body classifications")
+// set explicitly by whoever records the finding — the system never infers
+// or defaults it, so a finding can never carry an automatic certification
+// judgement.
+// ---------------------------------------------------------------------------
+
+enum AuditChecklistStatus {
+  DRAFT
+  FROZEN
+}
+
+enum AuditQuestionResult {
+  NOT_ASSESSED
+  CONFORMS
+  NONCONFORMANCE
+  NOT_APPLICABLE
+}
+
+/// Generic, stable finding categories — never a certification-body-specific
+/// label (spec §3). An organisation may display its own wording for these in
+/// the UI; the stored code never changes.
+enum AuditFindingClassification {
+  OBSERVATION
+  OPPORTUNITY_FOR_IMPROVEMENT
+  MINOR_NONCONFORMITY
+  MAJOR_NONCONFORMITY
+}
+
+/// Full state machine per spec §2.
+enum AuditFindingStatus {
+  DRAFT
+  CONFIRMED
+  ACTION_REQUIRED
+  ACCEPTED_OBSERVATION
+  CLOSED
+}
+
+enum AuditReportStatus {
+  DRAFT
+  ISSUED
+}
+
+/// One version of an audit's checklist (spec §3 "audit, version, frozen
+/// questions/criteria/expected evidence"). Only the latest version may be
+/// DRAFT (edited); once FROZEN it, and its items, never change again —
+/// `checklist-service.ts` enforces both rules, never the database.
+model AuditChecklistVersion {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  auditId String
+  audit   EmsAudit @relation(fields: [organisationId, auditId], references: [organisationId, id], onDelete: Cascade)
+
+  version Int
+  status  AuditChecklistStatus @default(DRAFT)
+
+  frozenAt       DateTime?
+  frozenByUserId String?
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  items AuditChecklistItem[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, auditId, version])
+  @@index([organisationId, auditId])
+}
+
+/// One checklist question (spec §3). Immutable once its parent version is
+/// FROZEN — enforced in `checklist-service.ts`.
+model AuditChecklistItem {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  checklistVersionId String
+  checklistVersion   AuditChecklistVersion @relation(fields: [organisationId, checklistVersionId], references: [organisationId, id], onDelete: Cascade)
+
+  sortOrder         Int
+  question          String
+  criteriaReference String?
+  expectedEvidence  String?
+
+  createdAt DateTime @default(now())
+
+  response AuditQuestionResponse?
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, checklistVersionId, sortOrder])
+  @@index([organisationId, checklistVersionId])
+}
+
+/// The auditor's recorded answer to one frozen checklist item (spec §3
+/// "checklist item, result, notes, evidence, auditor/time"). One response
+/// per item — `checklist-service.ts` upserts in place rather than
+/// versioning responses, and blocks further changes once the audit's report
+/// is issued (`AuditReportRevision.status = ISSUED`).
+model AuditQuestionResponse {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  checklistItemId String
+  checklistItem   AuditChecklistItem @relation(fields: [organisationId, checklistItemId], references: [organisationId, id], onDelete: Cascade)
+
+  // Denormalised for tenant-scoped queries/indexing without a join through
+  // AuditChecklistItem -> AuditChecklistVersion on every read.
+  auditId String
+  audit   EmsAudit @relation(fields: [organisationId, auditId], references: [organisationId, id], onDelete: Cascade)
+
+  result AuditQuestionResult @default(NOT_ASSESSED)
+  notes  String?
+
+  auditorMembershipId String?
+  auditor             OrganisationMembership? @relation(fields: [organisationId, auditorMembershipId], references: [organisationId, id], onDelete: Restrict)
+  respondedAt         DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, checklistItemId])
+  @@index([organisationId, auditId])
+}
+
+/// One audit finding (spec §3 "audit, type/configured classification,
+/// statement, objective evidence, criterion/requirement reference, scope,
+/// owner, due date, confirmation metadata"). `scopeRef` pins the exact
+/// resource the finding concerns (same `{ resourceType, resourceId }` shape
+/// as `EmsAudit.criteriaReferences`) rather than a second six-column scope
+/// table — a finding concerns exactly one thing, unlike an audit's coverage.
+model AuditFinding {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  auditId String
+  audit   EmsAudit @relation(fields: [organisationId, auditId], references: [organisationId, id], onDelete: Cascade)
+
+  questionResponseId String?
+
+  classification AuditFindingClassification
+  status         AuditFindingStatus         @default(DRAFT)
+
+  statement          String
+  objectiveEvidence  String?
+  criterionReference String?
+  scopeRef           Json?
+
+  ownerMembershipId String?
+  owner             OrganisationMembership? @relation(fields: [organisationId, ownerMembershipId], references: [organisationId, id], onDelete: Restrict)
+  dueDate           DateTime?
+
+  confirmedAt       DateTime?
+  confirmedByUserId String?
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@index([organisationId, auditId, status])
+}
+
+/// The frozen, issued audit report (spec §3 "audit, draft/issued number,
+/// frozen payload/storage/checksum, preparer/reviewer/issuer, issued time").
+/// One row per audit (T61 does not model report corrections/reissue — a
+/// later phase's concern); `status -> ISSUED` is a one-way, one-time
+/// transition set only by `report-service.ts#issueAuditReport`, after which
+/// no field on this row is ever written again (acceptance: "issued report
+/// immutable").
+model AuditReportRevision {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  auditId String
+  audit   EmsAudit @relation(fields: [organisationId, auditId], references: [organisationId, id], onDelete: Restrict)
+
+  revisionNumber Int               @default(1)
+  status         AuditReportStatus @default(DRAFT)
+
+  preparerUserId String
+  reviewerUserId String?
+  issuerUserId   String?
+  issuedAt       DateTime?
+
+  // Populated only at issue: a full snapshot of the frozen checklist,
+  // responses and findings this report was issued against, plus its
+  // checksum — never re-derived from live data after issue.
+  frozenPayload  Json?
+  checksumSha256 String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  coverageSnapshot AuditCoverageSnapshot?
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, auditId])
+}
+
+/// Frozen coverage-by-dimension snapshot taken at report issue (spec §3) —
+/// the point-in-time counterpart to `programme-service.ts`'s live coverage
+/// report, scoped to this one audit's own `EmsAuditScope` rows.
+model AuditCoverageSnapshot {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  auditId String
+  audit   EmsAudit @relation(fields: [organisationId, auditId], references: [organisationId, id], onDelete: Restrict)
+
+  reportRevisionId String
+  reportRevision   AuditReportRevision @relation(fields: [organisationId, reportRevisionId], references: [organisationId, id], onDelete: Restrict)
+
+  payload Json
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, auditId])
+  @@unique([organisationId, reportRevisionId])
 }

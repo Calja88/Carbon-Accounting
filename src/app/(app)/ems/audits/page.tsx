@@ -148,7 +148,7 @@ export default async function AuditProgrammesPage() {
         <p className="mt-1 max-w-3xl text-sm text-slate-500">
           Plan a risk-based internal audit programme, schedule audits under it, assign a team with an explicit
           independence declaration, and track coverage across sites, processes, aspects, obligations and internal
-          requirements. Checklist execution, findings and the frozen audit report are a later stage of this workflow.
+          requirements. Open an audit to work its checklist, record findings, and issue its frozen report.
         </p>
       </div>
 

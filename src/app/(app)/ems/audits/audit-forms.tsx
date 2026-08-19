@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -447,6 +448,9 @@ function AuditCard({ audit, members }: { audit: EmsAuditRow; members: Option[] }
         <Badge tone={auditStatusTone(audit.status)}>{audit.status}</Badge>
       </div>
       {audit.scopeLabels.length > 0 && <p className="text-xs text-slate-500">Scope: {audit.scopeLabels.join(", ")}</p>}
+      <Link href={`/ems/audits/${audit.id}`} className="text-sm font-medium text-blue-700 hover:underline">
+        Checklist, findings and report →
+      </Link>
       <AuditLifecycleButtons auditId={audit.id} status={audit.status} />
       <RescheduleAuditForm auditId={audit.id} />
       <div className="space-y-2">

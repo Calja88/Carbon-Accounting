@@ -56,3 +56,37 @@ export const assignAuditTeamMemberFormSchema = z.object({
   conflictDeclared: z.coerce.boolean(),
   conflictNotes: z.string().trim().max(2000).optional().or(z.literal("")),
 });
+
+// --- Checklists, evidence, findings and frozen report (T61) ---
+
+export const auditQuestionResultSchema = z.enum(["NOT_ASSESSED", "CONFORMS", "NONCONFORMANCE", "NOT_APPLICABLE"]);
+export const auditFindingClassificationSchema = z.enum([
+  "OBSERVATION",
+  "OPPORTUNITY_FOR_IMPROVEMENT",
+  "MINOR_NONCONFORMITY",
+  "MAJOR_NONCONFORMITY",
+]);
+
+export const addChecklistItemFormSchema = z.object({
+  checklistVersionId: z.string().trim().min(1),
+  question: z.string().trim().min(1, "Enter the checklist question.").max(1000),
+  criteriaReference: z.string().trim().max(500).optional().or(z.literal("")),
+  expectedEvidence: z.string().trim().max(500).optional().or(z.literal("")),
+});
+
+export const recordQuestionResponseFormSchema = z.object({
+  checklistItemId: z.string().trim().min(1),
+  result: auditQuestionResultSchema,
+  notes: z.string().trim().max(2000).optional().or(z.literal("")),
+  auditorMembershipId: z.string().trim().min(1, "Choose the responding auditor."),
+});
+
+export const createAuditFindingFormSchema = z.object({
+  auditId: z.string().trim().min(1),
+  classification: auditFindingClassificationSchema,
+  statement: z.string().trim().min(1, "Enter the finding statement.").max(2000),
+  objectiveEvidence: z.string().trim().max(2000).optional().or(z.literal("")),
+  criterionReference: z.string().trim().max(500).optional().or(z.literal("")),
+  ownerMembershipId: z.string().trim().optional().or(z.literal("")),
+  dueDate: z.coerce.date().optional(),
+});

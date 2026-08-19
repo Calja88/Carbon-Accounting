@@ -22,11 +22,35 @@ import {
   startAuditExecution,
 } from "@/lib/ems/audits/audit-service";
 import {
+  AuditChecklistError,
+  ensureDraftChecklistVersion,
+  addChecklistItem,
+  removeChecklistItem,
+  freezeChecklistVersion,
+  recordQuestionResponse,
+} from "@/lib/ems/audits/checklist-service";
+import {
+  AuditFindingError,
+  createAuditFinding,
+  confirmAuditFinding,
+  requireActionOnAuditFinding,
+  acceptAuditFindingAsObservation,
+  closeAuditFinding,
+} from "@/lib/ems/audits/finding-service";
+import {
+  AuditReportError,
+  createAuditReportDraft,
+  issueAuditReport,
+} from "@/lib/ems/audits/report-service";
+import {
   createAuditProgrammeFormSchema,
   createAuditProgrammeItemFormSchema,
   createEmsAuditFormSchema,
   rescheduleEmsAuditFormSchema,
   assignAuditTeamMemberFormSchema,
+  addChecklistItemFormSchema,
+  recordQuestionResponseFormSchema,
+  createAuditFindingFormSchema,
 } from "@/lib/ems/audits/audit-schemas";
 
 export interface AuditActionState {
@@ -41,6 +65,9 @@ function friendlyError(error: unknown): string {
   if (error instanceof PermissionDeniedError) return "You don't have permission to do that.";
   if (error instanceof TenantOwnershipError) return "That record could not be found in this organisation or scope.";
   if (error instanceof AuditProgrammeError) return error.message;
+  if (error instanceof AuditChecklistError) return error.message;
+  if (error instanceof AuditFindingError) return error.message;
+  if (error instanceof AuditReportError) return error.message;
   throw error;
 }
 
@@ -272,6 +299,201 @@ export async function startAuditExecutionAction(_previous: AuditActionState, for
     await startAuditExecution(context, auditId, context.userId);
     revalidateAudits();
     return { ...emptyState, message: "Audit execution started." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+// --- Checklists, evidence, findings and frozen report (T61) ---
+
+export async function ensureDraftChecklistAction(_previous: AuditActionState, formData: FormData): Promise<AuditActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const auditId = String(formData.get("auditId") ?? "");
+    if (!auditId) return { ...emptyState, error: "Choose an audit." };
+    await ensureDraftChecklistVersion(context, auditId, context.userId);
+    revalidateAudits();
+    return { ...emptyState, message: "Checklist started." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function addChecklistItemAction(_previous: AuditActionState, formData: FormData): Promise<AuditActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = addChecklistItemFormSchema.safeParse({
+      checklistVersionId: formData.get("checklistVersionId"),
+      question: formData.get("question"),
+      criteriaReference: formData.get("criteriaReference"),
+      expectedEvidence: formData.get("expectedEvidence"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the checklist item." };
+    await addChecklistItem(context, parsed.data.checklistVersionId, {
+      question: parsed.data.question,
+      criteriaReference: parsed.data.criteriaReference || null,
+      expectedEvidence: parsed.data.expectedEvidence || null,
+      actorUserId: context.userId,
+    });
+    revalidateAudits();
+    return { ...emptyState, message: "Checklist item added." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function removeChecklistItemAction(_previous: AuditActionState, formData: FormData): Promise<AuditActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const itemId = String(formData.get("itemId") ?? "");
+    if (!itemId) return { ...emptyState, error: "Choose a checklist item." };
+    await removeChecklistItem(context, itemId, context.userId);
+    revalidateAudits();
+    return { ...emptyState, message: "Checklist item removed." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function freezeChecklistAction(_previous: AuditActionState, formData: FormData): Promise<AuditActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const auditId = String(formData.get("auditId") ?? "");
+    if (!auditId) return { ...emptyState, error: "Choose an audit." };
+    await freezeChecklistVersion(context, auditId, context.userId);
+    revalidateAudits();
+    return { ...emptyState, message: "Checklist frozen." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function recordQuestionResponseAction(_previous: AuditActionState, formData: FormData): Promise<AuditActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = recordQuestionResponseFormSchema.safeParse({
+      checklistItemId: formData.get("checklistItemId"),
+      result: formData.get("result"),
+      notes: formData.get("notes"),
+      auditorMembershipId: formData.get("auditorMembershipId"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the response." };
+    await recordQuestionResponse(context, parsed.data.checklistItemId, {
+      result: parsed.data.result,
+      notes: parsed.data.notes || null,
+      auditorMembershipId: parsed.data.auditorMembershipId,
+      actorUserId: context.userId,
+    });
+    revalidateAudits();
+    return { ...emptyState, message: "Response recorded." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function createAuditFindingAction(_previous: AuditActionState, formData: FormData): Promise<AuditActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const dueDateRaw = String(formData.get("dueDate") ?? "").trim();
+    const parsed = createAuditFindingFormSchema.safeParse({
+      auditId: formData.get("auditId"),
+      classification: formData.get("classification"),
+      statement: formData.get("statement"),
+      objectiveEvidence: formData.get("objectiveEvidence"),
+      criterionReference: formData.get("criterionReference"),
+      ownerMembershipId: formData.get("ownerMembershipId"),
+      dueDate: dueDateRaw || undefined,
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the finding details." };
+    await createAuditFinding(context, parsed.data.auditId, {
+      classification: parsed.data.classification,
+      statement: parsed.data.statement,
+      objectiveEvidence: parsed.data.objectiveEvidence || null,
+      criterionReference: parsed.data.criterionReference || null,
+      ownerMembershipId: parsed.data.ownerMembershipId || null,
+      dueDate: parsed.data.dueDate ?? null,
+      actorUserId: context.userId,
+    });
+    revalidateAudits();
+    return { ...emptyState, message: "Finding raised. Its classification is a working category, not a certification decision." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function confirmAuditFindingAction(_previous: AuditActionState, formData: FormData): Promise<AuditActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const findingId = String(formData.get("findingId") ?? "");
+    if (!findingId) return { ...emptyState, error: "Choose a finding." };
+    await confirmAuditFinding(context, findingId, context.userId);
+    revalidateAudits();
+    return { ...emptyState, message: "Finding confirmed." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function requireActionOnAuditFindingAction(_previous: AuditActionState, formData: FormData): Promise<AuditActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const findingId = String(formData.get("findingId") ?? "");
+    if (!findingId) return { ...emptyState, error: "Choose a finding." };
+    await requireActionOnAuditFinding(context, findingId, context.userId);
+    revalidateAudits();
+    return { ...emptyState, message: "Finding marked as requiring action." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function acceptAuditFindingAsObservationAction(_previous: AuditActionState, formData: FormData): Promise<AuditActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const findingId = String(formData.get("findingId") ?? "");
+    if (!findingId) return { ...emptyState, error: "Choose a finding." };
+    await acceptAuditFindingAsObservation(context, findingId, context.userId);
+    revalidateAudits();
+    return { ...emptyState, message: "Finding accepted as an observation." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function closeAuditFindingAction(_previous: AuditActionState, formData: FormData): Promise<AuditActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const findingId = String(formData.get("findingId") ?? "");
+    if (!findingId) return { ...emptyState, error: "Choose a finding." };
+    await closeAuditFinding(context, findingId, context.userId);
+    revalidateAudits();
+    return { ...emptyState, message: "Finding closed." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function createAuditReportDraftAction(_previous: AuditActionState, formData: FormData): Promise<AuditActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const auditId = String(formData.get("auditId") ?? "");
+    if (!auditId) return { ...emptyState, error: "Choose an audit." };
+    await createAuditReportDraft(context, auditId, context.userId);
+    revalidateAudits();
+    return { ...emptyState, message: "Report drafting started." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function issueAuditReportAction(_previous: AuditActionState, formData: FormData): Promise<AuditActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const auditId = String(formData.get("auditId") ?? "");
+    if (!auditId) return { ...emptyState, error: "Choose an audit." };
+    await issueAuditReport(context, auditId, context.userId);
+    revalidateAudits();
+    return { ...emptyState, message: "Audit report issued and frozen." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }
