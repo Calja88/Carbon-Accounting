@@ -82,6 +82,10 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   // Other requirements and manual legal sources (task T46). Callers
   // resolve the source in the tenant repository before linking.
   "other_requirement_source",
+  // Action programmes and reminders (task T52). Callers resolve the action
+  // item in the tenant repository before linking — used for completion
+  // evidence.
+  "action_item",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 
