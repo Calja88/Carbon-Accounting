@@ -25,6 +25,7 @@ import {
   Siren,
   Scale,
   ClipboardCheck,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -64,6 +65,7 @@ const MORE_ITEMS: NavItem[] = [
   { href: "/ems/legal/provider-health", label: "Legal sync health", icon: HeartPulse },
   { href: "/ems/legal/applicability", label: "Legal applicability workflow", icon: Scale },
   { href: "/ems/legal/evaluations", label: "Compliance evaluations", icon: ClipboardCheck },
+  { href: "/ems/audits", label: "Audit programme and execution", icon: Search },
   { href: "/ems/communications", label: "EMS communications", icon: MessageSquare },
   { href: "/ems/emergency", label: "EMS emergency preparedness", icon: Siren },
   { href: "/help/lca", label: "Product LCA guidance", icon: HelpCircle },

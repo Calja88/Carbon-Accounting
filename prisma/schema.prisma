@@ -271,6 +271,14 @@ model Organisation {
   actionProgressUpdates ActionProgressUpdate[]
   actionStatusHistory ActionStatusHistory[]
 
+  // Audit programme and audit execution (T60).
+  auditProgrammes          AuditProgramme[]
+  auditProgrammeItems      AuditProgrammeItem[]
+  auditProgrammeItemScopes AuditProgrammeItemScope[]
+  emsAudits                EmsAudit[]
+  emsAuditScopes           EmsAuditScope[]
+  auditTeamMembers         AuditTeamMember[]
+
   @@index([status])
 }
 
@@ -361,6 +369,11 @@ model OrganisationMembership {
   // Action programmes and reminders (T52).
   ownedActionProgrammes ActionProgramme[] @relation("ActionProgrammeOwner")
   ownedActionItems      ActionItem[]      @relation("ActionItemOwner")
+
+  // Audit programme and audit execution (T60).
+  ownedAuditProgrammes AuditProgramme[]  @relation("AuditProgrammeOwner")
+  ledEmsAudits         EmsAudit[]        @relation("EmsAuditLead")
+  auditTeamMemberships AuditTeamMember[] @relation("AuditTeamMembership")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -501,6 +514,10 @@ model Entity {
   // Compliance evaluation scopes (T45).
   complianceEvaluationScopes ComplianceEvaluationScope[]
 
+  // Audit programme/execution scopes (T60).
+  auditProgrammeItemScopes AuditProgrammeItemScope[]
+  emsAuditScopes           EmsAuditScope[]
+
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy global-unique Entity name —
   // two organisations may now use the same Entity name.
@@ -557,6 +574,10 @@ model Site {
 
   // Compliance evaluation scopes (T45).
   complianceEvaluationScopes ComplianceEvaluationScope[]
+
+  // Audit programme/execution scopes (T60).
+  auditProgrammeItemScopes AuditProgrammeItemScope[]
+  emsAuditScopes           EmsAuditScope[]
 
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy [entityId, name] unique —
@@ -2852,6 +2873,10 @@ model StandardRequirementMap {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Audit programme/execution scopes (T60).
+  auditProgrammeItemScopes AuditProgrammeItemScope[]
+  emsAuditScopes           EmsAuditScope[]
+
   @@unique([programmeId, standardProfile, requirementKey])
   @@unique([organisationId, id])
   @@index([organisationId, programmeId])
@@ -3374,6 +3399,10 @@ model ActivityProcess {
   // Legal applicability assessment scopes (T43).
   applicabilityAssessmentScopes ApplicabilityAssessmentScope[]
 
+  // Audit programme/execution scopes (T60).
+  auditProgrammeItemScopes AuditProgrammeItemScope[]
+  emsAuditScopes           EmsAuditScope[]
+
   @@unique([organisationId, id])
   @@index([organisationId, programmeId, status])
   @@index([organisationId, siteId])
@@ -3420,6 +3449,10 @@ model EnvironmentalAspect {
 
   // Compliance obligation version scopes (T44).
   complianceObligationVersionScopes ComplianceObligationVersionScope[]
+
+  // Audit programme/execution scopes (T60).
+  auditProgrammeItemScopes AuditProgrammeItemScope[]
+  emsAuditScopes           EmsAuditScope[]
 
   @@unique([organisationId, id])
   @@index([organisationId, processId])
@@ -4966,6 +4999,10 @@ model ComplianceObligation {
 
   versions ComplianceObligationVersion[] @relation("ComplianceObligationVersions")
 
+  // Audit programme/execution scopes (T60).
+  auditProgrammeItemScopes AuditProgrammeItemScope[]
+  emsAuditScopes           EmsAuditScope[]
+
   @@unique([organisationId, id])
   @@unique([organisationId, activeVersionId])
   @@index([organisationId])
@@ -6002,4 +6039,302 @@ model ActionStatusHistory {
   occurredAt  DateTime @default(now())
 
   @@index([organisationId, actionItemId])
+}
+
+// ---------------------------------------------------------------------------
+// Audit programme and audit execution (task T60, Docs/PHASE6_AUDIT_INCIDENT_CAPA_SPEC.md
+// §§1-3,7). Depends on T23 (EMS programme), T22 (controlled documents/evidence)
+// and T24 (notifications/reminders). Scope is deliberately the programme,
+// scheduling and independence shell only — checklist versioning, question
+// responses, findings and the frozen issued report belong to T61
+// (`EmsAudit.status` therefore only ever reaches IN_PROGRESS here;
+// REPORT_DRAFT/REPORT_ISSUED/CLOSED are reserved enum values T61 will drive).
+//
+// `EmsAudit` is a planned management-system audit, distinct from the
+// `AuditEvent` platform change-history table (T20) — see spec §1 "names and
+// modules must prevent confusion".
+//
+// `AuditProgrammeItemScope`/`EmsAuditScope` follow the exact
+// `ApplicabilityAssessmentScope` shape (entity/site/process/aspect), extended
+// with obligation/requirement-map so a programme's coverage can be reported
+// "by Site/process/aspect/obligation/internal requirement" (spec §3) without
+// a second, incompatible scope shape in the same phase. Exactly one column
+// is set per row — enforced in the service layer, the same way
+// `ComplianceEvaluationScope`/`ApplicabilityAssessmentScope` enforce it.
+//
+// Independence is represented on `AuditTeamMember`, not assumed from role
+// name (spec §1): `independenceDeclared`/`conflictDeclared` must be set
+// explicitly by `assignAuditTeamMember`, never defaulted true, and a
+// declared conflict blocks a LEAD_AUDITOR/AUDITOR assignment in the service
+// layer (spec §8 "independence conflict blocks assignment ... when policy
+// requires it").
+// ---------------------------------------------------------------------------
+
+enum AuditProgrammeStatus {
+  DRAFT
+  APPROVED
+  ACTIVE
+  COMPLETED
+  SUPERSEDED
+}
+
+enum EmsAuditType {
+  INTERNAL
+  SUPPLIER
+  COMPLIANCE
+  SYSTEM
+  PROCESS
+  OTHER
+}
+
+/// Full state machine per spec §2. T60 only ever drives PLANNED -> PREPARATION
+/// -> IN_PROGRESS; later values are reserved for T61.
+enum EmsAuditStatus {
+  PLANNED
+  PREPARATION
+  IN_PROGRESS
+  REPORT_DRAFT
+  REPORT_ISSUED
+  CLOSED
+}
+
+enum AuditTeamRole {
+  LEAD_AUDITOR
+  AUDITOR
+  TECHNICAL_EXPERT
+  OBSERVER
+}
+
+enum AuditItemPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+/// A standing, risk-based programme of internal audits (spec §3
+/// "organisation/programme, period, objectives, risk basis, scope, coverage
+/// targets, owner, approval/status/version"). `AuditProgrammeItem` rows are
+/// the individual planned audits under it; the programme itself carries no
+/// audit content of its own.
+model AuditProgramme {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  name        String
+  description String?
+  objectives  String?
+
+  // Free-text rationale for why this programme prioritises what it does
+  // (spec §3 "risk basis") — deliberately not a structured risk model,
+  // matching how `ComplianceEvaluationProgramme.recurrence` stays a plain
+  // string rather than inventing a scheduling engine this phase doesn't need.
+  riskBasis String
+
+  periodStart DateTime
+  periodEnd   DateTime
+
+  ownerMembershipId String
+  owner             OrganisationMembership @relation("AuditProgrammeOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  status  AuditProgrammeStatus @default(DRAFT)
+  version Int                  @default(1)
+
+  // Revision chain (never mutate approved content in place) — same shape as
+  // `EmsScopeVersion.supersedesVersionId`.
+  supersedesProgrammeId String?
+  supersedesProgramme   AuditProgramme?  @relation("AuditProgrammeSuccessor", fields: [organisationId, supersedesProgrammeId], references: [organisationId, id], onDelete: Restrict)
+  supersededBy          AuditProgramme[] @relation("AuditProgrammeSuccessor")
+
+  approvedAt     DateTime?
+  approvedByUserId String?
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  items  AuditProgrammeItem[]
+  audits EmsAudit[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, status])
+}
+
+/// One planned audit slot under a programme (spec §3 "planned audit,
+/// sites/processes/aspects/obligations/standard-map scope, timing,
+/// priority/rationale"). `EmsAudit.programmeItemId` links the audit actually
+/// created from this slot; a slot may exist with no audit created yet.
+model AuditProgrammeItem {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  programmeId String
+  programme   AuditProgramme @relation(fields: [organisationId, programmeId], references: [organisationId, id], onDelete: Cascade)
+
+  title     String
+  rationale String?
+  priority  AuditItemPriority @default(MEDIUM)
+
+  plannedStart DateTime
+  plannedEnd   DateTime
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  scopes AuditProgrammeItemScope[]
+  audits EmsAudit[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, programmeId])
+}
+
+/// Coverage-dimension row for one `AuditProgrammeItem` — exactly one of
+/// entity/site/process/aspect/obligation/requirementMap is set per row
+/// (service-enforced, same convention as `ApplicabilityAssessmentScope`).
+model AuditProgrammeItemScope {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  itemId String
+  item   AuditProgrammeItem @relation(fields: [organisationId, itemId], references: [organisationId, id], onDelete: Cascade)
+
+  entityId String?
+  entity   Entity? @relation(fields: [organisationId, entityId], references: [organisationId, id], onDelete: Restrict)
+  siteId   String?
+  site     Site?   @relation(fields: [organisationId, siteId], references: [organisationId, id], onDelete: Restrict)
+
+  processId String?
+  process   ActivityProcess? @relation(fields: [organisationId, processId], references: [organisationId, id], onDelete: Restrict)
+  aspectId  String?
+  aspect    EnvironmentalAspect? @relation(fields: [organisationId, aspectId], references: [organisationId, id], onDelete: Restrict)
+
+  obligationId     String?
+  obligation       ComplianceObligation?    @relation(fields: [organisationId, obligationId], references: [organisationId, id], onDelete: Restrict)
+  requirementMapId String?
+  requirementMap   StandardRequirementMap?  @relation(fields: [organisationId, requirementMapId], references: [organisationId, id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, itemId, entityId, siteId, processId, aspectId, obligationId, requirementMapId], map: "AuditProgrammeItemScope_scope_key")
+  @@index([organisationId, itemId])
+  @@index([organisationId, entityId])
+  @@index([organisationId, siteId])
+  @@index([organisationId, processId])
+  @@index([organisationId, aspectId])
+  @@index([organisationId, obligationId])
+  @@index([organisationId, requirementMapId])
+}
+
+/// One planned management-system audit (spec §3). Distinct from the
+/// `AuditEvent` system change-history table — see module note above.
+/// `criteriaReferences` pins the exact controlled-document-revision/standard
+/// references the audit is run against (spec §1 "audit programmes and
+/// reports pin exact criteria/checklist/source versions") — a plain JSON
+/// list of `{ resourceType, resourceId }` pairs since T60 has no checklist
+/// model of its own yet to pin against (that arrives with T61).
+model EmsAudit {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  programmeId String
+  programme   AuditProgramme @relation(fields: [organisationId, programmeId], references: [organisationId, id], onDelete: Restrict)
+
+  programmeItemId String?
+  programmeItem   AuditProgrammeItem? @relation(fields: [organisationId, programmeItemId], references: [organisationId, id], onDelete: Restrict)
+
+  type EmsAuditType
+
+  title              String
+  objectives         String?
+  criteriaSummary    String
+  criteriaReferences Json?
+
+  leadMembershipId String
+  lead             OrganisationMembership @relation("EmsAuditLead", fields: [organisationId, leadMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  scheduledStart DateTime
+  scheduledEnd   DateTime
+
+  status EmsAuditStatus @default(PLANNED)
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  scopes EmsAuditScope[]
+  team   AuditTeamMember[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, programmeId, status])
+  @@index([organisationId, status])
+  @@index([organisationId, programmeItemId])
+}
+
+/// Coverage-dimension row for one `EmsAudit` — same shape/convention as
+/// `AuditProgrammeItemScope`.
+model EmsAuditScope {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  auditId String
+  audit   EmsAudit @relation(fields: [organisationId, auditId], references: [organisationId, id], onDelete: Cascade)
+
+  entityId String?
+  entity   Entity? @relation(fields: [organisationId, entityId], references: [organisationId, id], onDelete: Restrict)
+  siteId   String?
+  site     Site?   @relation(fields: [organisationId, siteId], references: [organisationId, id], onDelete: Restrict)
+
+  processId String?
+  process   ActivityProcess? @relation(fields: [organisationId, processId], references: [organisationId, id], onDelete: Restrict)
+  aspectId  String?
+  aspect    EnvironmentalAspect? @relation(fields: [organisationId, aspectId], references: [organisationId, id], onDelete: Restrict)
+
+  obligationId     String?
+  obligation       ComplianceObligation?   @relation(fields: [organisationId, obligationId], references: [organisationId, id], onDelete: Restrict)
+  requirementMapId String?
+  requirementMap   StandardRequirementMap? @relation(fields: [organisationId, requirementMapId], references: [organisationId, id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, auditId, entityId, siteId, processId, aspectId, obligationId, requirementMapId], map: "EmsAuditScope_scope_key")
+  @@index([organisationId, auditId])
+  @@index([organisationId, entityId])
+  @@index([organisationId, siteId])
+  @@index([organisationId, processId])
+  @@index([organisationId, aspectId])
+  @@index([organisationId, obligationId])
+  @@index([organisationId, requirementMapId])
+}
+
+/// One person's membership of one audit's team (spec §3). Independence is
+/// represented explicitly here, not assumed from `role` — see module note.
+model AuditTeamMember {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  auditId String
+  audit   EmsAudit @relation(fields: [organisationId, auditId], references: [organisationId, id], onDelete: Cascade)
+
+  membershipId String
+  membership   OrganisationMembership @relation("AuditTeamMembership", fields: [organisationId, membershipId], references: [organisationId, id], onDelete: Restrict)
+
+  role AuditTeamRole
+
+  independenceDeclared Boolean   @default(false)
+  conflictDeclared     Boolean   @default(false)
+  conflictNotes        String?
+  declaredAt           DateTime?
+
+  addedByUserId String
+  createdAt     DateTime @default(now())
+
+  @@unique([organisationId, auditId, membershipId])
+  @@index([organisationId, auditId])
+  @@index([organisationId, membershipId])
 }
