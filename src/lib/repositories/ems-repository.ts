@@ -311,6 +311,49 @@ export async function findTenantActionItem(ctx: TenantRepositoryContext, id: str
   return assertChildOwnership(ctx, row, expectedProgrammeId, "programmeId");
 }
 
+/** Loads a T60 audit programme only inside the current organisation. */
+export async function findTenantAuditProgramme(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.auditProgramme.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads a T60 audit programme item only inside the current organisation, and
+ * (when `expectedProgrammeId` is supplied) attached to that exact
+ * programme — the nested-parent-substitution guard.
+ */
+export async function findTenantAuditProgrammeItem(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedProgrammeId?: string,
+) {
+  const row = await prisma.auditProgrammeItem.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedProgrammeId, "programmeId");
+}
+
+/**
+ * Loads a T60 planned audit only inside the current organisation, and
+ * (when `expectedProgrammeId` is supplied) attached to that exact
+ * programme — the nested-parent-substitution guard.
+ */
+export async function findTenantEmsAudit(ctx: TenantRepositoryContext, id: string, expectedProgrammeId?: string) {
+  const row = await prisma.emsAudit.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedProgrammeId, "programmeId");
+}
+
+/**
+ * Loads a T60 audit team member only inside the current organisation, and
+ * (when `expectedAuditId` is supplied) attached to that exact audit — the
+ * nested-parent-substitution guard.
+ */
+export async function findTenantAuditTeamMember(ctx: TenantRepositoryContext, id: string, expectedAuditId?: string) {
+  const row = await prisma.auditTeamMember.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedAuditId, "auditId");
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain

@@ -86,6 +86,11 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   // item in the tenant repository before linking — used for completion
   // evidence.
   "action_item",
+  // Audit programme and audit execution (task T60). Callers resolve the
+  // audit/team member in the tenant repository before linking — used for
+  // criteria references and auditor competence/independence evidence.
+  "ems_audit",
+  "audit_team_member",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 

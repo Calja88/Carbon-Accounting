@@ -150,6 +150,18 @@ export const AUDIT_EVENT_TYPES = [
   "action_item.completed",
   "action_item.verified",
   "action_item.reopened",
+  // Audit programme and audit execution (task T60).
+  "audit_programme.created",
+  "audit_programme.approved",
+  "audit_programme.activated",
+  "audit_programme.completed",
+  "audit_programme_item.created",
+  "ems_audit.created",
+  "ems_audit.rescheduled",
+  "ems_audit.preparation_started",
+  "ems_audit.started",
+  "audit_team_member.assigned",
+  "audit_team_member.removed",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -201,7 +213,11 @@ export type AuditResourceType =
   | "environmental_objective_version"
   | "objective_metric_version"
   | "action_programme"
-  | "action_item";
+  | "action_item"
+  | "audit_programme"
+  | "audit_programme_item"
+  | "ems_audit"
+  | "audit_team_member";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept
