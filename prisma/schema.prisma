@@ -179,6 +179,9 @@ model Organisation {
   // Platform audit log (T20).
   auditEvents AuditEvent[]
 
+  // Legal hold register (T81).
+  legalHolds LegalHold[]
+
   // Transactional outbox and job framework (T21).
   outboxMessages OutboxMessage[]
   jobRuns        JobRun[]
@@ -750,6 +753,10 @@ model User {
 
   // Platform audit log (T20).
   auditEvents AuditEvent[] @relation("AuditEventActor")
+
+  // Legal hold register (T81).
+  legalHoldsCreated  LegalHold[] @relation("LegalHoldCreatedBy")
+  legalHoldsReleased LegalHold[] @relation("LegalHoldReleasedBy")
 
   // --- AI layer / evidence documents ---
   aiSettingsUpdates    AiSettings[]         @relation("AiSettingsUpdatedBy")
@@ -2340,6 +2347,48 @@ model AuditEvent {
   @@index([organisationId, sequence])
 }
 
+/// Legal hold register (task T81, Docs/PHASE8_HARDENING_READINESS_SPEC.md
+/// §4 "Holds always win"). A hold either targets one resource
+/// (`resourceType`+`resourceId` both set) or the whole organisation
+/// (`resourceType`/`resourceId` both null) — never partial, so a query for
+/// "is X under hold" only needs to check its own resource row plus the one
+/// org-wide row, and can never miss a hold because of a typo'd resource
+/// type. `status` stays `ACTIVE` until explicitly released; there is no
+/// update path that changes `resourceId`/`resourceType`/`reason` in place —
+/// a hold is superseded by releasing it and creating a new one, so the
+/// register itself stays an honest history.
+model LegalHold {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  /// Both null means an organisation-wide hold (every record in every
+  /// class). Both set means the hold applies only to that one resource.
+  resourceType String?
+  resourceId   String?
+
+  reason String
+
+  status LegalHoldStatus @default(ACTIVE)
+
+  createdByUserId String
+  createdBy       User     @relation("LegalHoldCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+
+  releasedByUserId String?
+  releasedBy       User?     @relation("LegalHoldReleasedBy", fields: [releasedByUserId], references: [id])
+  releasedAt       DateTime?
+  releaseReason    String?
+
+  @@index([organisationId, status])
+  @@index([organisationId, resourceType, resourceId, status])
+}
+
+enum LegalHoldStatus {
+  ACTIVE
+  RELEASED
+}
+
 // ---------------------------------------------------------------------------
 // Transactional outbox and job framework (Phase 2 spec §§2,3 "Audit, outbox
 // and notifications", task T21). `OutboxMessage` is the reliability
@@ -2652,6 +2701,12 @@ model EvidenceObject {
   /// Deletion is prohibited while this is true, regardless of retention
   /// category — checked in the service layer before any remove() call.
   legalHold         Boolean                @default(false)
+  /// Set by `src/lib/retention/retention-service.ts` when retention
+  /// execution removes this object's bytes (task T81). Metadata/checksum
+  /// rows are kept for traceability; only the blob and storage-provider
+  /// bytes are removed — a tombstone, not a row delete, so audit links and
+  /// export history keep resolving. Null while the object is live.
+  retentionTombstonedAt DateTime?
 
   /// Always set by the malware-scanning interface — PENDING immediately
   /// after upload, until a scanner (no-op in development) updates it.
@@ -2672,6 +2727,7 @@ model EvidenceObject {
 
   @@unique([organisationId, id])
   @@index([organisationId, classification])
+  @@index([organisationId, retentionUntil])
 }
 
 /// Bytes for the shared evidence provider's built-in "database" backend —

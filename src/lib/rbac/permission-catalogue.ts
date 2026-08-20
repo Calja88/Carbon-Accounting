@@ -33,6 +33,9 @@ export const PERMISSION_CATALOGUE: PermissionCatalogueEntry[] = [
   entry("organisation.role.view", "View role definitions and grants"),
   entry("organisation.role.manage", "Create, edit, or assign roles and permissions", true),
   entry("organisation.access_review.manage", "Run and record periodic access reviews"),
+  entry("organisation.legal_hold.manage", "Place or release a legal hold on organisation records", true),
+  entry("organisation.retention.manage", "Preview and execute record retention for the organisation", true),
+  entry("organisation.export.generate", "Generate a full organisation export", true),
 
   // --- Corporate carbon ---
   entry("carbon.view", "View corporate carbon activity data and calculations"),
