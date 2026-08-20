@@ -97,6 +97,10 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   // supporting evidence for a finding.
   "audit_question_response",
   "audit_finding",
+  // Environmental incident intake (task T62). Callers resolve the incident
+  // in the tenant repository, and re-check restricted-incident clearance,
+  // before invoking linkEvidence.
+  "environmental_incident",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 

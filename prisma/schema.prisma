@@ -287,6 +287,13 @@ model Organisation {
   auditReportRevisions   AuditReportRevision[]
   auditCoverageSnapshots AuditCoverageSnapshot[]
 
+  // Environmental incident intake (T62).
+  incidentSeverityLevels          IncidentSeverityLevel[]
+  incidentEscalationRules         IncidentEscalationRule[]
+  environmentalIncidents          EnvironmentalIncident[]
+  incidentCorrections             IncidentCorrection[]
+  incidentNotificationAssessments IncidentNotificationAssessment[]
+
   @@index([status])
 }
 
@@ -386,6 +393,10 @@ model OrganisationMembership {
   // Checklists, evidence, findings and frozen report (T61).
   auditQuestionResponses AuditQuestionResponse[]
   ownedAuditFindings     AuditFinding[]
+
+  // Environmental incident intake (T62).
+  reportedIncidents                  EnvironmentalIncident[]          @relation("EnvironmentalIncidentReporter")
+  reviewedIncidentNotificationChecks IncidentNotificationAssessment[] @relation("IncidentNotificationAssessmentReviewer")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -530,6 +541,9 @@ model Entity {
   auditProgrammeItemScopes AuditProgrammeItemScope[]
   emsAuditScopes           EmsAuditScope[]
 
+  // Environmental incident intake (T62).
+  environmentalIncidents EnvironmentalIncident[]
+
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy global-unique Entity name —
   // two organisations may now use the same Entity name.
@@ -590,6 +604,9 @@ model Site {
   // Audit programme/execution scopes (T60).
   auditProgrammeItemScopes AuditProgrammeItemScope[]
   emsAuditScopes           EmsAuditScope[]
+
+  // Environmental incident intake (T62).
+  environmentalIncidents EnvironmentalIncident[]
 
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy [entityId, name] unique —
@@ -3415,6 +3432,9 @@ model ActivityProcess {
   auditProgrammeItemScopes AuditProgrammeItemScope[]
   emsAuditScopes           EmsAuditScope[]
 
+  // Environmental incident intake (T62).
+  environmentalIncidents EnvironmentalIncident[]
+
   @@unique([organisationId, id])
   @@index([organisationId, programmeId, status])
   @@index([organisationId, siteId])
@@ -3465,6 +3485,9 @@ model EnvironmentalAspect {
   // Audit programme/execution scopes (T60).
   auditProgrammeItemScopes AuditProgrammeItemScope[]
   emsAuditScopes           EmsAuditScope[]
+
+  // Environmental incident intake (T62).
+  environmentalIncidents EnvironmentalIncident[]
 
   @@unique([organisationId, id])
   @@index([organisationId, processId])
@@ -6603,4 +6626,220 @@ model AuditCoverageSnapshot {
   @@unique([organisationId, id])
   @@unique([organisationId, auditId])
   @@unique([organisationId, reportRevisionId])
+}
+
+// ---------------------------------------------------------------------------
+// Environmental incident intake (task T62, Docs/PHASE6_AUDIT_INCIDENT_CAPA_SPEC.md
+// §§1-3,5-9). Depends on T22 (`EvidenceObject`/`EvidenceLink`, resource type
+// `environmental_incident` added to `EVIDENCE_LINK_RESOURCE_TYPES`) and T23
+// (Organisation/EMS tenant foundation) — see `src/lib/ems/incidents/incident-service.ts`.
+//
+// `IncidentSeverityLevel`/`IncidentEscalationRule` are the organisation's own
+// configurable severity/escalation policy (spec acceptance: "escalation
+// rules configurable") — same recipients-policy convention as
+// `ReminderRule.recipientsPolicy` (T24). `EnvironmentalIncident.severityConfigSnapshot`
+// freezes the exact severity-level row in effect when severity was assigned,
+// so a later edit to the config never rewrites a past incident's record.
+//
+// `EnvironmentalIncident`'s own factual fields (`factualDescription`/
+// `immediateResponse`/`potentialReceptors`) are set once at creation and
+// never overwritten — `IncidentCorrection` is the only way to record a
+// changed understanding of the facts, and it always keeps the original
+// (spec acceptance: "preserves original report and corrections").
+//
+// `IncidentNotificationAssessment.decision` is entered only by a human
+// reviewer through `notification-assessment-service.ts`; nothing in this
+// schema or the service layer defaults or infers it, which is what makes
+// "no automatic legal-reportability conclusion" true at the data level
+// (spec acceptance).
+// ---------------------------------------------------------------------------
+
+enum EnvironmentalIncidentStatus {
+  REPORTED
+  TRIAGED
+  INVESTIGATING
+  RESPONSE_COMPLETE
+  CLOSED
+  REOPENED
+}
+
+enum IncidentNotificationDecision {
+  NOT_REQUIRED
+  REQUIRED
+  UNCERTAIN
+}
+
+/// Organisation-configurable incident severity levels (spec §4 "severity
+/// config snapshot"). `rank` orders levels low -> high for display; a level
+/// is never deleted once referenced by an incident, only deactivated
+/// (`isActive = false`) — `incident-service.ts` enforces this.
+model IncidentSeverityLevel {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  key                String
+  label              String
+  rank               Int
+  requiresEscalation Boolean @default(false)
+  isActive           Boolean @default(true)
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  escalationRule IncidentEscalationRule?
+  incidents      EnvironmentalIncident[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, key])
+  @@index([organisationId, isActive])
+}
+
+/// Configurable escalation rule for one severity level (spec acceptance:
+/// "escalation rules configurable"). `recipientsPolicy` is resolved against
+/// live membership state at evaluation time, never a stored membership id
+/// list — same convention as `ReminderRule.recipientsPolicy` (T24).
+model IncidentEscalationRule {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  severityLevelId String
+  severityLevel   IncidentSeverityLevel @relation(fields: [organisationId, severityLevelId], references: [organisationId, id], onDelete: Cascade)
+
+  recipientsPolicy Json
+  isActive         Boolean @default(true)
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, severityLevelId])
+  @@index([organisationId, isActive])
+}
+
+/// One reported environmental incident (spec §4). State machine per spec §2:
+///   REPORTED -> TRIAGED -> INVESTIGATING -> RESPONSE_COMPLETE -> CLOSED / REOPENED
+/// `restricted` gates list/search/aggregate visibility to
+/// `ems.incident.restricted.view` in the service layer (spec §5); the
+/// reporter may always read their own report regardless.
+model EnvironmentalIncident {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  reference String
+
+  reportedAt   DateTime  @default(now())
+  occurredAt   DateTime?
+  discoveredAt DateTime?
+
+  entityId  String?
+  entity    Entity?              @relation(fields: [organisationId, entityId], references: [organisationId, id], onDelete: Restrict)
+  siteId    String?
+  site      Site?                @relation(fields: [organisationId, siteId], references: [organisationId, id], onDelete: Restrict)
+  processId String?
+  process   ActivityProcess?     @relation(fields: [organisationId, processId], references: [organisationId, id], onDelete: Restrict)
+  aspectId  String?
+  aspect    EnvironmentalAspect? @relation(fields: [organisationId, aspectId], references: [organisationId, id], onDelete: Restrict)
+
+  type String
+
+  // Original report — set once at creation, never overwritten. See
+  // IncidentCorrection for how a changed understanding of the facts is
+  // recorded without losing this.
+  factualDescription String
+  immediateResponse  String?
+  potentialReceptors String?
+
+  severityLevelId        String?
+  severityLevel          IncidentSeverityLevel? @relation(fields: [organisationId, severityLevelId], references: [organisationId, id], onDelete: Restrict)
+  severityConfigSnapshot Json?
+
+  status     EnvironmentalIncidentStatus @default(REPORTED)
+  restricted Boolean                     @default(false)
+
+  reporterMembershipId String
+  reporter             OrganisationMembership @relation("EnvironmentalIncidentReporter", fields: [organisationId, reporterMembershipId], references: [organisationId, id], onDelete: Restrict)
+  reporterUserId       String
+
+  closedAt         DateTime?
+  closedByUserId   String?
+  reopenedAt       DateTime?
+  reopenedByUserId String?
+  reopenReason     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  corrections             IncidentCorrection[]
+  notificationAssessments IncidentNotificationAssessment[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, reference])
+  @@index([organisationId, status])
+  @@index([organisationId, restricted])
+  @@index([organisationId, entityId])
+  @@index([organisationId, siteId])
+  @@index([organisationId, processId])
+  @@index([organisationId, aspectId])
+  @@index([organisationId, severityLevelId])
+}
+
+/// Append-only correction to an incident's factual record (spec §4
+/// "append-only correction to factual record with reason; original
+/// retained"). The incident's own factual fields never change after
+/// creation — the current view is the latest correction here, if any, else
+/// the original incident fields; `incident-service.ts#getEnvironmentalIncident`
+/// computes this rather than the schema.
+model IncidentCorrection {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  incidentId String
+  incident   EnvironmentalIncident @relation(fields: [organisationId, incidentId], references: [organisationId, id], onDelete: Cascade)
+
+  correctedFactualDescription String?
+  correctedImmediateResponse  String?
+  correctedPotentialReceptors String?
+  reason                      String
+
+  correctedByUserId String
+  correctedAt       DateTime @default(now())
+
+  @@unique([organisationId, id])
+  @@index([organisationId, incidentId])
+}
+
+/// A competent reviewer's notification/reportability assessment (spec §4
+/// "authority/party, due trigger, decision, competent reviewer,
+/// rationale/evidence/time. Never automatic legal advice."). `decision` is
+/// always set explicitly by `reviewerMembershipId` through
+/// `notification-assessment-service.ts` — nothing here or in the service
+/// infers or defaults it (spec acceptance: "no automatic legal-reportability
+/// conclusion").
+model IncidentNotificationAssessment {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  incidentId String
+  incident   EnvironmentalIncident @relation(fields: [organisationId, incidentId], references: [organisationId, id], onDelete: Cascade)
+
+  authorityOrParty String
+  dueTrigger       String?
+  decision         IncidentNotificationDecision
+  rationale        String
+
+  reviewerMembershipId String
+  reviewer             OrganisationMembership @relation("IncidentNotificationAssessmentReviewer", fields: [organisationId, reviewerMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  assessedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@unique([organisationId, id])
+  @@index([organisationId, incidentId])
 }

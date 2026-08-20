@@ -61,6 +61,12 @@
  *    Provider controls reuse `ems.control.manage` per Phase 3 spec §4, so no
  *    new code or template change was needed for that part. Flagged here as
  *    an owner decision to confirm, same as the AI-governance note above.
+ *  - T62 (environmental incident intake) added `ems.incident.restricted.view`
+ *    (Phase 6 spec §5: "add `ems.incident.restricted.view` for confidential
+ *    records"). Granted only to Sustainability Lead, the same default-only
+ *    pattern used for `ems.compliance_obligation.approve` — every other
+ *    template can report/work incidents (`EMS_INCIDENT_WORK`) but not read a
+ *    restricted one. Flagged as an owner decision to confirm.
  */
 
 // Type-only: RoleTemplateKey is never read as a runtime value in this file —
@@ -93,7 +99,12 @@ const EMS_APPLICABILITY_ASSESS = ["ems.applicability.assess", "ems.legal_source.
 const EMS_APPLICABILITY_REVIEW = ["ems.applicability.review"];
 const EMS_OBJECTIVES_MANAGE = ["ems.objective.manage", "ems.action.manage"];
 const EMS_INCIDENT_WORK = ["ems.incident.report", "ems.nonconformity.manage", "ems.corrective_action.manage"];
-const EMS_INCIDENT_MANAGE = [...EMS_INCIDENT_WORK, "ems.incident.manage", "ems.corrective_action.effectiveness_review"];
+const EMS_INCIDENT_MANAGE = [
+  ...EMS_INCIDENT_WORK,
+  "ems.incident.manage",
+  "ems.incident.restricted.view",
+  "ems.corrective_action.effectiveness_review",
+];
 const EMS_AUDIT_MANAGE = ["ems.audit_programme.manage", "ems.audit.perform", "ems.audit_report.issue"];
 const EMS_DOCUMENT_MANAGE = ["ems.controlled_document.manage"];
 // T35: provider controls reuse ems.control.manage per Phase 3 spec §4 — no
