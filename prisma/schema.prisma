@@ -328,6 +328,14 @@ model Organisation {
   managementReviewAttendees              ManagementReviewAttendee[]
   managementReviewInputLinks             ManagementReviewInputLink[]
 
+  // Deterministic review pack, decisions and approved minutes (T73).
+  managementReviewPacks          ManagementReviewPack[]
+  managementReviewInputSnapshots ManagementReviewInputSnapshot[]
+  managementReviewAiNarratives   ManagementReviewAiNarrative[]
+  managementReviewDecisions      ManagementReviewDecision[]
+  managementReviewMinuteRevisions ManagementReviewMinuteRevision[]
+  managementReviewActionLinks    ManagementReviewActionLink[]
+
   @@index([status])
 }
 
@@ -458,6 +466,13 @@ model OrganisationMembership {
   chairedManagementReviews       ManagementReview[]           @relation("ManagementReviewChair")
   coordinatedManagementReviews   ManagementReview[]           @relation("ManagementReviewCoordinator")
   linkedManagementReviewInputs   ManagementReviewInputLink[]  @relation("ManagementReviewInputLinkLinkedBy")
+
+  // Deterministic review pack, decisions and approved minutes (T73).
+  ownedManagementReviewDecisions    ManagementReviewDecision[]       @relation("ManagementReviewDecisionOwner")
+  recordedManagementReviewDecisions ManagementReviewDecision[]       @relation("ManagementReviewDecisionRecordedBy")
+  preparedManagementReviewMinuteRevisions ManagementReviewMinuteRevision[] @relation("ManagementReviewMinuteRevisionPreparedBy")
+  approvedManagementReviewMinuteRevisions ManagementReviewMinuteRevision[] @relation("ManagementReviewMinuteRevisionApprovedBy")
+  linkedManagementReviewActionLinks ManagementReviewActionLink[]     @relation("ManagementReviewActionLinkLinkedBy")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -6098,6 +6113,11 @@ model ActionItem {
   // implied — see corrective-action-service.ts.
   correctiveActionLinks CorrectiveAction[]
 
+  // Management review action links (T73) — link-only, see
+  // `ManagementReviewActionLink` file-header note; this module never writes
+  // to a linked ActionItem.
+  managementReviewActionLinks ManagementReviewActionLink[]
+
   @@unique([organisationId, id])
   @@index([organisationId, programmeId])
   @@index([organisationId, status])
@@ -8033,6 +8053,11 @@ model ManagementReview {
   attendees  ManagementReviewAttendee[]
   inputLinks ManagementReviewInputLink[]
 
+  // Deterministic review pack, decisions and approved minutes (T73).
+  pack            ManagementReviewPack?
+  decisions       ManagementReviewDecision[]
+  minuteRevisions ManagementReviewMinuteRevision[]
+
   @@unique([organisationId, id])
   @@unique([organisationId, reference])
   @@index([organisationId, status])
@@ -8103,4 +8128,304 @@ model ManagementReviewInputLink {
   @@unique([organisationId, reviewId, inputDefinitionKey, sourceRecordId], map: "ManagementReviewInputLink_unique_source")
   @@index([organisationId, reviewId])
   @@index([organisationId, inputDefinitionKey])
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic review pack generation, decisions and approved minutes (task
+// T73, Docs/PHASE7_COMPETENCE_MANAGEMENT_REVIEW_SPEC.md §§1,4-6, PR sequence
+// P7-06/P7-07/P7-08). Depends on T72's `ManagementReview`/
+// `ManagementReviewInputLink`/`ManagementReviewAttendee`, already on this
+// branch. Deliberately narrow: only the pack/snapshot/decision/minute/
+// action-link tables and the `PACK_ISSUED`/`HELD`/`MINUTES_DRAFT`/
+// `APPROVED`/`CLOSED` half of `ManagementReview.status` T72 reserved
+// (schema file-header note above) — no other T number's model changes.
+//
+// `ManagementReviewPack` is the one-per-review pack row (spec §4 "review,
+// exact template version, cutoff, generation time, frozen JSON payload,
+// file/checksum, generator version, issued by/time"). `status` is DRAFT ->
+// ISSUED, a one-way transition set only by `pack-service.ts#issueManagementReviewPack`
+// (exactly the `AuditReportRevision.status -> ISSUED` convention T61 uses):
+// once ISSUED, `payload`/`checksumSha256` are never written again.
+// `pack-service.ts#generateManagementReviewPack` may be called repeatedly
+// while DRAFT — spec acceptance "repeated generation from same snapshot is
+// stable" — recomputing `payload`/`checksumSha256` from the review's current
+// `ManagementReviewInputLink` rows each time; the checksum is a SHA-256 of
+// the *canonical* (recursively key-sorted) JSON serialization of `payload`,
+// reusing `canonicalStringify` from `src/lib/audit/integrity.ts` (the same
+// helper the append-only audit-log hash chain uses) rather than
+// `report-service.ts`'s plain `JSON.stringify`, because determinism here is
+// an explicit acceptance criterion, not an incidental property of a
+// fixed-key-order object literal.
+//
+// `ManagementReviewInputSnapshot` is the frozen, per-input-key copy taken at
+// issue time (spec §4 "pack ... input snapshot"; §1 "issue freezes inputs"):
+// one row per `ManagementReviewInputLink` the review had linked at that
+// instant, copied — never referenced live — so a later edit or deletion of
+// the source `ManagementReviewInputLink` can never change an issued pack's
+// record of what it saw.
+//
+// `ManagementReviewAiNarrative` is the optional, clearly labelled AI
+// attachment (spec §1 "AI may draft a labelled narrative from the frozen
+// pack but cannot create decisions, conclusions or approval"; §6 AI
+// boundary). It only ever attaches to an ISSUED pack (never a live/mutable
+// one), is never merged into `ManagementReviewDecision`/
+// `ManagementReviewMinuteRevision` content by any code path, and must reach
+// `REVIEWED` status before a minute revision's `narrativeId` may reference
+// it (`minutes-service.ts`) — a `PENDING_REVIEW` or `REJECTED` narrative can
+// never be attached to minutes.
+//
+// `ManagementReviewDecision` rows are always created from caller-supplied
+// `decisionType`/`text`/`rationale` — spec §1 "do not infer decisions
+// automatically from linked inputs, narrative, metrics, findings, or
+// actions" is enforced by `minutes-service.ts` never reading pack/narrative
+// content into a decision field, only ever the human-entered input.
+// `minutes-service.ts` exposes creation only for this row — there is no
+// update/delete path — so a decision is immutable by construction the
+// instant it is recorded; a correction is always a new decision, folded
+// into the next addendum minute revision, never an edit of the original.
+//
+// `ManagementReviewMinuteRevision` is spec §4's "draft/approved/addendum,
+// controlled content/checksum, preparer/approver/times": the first
+// revision (`revisionNumber: 1`, `status: DRAFT`) is created by
+// `minutes-service.ts#draftManagementReviewMinutes` (HELD -> MINUTES_DRAFT),
+// approved by `#approveManagementReviewMinutes` (requires
+// `ems.management_review.approve`, MINUTES_DRAFT -> APPROVED for the
+// primary revision), after which every field is frozen — the exact
+// `AuditReportRevision` "issued/approved -> immutable, corrected only by a
+// successor row" convention. A later correction
+// (`#createManagementReviewMinutesAddendum`) is a new revision row whose
+// `supersedesRevisionId` references the prior APPROVED revision and which
+// never replaces it, satisfying spec §1 "corrections require a
+// successor/addendum" — see the model's own doc comment for why "addendum"
+// is carried by `supersedesRevisionId` rather than a third `status` value.
+//
+// `ManagementReviewActionLink` is spec §4's "decision to shared ActionItem":
+// a link-only row, following the exact `CorrectiveAction.sharedActionItemId`
+// (T64) convention — this module never creates, completes or otherwise
+// writes to the linked `ActionItem`, so a review can never silently mark its
+// own resulting action complete or achieved (spec §1 "track resulting
+// actions without silently marking them complete or achieved").
+// ---------------------------------------------------------------------------
+
+enum ManagementReviewPackStatus {
+  DRAFT
+  ISSUED
+}
+
+enum ManagementReviewAiNarrativeStatus {
+  PENDING_REVIEW
+  REVIEWED
+  REJECTED
+}
+
+enum ManagementReviewDecisionType {
+  RESOURCE_ALLOCATION
+  OBJECTIVE_OR_POLICY_CHANGE
+  PROCESS_OR_CONTROL_CHANGE
+  OTHER
+}
+
+/// A revision's own lifecycle (spec §4 "draft/approved"); whether a revision
+/// is an original or a correction is carried by `supersedesRevisionId`
+/// (non-null only on an addendum) rather than a third enum value here — see
+/// `ManagementReviewMinuteRevision`'s doc comment.
+enum ManagementReviewMinuteRevisionStatus {
+  DRAFT
+  APPROVED
+}
+
+/// One-per-review deterministic pack (spec §4). See file-header note above
+/// for the DRAFT -> ISSUED freeze and checksum algorithm.
+model ManagementReviewPack {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  reviewId String
+  review   ManagementReview @relation(fields: [organisationId, reviewId], references: [organisationId, id], onDelete: Restrict)
+
+  agendaTemplateVersionId String
+
+  cutoffDate DateTime
+
+  generatorVersion String @default("t73-pack-v1")
+
+  status ManagementReviewPackStatus @default(DRAFT)
+
+  payload        Json?
+  checksumSha256 String?
+  generatedAt    DateTime?
+
+  issuedByUserId String?
+  issuedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  inputSnapshots ManagementReviewInputSnapshot[]
+  aiNarratives   ManagementReviewAiNarrative[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, reviewId])
+  @@index([organisationId, status])
+}
+
+/// Frozen copy of one `ManagementReviewInputLink` taken at pack issue (spec
+/// §4/§1 "issue freezes inputs"). See file-header note above.
+model ManagementReviewInputSnapshot {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  packId String
+  pack   ManagementReviewPack @relation(fields: [organisationId, packId], references: [organisationId, id], onDelete: Cascade)
+
+  inputDefinitionKey String
+  sourceType         ManagementReviewInputSourceType
+
+  sourceRecordId     String
+  sourceVersionLabel String?
+
+  summary Json?
+  isStale Boolean @default(false)
+
+  capturedAt DateTime @default(now())
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, packId, inputDefinitionKey, sourceRecordId], map: "ManagementReviewInputSnapshot_unique_source")
+  @@index([organisationId, packId])
+}
+
+/// Optional, clearly labelled AI-drafted narrative attached to an issued
+/// pack (spec §1/§6 AI boundary). See file-header note above.
+model ManagementReviewAiNarrative {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  packId String
+  pack   ManagementReviewPack @relation(fields: [organisationId, packId], references: [organisationId, id], onDelete: Cascade)
+
+  content String
+
+  status ManagementReviewAiNarrativeStatus @default(PENDING_REVIEW)
+
+  generatedByUserId String
+  generatedAt       DateTime @default(now())
+
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  rejectionReason  String?
+
+  minuteRevisions ManagementReviewMinuteRevision[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, packId, status])
+}
+
+/// One explicit, human-recorded decision (spec §1 "do not infer decisions
+/// automatically ..."; §4). `minutes-service.ts` exposes creation only — no
+/// update/delete path exists for this row, so a recorded decision can never
+/// be edited after the fact by construction, not by a separate immutability
+/// flag. A correction after minutes approval is a new decision, folded into
+/// the next addendum `ManagementReviewMinuteRevision`.
+model ManagementReviewDecision {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  reviewId String
+  review   ManagementReview @relation(fields: [organisationId, reviewId], references: [organisationId, id], onDelete: Restrict)
+
+  inputDefinitionKey String?
+
+  decisionType ManagementReviewDecisionType
+  text         String
+  rationale    String?
+
+  ownerMembershipId String?
+  owner             OrganisationMembership? @relation("ManagementReviewDecisionOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id], onDelete: Restrict)
+  targetDate        DateTime?
+
+  recordedByMembershipId String
+  recordedBy             OrganisationMembership @relation("ManagementReviewDecisionRecordedBy", fields: [organisationId, recordedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  recordedAt              DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  actionLinks ManagementReviewActionLink[]
+
+  @@unique([organisationId, id])
+  @@index([organisationId, reviewId])
+}
+
+/// Draft/approved minutes (spec §4). A row is an "addendum" exactly when
+/// `supersedesRevisionId` is set (pointing at the prior APPROVED revision it
+/// corrects) — spec §1 "corrections require a successor/addendum", the same
+/// `AuditReportRevision`/`CompetenceRequirementVersion` "later change is a
+/// new successor row, never an edit in place" convention. `status` DRAFT ->
+/// APPROVED is a one-way transition (`minutes-service.ts#approveManagementReviewMinutes`,
+/// requires `ems.management_review.approve`); once APPROVED, `content`/
+/// `checksumSha256` are never written again for that row.
+model ManagementReviewMinuteRevision {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  reviewId String
+  review   ManagementReview @relation(fields: [organisationId, reviewId], references: [organisationId, id], onDelete: Restrict)
+
+  revisionNumber Int
+  status         ManagementReviewMinuteRevisionStatus @default(DRAFT)
+
+  content        Json
+  checksumSha256 String?
+
+  narrativeId String?
+  narrative   ManagementReviewAiNarrative? @relation(fields: [organisationId, narrativeId], references: [organisationId, id], onDelete: Restrict)
+
+  preparedByMembershipId String
+  preparedBy             OrganisationMembership @relation("ManagementReviewMinuteRevisionPreparedBy", fields: [organisationId, preparedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  preparedAt              DateTime @default(now())
+
+  approvedByMembershipId String?
+  approvedBy             OrganisationMembership? @relation("ManagementReviewMinuteRevisionApprovedBy", fields: [organisationId, approvedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  approvedAt              DateTime?
+
+  supersedesRevisionId String?
+  supersedesRevision   ManagementReviewMinuteRevision? @relation("ManagementReviewMinuteRevisionSuccessor", fields: [organisationId, supersedesRevisionId], references: [organisationId, id])
+  successorRevision    ManagementReviewMinuteRevision? @relation("ManagementReviewMinuteRevisionSuccessor")
+  addendumReason        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, reviewId, revisionNumber])
+  @@unique([organisationId, supersedesRevisionId])
+  @@index([organisationId, reviewId, status])
+}
+
+/// Decision -> shared ActionItem link (spec §4). See file-header note above:
+/// link-only, never writes to the linked `ActionItem`.
+model ManagementReviewActionLink {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  decisionId String
+  decision   ManagementReviewDecision @relation(fields: [organisationId, decisionId], references: [organisationId, id], onDelete: Restrict)
+
+  actionItemId String
+  actionItem   ActionItem @relation(fields: [organisationId, actionItemId], references: [organisationId, id], onDelete: Restrict)
+
+  linkedByMembershipId String
+  linkedBy             OrganisationMembership @relation("ManagementReviewActionLinkLinkedBy", fields: [organisationId, linkedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  linkedAt              DateTime @default(now())
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, decisionId, actionItemId])
+  @@index([organisationId, decisionId])
+  @@index([organisationId, actionItemId])
 }

@@ -240,6 +240,19 @@ export const AUDIT_EVENT_TYPES = [
   "management_review_attendee.removed",
   "management_review_input_link.linked",
   "management_review_input_link.removed",
+  // Deterministic review pack, decisions and approved minutes (task T73).
+  "management_review_pack.generated",
+  "management_review_pack.issued",
+  "management_review_ai_narrative.added",
+  "management_review_ai_narrative.reviewed",
+  "management_review_decision.recorded",
+  "management_review.held",
+  "management_review_minutes.drafted",
+  "management_review_minutes.approved",
+  "management_review_minutes.addendum_drafted",
+  "management_review.closed",
+  "management_review_action_link.linked",
+  "management_review_action_link.unlinked",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -316,7 +329,12 @@ export type AuditResourceType =
   | "management_review_agenda_template_version"
   | "management_review"
   | "management_review_attendee"
-  | "management_review_input_link";
+  | "management_review_input_link"
+  | "management_review_pack"
+  | "management_review_ai_narrative"
+  | "management_review_decision"
+  | "management_review_minute_revision"
+  | "management_review_action_link";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

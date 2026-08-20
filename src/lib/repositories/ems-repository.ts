@@ -705,3 +705,65 @@ export async function findTenantManagementReviewInputLink(
   if (!row) return null;
   return assertChildOwnership(ctx, row, expectedReviewId, "reviewId");
 }
+
+// ---------------------------------------------------------------------------
+// Deterministic review pack, decisions and approved minutes (task T73).
+// ---------------------------------------------------------------------------
+
+/** Loads a T73 ManagementReviewPack only inside the current organisation. */
+export async function findTenantManagementReviewPack(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.managementReviewPack.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/** Loads the (at most one) T73 ManagementReviewPack for a given review, only inside the current organisation. */
+export async function findTenantManagementReviewPackByReviewId(ctx: TenantRepositoryContext, reviewId: string) {
+  const row = await prisma.managementReviewPack.findFirst({ where: tenantWhere(ctx, { reviewId }) });
+  if (!row) return null;
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads a T73 ManagementReviewAiNarrative only inside the current
+ * organisation, and (when `expectedPackId` is supplied) attached to that
+ * exact pack — the nested-parent-substitution guard.
+ */
+export async function findTenantManagementReviewAiNarrative(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedPackId?: string,
+) {
+  const row = await prisma.managementReviewAiNarrative.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedPackId, "packId");
+}
+
+/**
+ * Loads a T73 ManagementReviewDecision only inside the current
+ * organisation, and (when `expectedReviewId` is supplied) attached to that
+ * exact review — the nested-parent-substitution guard.
+ */
+export async function findTenantManagementReviewDecision(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedReviewId?: string,
+) {
+  const row = await prisma.managementReviewDecision.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedReviewId, "reviewId");
+}
+
+/**
+ * Loads a T73 ManagementReviewMinuteRevision only inside the current
+ * organisation, and (when `expectedReviewId` is supplied) attached to that
+ * exact review — the nested-parent-substitution guard.
+ */
+export async function findTenantManagementReviewMinuteRevision(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedReviewId?: string,
+) {
+  const row = await prisma.managementReviewMinuteRevision.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedReviewId, "reviewId");
+}
