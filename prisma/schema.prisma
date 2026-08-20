@@ -319,6 +319,15 @@ model Organisation {
   competenceEvidence   CompetenceEvidence[]
   competenceAssessments CompetenceAssessment[]
 
+  // Management review model and agenda (T72).
+  managementReviewAgendaTemplates        ManagementReviewAgendaTemplate[]
+  managementReviewAgendaTemplateVersions ManagementReviewAgendaTemplateVersion[]
+  managementReviewAgendaItemDefinitions  ManagementReviewAgendaItemDefinition[]
+  managementReviewInputDefinitions       ManagementReviewInputDefinition[]
+  managementReviews                      ManagementReview[]
+  managementReviewAttendees              ManagementReviewAttendee[]
+  managementReviewInputLinks             ManagementReviewInputLink[]
+
   @@index([status])
 }
 
@@ -444,6 +453,11 @@ model OrganisationMembership {
   submittedCompetenceEvidence CompetenceEvidence[]  @relation("CompetenceEvidenceSubmittedBy")
   verifiedCompetenceEvidence  CompetenceEvidence[]  @relation("CompetenceEvidenceVerifiedBy")
   createdCompetenceAssessments CompetenceAssessment[] @relation("CompetenceAssessmentCreatedBy")
+
+  // Management review model and agenda (T72).
+  chairedManagementReviews       ManagementReview[]           @relation("ManagementReviewChair")
+  coordinatedManagementReviews   ManagementReview[]           @relation("ManagementReviewCoordinator")
+  linkedManagementReviewInputs   ManagementReviewInputLink[]  @relation("ManagementReviewInputLinkLinkedBy")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -7491,6 +7505,7 @@ model PersonProfile {
   sensitiveProfile PersonSensitiveProfile?
   assignments      CompetenceAssignment[]
   evidence         CompetenceEvidence[]
+  reviewAttendance ManagementReviewAttendee[]
 
   @@unique([organisationId, id])
   @@unique([organisationId, membershipId])
@@ -7768,4 +7783,324 @@ model CompetenceAssessment {
   @@unique([organisationId, id])
   @@unique([organisationId, supersedesAssessmentId])
   @@index([organisationId, assignmentId, status])
+}
+
+// ---------------------------------------------------------------------------
+// Management review model and agenda (task T72, Docs/PHASE7_COMPETENCE_MANAGEMENT_REVIEW_SPEC.md
+// §4, PR sequence P7-05/P7-06). Depends on T45 (ComplianceEvaluation), T52
+// (ActionItem), T61 (AuditReportRevision/AuditFinding), T64
+// (CorrectiveAction/EffectivenessReview) and T71 (CompetenceAssignment/
+// CompetenceEvidence gap state), all already on this branch. Deliberately
+// narrow: this is the review/attendee/agenda-template/input-definition
+// model plus exact-version input linking only (P7-05/P7-06) — frozen pack
+// generation, decisions and approved minutes (`ManagementReviewPack`,
+// `ManagementReviewDecision`, `ManagementReviewMinuteRevision`,
+// `ManagementReviewActionLink`) are T73 (spec PR sequence P7-07/P7-08) and
+// are not modelled here (task packet "do not implement beyond T72").
+//
+// `ManagementReview.status` therefore only ever reaches INPUT_COLLECTION in
+// this module — PACK_ISSUED/HELD/MINUTES_DRAFT/APPROVED/CLOSED are reserved
+// enum values T73 will drive, the same "narrow status subset" convention
+// `EmsAudit`/`ComplianceEvaluation` already use for their own multi-task
+// state machines.
+//
+// `ManagementReviewAgendaTemplate`/`ManagementReviewAgendaTemplateVersion`
+// follow the exact stable-reference-plus-version shape as
+// `CompetenceRequirement`/`CompetenceRequirementVersion` (T70):
+// `activeVersionId` only ever moves inside
+// `agenda-service.ts#activateManagementReviewAgendaTemplateVersion`, and a
+// version that has left DRAFT is never edited in place — a later revision
+// is a new successor version (spec §1 "agenda template is
+// configurable/versioned").
+//
+// `ManagementReview` pins one exact `ManagementReviewAgendaTemplateVersion`
+// at schedule time (never the template's mutable `activeVersionId`
+// pointer), so a later template revision never rewrites an already
+// scheduled review's agenda — the same "exact version, not a live pointer"
+// rule `CompetenceAssignment.requirementVersionId` enforces for T70.
+//
+// `ManagementReviewInputLink` is the review-instance-level "input links
+// point to exact report/record versions" record (spec §1/§4 acceptance):
+// one row per input key/source record, capturing the exact source id and
+// version label a coordinator has resolved via `input-adapters/*.ts`
+// (spec §5 `ReviewInputAdapter` contract) during INPUT_COLLECTION. This is
+// deliberately not the frozen JSON `ManagementReviewInputSnapshot` T73's
+// pack will freeze — it is a live, editable staging record the coordinator
+// can re-resolve before the review is held.
+//
+// "Open prior actions are included" (spec §1 acceptance) is served as a
+// read model over `ActionItem` (T52) in `review-service.ts`, the same
+// "derived, not persisted" convention `gap-service.ts` (T70) uses for
+// `CompetenceGap` — surfacing live open actions never requires a schema
+// addition or risks going stale inside this review's own tables.
+// ---------------------------------------------------------------------------
+
+enum ManagementReviewStatus {
+  PLANNED
+  INPUT_COLLECTION
+  PACK_ISSUED
+  HELD
+  MINUTES_DRAFT
+  APPROVED
+  CLOSED
+}
+
+enum ManagementReviewAgendaTemplateVersionStatus {
+  DRAFT
+  APPROVED
+  ACTIVE
+  SUPERSEDED
+}
+
+enum ManagementReviewAttendeeRole {
+  CHAIR
+  COORDINATOR
+  MEMBER
+  GUEST
+}
+
+/// Which prior module an input link's source record comes from (spec §4
+/// "input adapter interfaces" / §11 "read-only interfaces from prior
+/// modules"). `OTHER` covers an organisation-defined input with no
+/// dedicated adapter yet.
+enum ManagementReviewInputSourceType {
+  COMPLIANCE_EVALUATION
+  ACTION_PROGRAMME
+  AUDIT_REPORT
+  CORRECTIVE_ACTION
+  COMPETENCE_GAP
+  OTHER
+}
+
+/// Stable reference to one management-review agenda template; only ever
+/// points at whichever `ManagementReviewAgendaTemplateVersion` is currently
+/// ACTIVE. Mirrors `CompetenceRequirement` exactly.
+model ManagementReviewAgendaTemplate {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  templateKey String
+  name        String
+
+  activeVersionId String?                                 @unique
+  activeVersion   ManagementReviewAgendaTemplateVersion? @relation("ManagementReviewAgendaTemplateActiveVersion", fields: [organisationId, activeVersionId], references: [organisationId, id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions ManagementReviewAgendaTemplateVersion[] @relation("ManagementReviewAgendaTemplateVersions")
+  reviews  ManagementReview[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, templateKey])
+  @@unique([organisationId, activeVersionId])
+  @@index([organisationId])
+}
+
+/// One version of an agenda template's ordered item list (spec §4
+/// "configurable and versioned agenda templates"). State machine DRAFT ->
+/// APPROVED -> ACTIVE -> SUPERSEDED, the same narrower (no IN_REVIEW step)
+/// machine `CompetenceRequirementVersion` uses.
+model ManagementReviewAgendaTemplateVersion {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  templateId String
+  template   ManagementReviewAgendaTemplate @relation("ManagementReviewAgendaTemplateVersions", fields: [organisationId, templateId], references: [organisationId, id])
+  version    Int
+
+  name String
+
+  status ManagementReviewAgendaTemplateVersionStatus @default(DRAFT)
+
+  preparedByUserId String
+  preparedAt       DateTime  @default(now())
+  approvedByUserId String?
+  approvedAt       DateTime?
+
+  revisionRationale String?
+
+  supersedesVersionId String?
+  supersedesVersion   ManagementReviewAgendaTemplateVersion? @relation("ManagementReviewAgendaTemplateVersionSuccessor", fields: [organisationId, supersedesVersionId], references: [organisationId, id])
+  successorVersion    ManagementReviewAgendaTemplateVersion? @relation("ManagementReviewAgendaTemplateVersionSuccessor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activeForTemplate ManagementReviewAgendaTemplate? @relation("ManagementReviewAgendaTemplateActiveVersion")
+
+  items   ManagementReviewAgendaItemDefinition[]
+  reviews ManagementReview[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, templateId, version])
+  @@unique([organisationId, supersedesVersionId])
+  @@index([organisationId, templateId, status])
+  @@index([organisationId, status])
+}
+
+/// One ordered agenda item within a template version. `inputDefinitionKey`
+/// optionally ties the item to a `ManagementReviewInputDefinition.key`, so
+/// the agenda can present "required inputs" alongside discussion-only items
+/// (spec §4 "represent required inputs ... attendees, decisions, resources
+/// and actions" — decisions/resources/actions themselves are recorded at
+/// review time in T73, this row only carries the agenda's own structure).
+model ManagementReviewAgendaItemDefinition {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  templateVersionId String
+  templateVersion   ManagementReviewAgendaTemplateVersion @relation(fields: [organisationId, templateVersionId], references: [organisationId, id], onDelete: Cascade)
+
+  order       Int
+  title       String
+  description String?
+
+  inputDefinitionKey String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, templateVersionId, order])
+  @@index([organisationId, templateVersionId])
+}
+
+/// Organisation-configurable catalogue of input source keys an agenda item
+/// can reference (spec §4 "required default input keys ... editable; do not
+/// paste ISO wording"). `sourceType` selects which `input-adapters/*.ts`
+/// module resolves an exact record/version for this key.
+model ManagementReviewInputDefinition {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  key   String
+  label String
+
+  sourceType ManagementReviewInputSourceType
+  required   Boolean @default(true)
+
+  periodRule         String?
+  presentationConfig Json?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, key])
+  @@index([organisationId, isActive])
+}
+
+/// One scheduled management review (spec §4 "organisation/programme,
+/// reference, period/cutoff, scheduled/held dates, chair, coordinator,
+/// status"). Pins an exact `ManagementReviewAgendaTemplateVersion` at
+/// schedule time — see file-header note above.
+model ManagementReview {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  reference String
+
+  periodStart DateTime
+  periodEnd   DateTime
+  cutoffDate  DateTime
+
+  scheduledDate DateTime
+  heldDate      DateTime?
+
+  chairMembershipId String
+  chair             OrganisationMembership @relation("ManagementReviewChair", fields: [organisationId, chairMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  coordinatorMembershipId String
+  coordinator             OrganisationMembership @relation("ManagementReviewCoordinator", fields: [organisationId, coordinatorMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  agendaTemplateId        String
+  agendaTemplate          ManagementReviewAgendaTemplate @relation(fields: [organisationId, agendaTemplateId], references: [organisationId, id], onDelete: Restrict)
+  agendaTemplateVersionId String
+  agendaTemplateVersion   ManagementReviewAgendaTemplateVersion @relation(fields: [organisationId, agendaTemplateVersionId], references: [organisationId, id], onDelete: Restrict)
+
+  status ManagementReviewStatus @default(PLANNED)
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  attendees  ManagementReviewAttendee[]
+  inputLinks ManagementReviewInputLink[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, reference])
+  @@index([organisationId, status])
+  @@index([organisationId, scheduledDate])
+}
+
+/// One attendee/invitee of a scheduled review, linked to a T70
+/// `PersonProfile` (never a bare name, so "login identity and person
+/// profile are linked, not duplicated" (T70 spec §1) holds for review
+/// attendance too).
+model ManagementReviewAttendee {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  reviewId String
+  review   ManagementReview @relation(fields: [organisationId, reviewId], references: [organisationId, id], onDelete: Cascade)
+
+  personId String
+  person   PersonProfile @relation(fields: [organisationId, personId], references: [organisationId, id], onDelete: Restrict)
+
+  role ManagementReviewAttendeeRole @default(MEMBER)
+
+  invited  Boolean  @default(true)
+  attended Boolean?
+  notes    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, reviewId, personId])
+  @@index([organisationId, reviewId])
+  @@index([organisationId, personId])
+}
+
+/// Exact source record/version a review has linked for one input key (spec
+/// §4/§1 acceptance "input links point to exact report/record versions") —
+/// see file-header note above for why this is distinct from T73's frozen
+/// pack snapshot. `sourceRecordId` is the id of the exact T45/T52/T61/T64/
+/// T71 row (e.g. a `ComplianceEvaluation`, `AuditReportRevision`,
+/// `CorrectiveAction`, `CompetenceAssignment`) this link points at;
+/// `sourceVersionLabel` carries a human-readable version marker (e.g. an
+/// audit report's `revisionNumber`) where the source itself is versioned.
+model ManagementReviewInputLink {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  reviewId String
+  review   ManagementReview @relation(fields: [organisationId, reviewId], references: [organisationId, id], onDelete: Cascade)
+
+  inputDefinitionKey String
+  sourceType         ManagementReviewInputSourceType
+
+  sourceRecordId     String
+  sourceVersionLabel String?
+
+  summary Json?
+
+  isStale Boolean @default(false)
+
+  linkedByMembershipId String
+  linkedBy             OrganisationMembership @relation("ManagementReviewInputLinkLinkedBy", fields: [organisationId, linkedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  linkedAt              DateTime @default(now())
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, reviewId, inputDefinitionKey, sourceRecordId], map: "ManagementReviewInputLink_unique_source")
+  @@index([organisationId, reviewId])
+  @@index([organisationId, inputDefinitionKey])
 }
