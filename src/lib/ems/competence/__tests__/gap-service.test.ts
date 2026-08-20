@@ -74,6 +74,38 @@ describe("listCompetenceGaps", () => {
     expect(gaps[0].severity).toBe("GAP");
   });
 
+  it("includes an EXPIRED assignment (task T71: expired competence appears as gap)", async () => {
+    tables.assignments.push({
+      id: "assignment-expired",
+      organisationId: ORG_A,
+      status: "EXPIRED",
+      dueDate: null,
+      gapSince: new Date("2026-08-01"),
+      gapNote: "Competence has expired.",
+      person: personOrgWide,
+      requirementVersion: { id: "version-1", title: "Confined space entry" },
+    });
+    const gaps = await listCompetenceGaps(orgContextA);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0].severity).toBe("EXPIRED");
+    expect(gaps[0].status).toBe("EXPIRED");
+  });
+
+  it("does not report a COMPETENT assignment as a gap", async () => {
+    tables.assignments.push({
+      id: "assignment-competent",
+      organisationId: ORG_A,
+      status: "COMPETENT",
+      dueDate: null,
+      gapSince: null,
+      gapNote: null,
+      person: personOrgWide,
+      requirementVersion: { id: "version-1", title: "Confined space entry" },
+    });
+    const gaps = await listCompetenceGaps(orgContextA);
+    expect(gaps).toHaveLength(0);
+  });
+
   it("surfaces a REQUIRED assignment past its due date as OVERDUE without a persisted GAP status", async () => {
     tables.assignments.push({
       id: "assignment-2",

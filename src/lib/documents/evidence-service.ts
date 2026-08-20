@@ -108,6 +108,10 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   // Root cause, corrective action and effectiveness (task T64). Callers
   // resolve the corrective action in the tenant repository before linking.
   "corrective_action",
+  // Training, evidence, assessment and expiry (task T71). Callers resolve
+  // the CompetenceEvidence row in the tenant repository before linking —
+  // the underlying training/qualification/licence file.
+  "competence_evidence",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 
