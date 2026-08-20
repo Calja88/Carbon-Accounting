@@ -75,6 +75,14 @@
  *    template keeps `ems.competence.view` (non-sensitive gap/status) but not
  *    a person's restricted contact detail. Flagged as an owner decision to
  *    confirm.
+ *  - T81 (audit integrity, retention and export) added
+ *    `organisation.legal_hold.manage`, `organisation.retention.manage`, and
+ *    `organisation.export.generate` — all sensitive. Granted only to
+ *    Sustainability Lead and Organisation Administrator, the same two
+ *    default-only oversight roles as `audit.view`/`audit.export`: every
+ *    other template can create/edit the records these operations act on,
+ *    but not hold, delete, or bulk-export them. Flagged as an owner
+ *    decision to confirm.
  */
 
 // Type-only: RoleTemplateKey is never read as a runtime value in this file —
@@ -154,6 +162,9 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       ...EMS_COMMUNICATIONS_EMERGENCY_MANAGE,
       "ems.notification.manage",
       "audit.view",
+      "organisation.legal_hold.manage",
+      "organisation.retention.manage",
+      "organisation.export.generate",
       "ai.use",
       "ai.settings.manage",
       "ai.audit.view",
@@ -240,6 +251,9 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       ...LCA_EDIT_FULL,
       "ems.view",
       "audit.view",
+      "organisation.legal_hold.manage",
+      "organisation.retention.manage",
+      "organisation.export.generate",
       "ai.use",
       "ai.settings.manage",
       "ai.audit.view",

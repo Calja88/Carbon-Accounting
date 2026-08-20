@@ -261,6 +261,12 @@ export const AUDIT_EVENT_TYPES = [
   "management_review.closed",
   "management_review_action_link.linked",
   "management_review_action_link.unlinked",
+  // Audit integrity, retention and export (task T81).
+  "legal_hold.created",
+  "legal_hold.released",
+  "evidence_object.retention_previewed",
+  "evidence_object.retention_executed",
+  "organisation_export.generated",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -346,7 +352,9 @@ export type AuditResourceType =
   | "management_review_ai_narrative"
   | "management_review_decision"
   | "management_review_minute_revision"
-  | "management_review_action_link";
+  | "management_review_action_link"
+  | "legal_hold"
+  | "organisation_export";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept
