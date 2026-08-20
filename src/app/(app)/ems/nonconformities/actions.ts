@@ -16,6 +16,16 @@ import {
   assignNonconformityClassification,
   upsertNonconformityClosurePolicy,
 } from "@/lib/ems/nonconformity/nonconformity-service";
+import { RootCauseError, recordRootCauseAnalysis, approveRootCauseAnalysis } from "@/lib/ems/nonconformity/root-cause-service";
+import {
+  CorrectiveActionError,
+  createCorrectiveAction,
+  setCorrectiveActionStatus,
+  completeCorrectiveAction,
+  verifyCorrectiveAction,
+  reopenCorrectiveAction,
+} from "@/lib/ems/nonconformity/corrective-action-service";
+import { EffectivenessError, requestEffectivenessReview, performEffectivenessReview } from "@/lib/ems/nonconformity/effectiveness-service";
 import {
   createNonconformityFromSourceFormSchema,
   linkAdditionalSourceFormSchema,
@@ -25,6 +35,15 @@ import {
   createNonconformityClassificationFormSchema,
   assignNonconformityClassificationFormSchema,
   upsertNonconformityClosurePolicyFormSchema,
+  recordRootCauseAnalysisFormSchema,
+  approveRootCauseAnalysisFormSchema,
+  createCorrectiveActionFormSchema,
+  setCorrectiveActionStatusFormSchema,
+  completeCorrectiveActionFormSchema,
+  verifyCorrectiveActionFormSchema,
+  reopenCorrectiveActionFormSchema,
+  requestEffectivenessReviewFormSchema,
+  performEffectivenessReviewFormSchema,
 } from "@/lib/ems/nonconformity/schemas";
 
 export interface NonconformityActionState {
@@ -36,9 +55,15 @@ const emptyState: NonconformityActionState = { error: null, message: null };
 
 function friendlyError(error: unknown): string {
   if (error instanceof OrganisationAccessError) return "You must be signed in.";
-  if (error instanceof PermissionDeniedError) return "You don't have permission to do that.";
+  if (error instanceof PermissionDeniedError) {
+    if (error.reason === "FOUR_EYES_SELF_APPROVAL") return "You own a corrective action on this nonconformity, so you cannot also review its effectiveness.";
+    return "You don't have permission to do that.";
+  }
   if (error instanceof TenantOwnershipError) return "That record could not be found in this organisation.";
   if (error instanceof NonconformityError) return error.message;
+  if (error instanceof RootCauseError) return error.message;
+  if (error instanceof CorrectiveActionError) return error.message;
+  if (error instanceof EffectivenessError) return error.message;
   throw error;
 }
 
@@ -228,6 +253,186 @@ export async function upsertNonconformityClosurePolicyAction(_previous: Nonconfo
     await upsertNonconformityClosurePolicy(context, { ...parsed.data, actorUserId: context.userId });
     revalidateNonconformities();
     return { ...emptyState, message: "Closure policy saved." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Root cause, corrective action and effectiveness (T64)
+// ---------------------------------------------------------------------------
+
+export async function recordRootCauseAnalysisAction(_previous: NonconformityActionState, formData: FormData): Promise<NonconformityActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = recordRootCauseAnalysisFormSchema.safeParse({
+      nonconformityId: formData.get("nonconformityId"),
+      method: formData.get("method"),
+      analysisPayload: formData.get("analysisPayload"),
+      contributors: formData.get("contributors"),
+      conclusion: formData.get("conclusion"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the root-cause analysis." };
+    await recordRootCauseAnalysis(context, parsed.data.nonconformityId, {
+      method: parsed.data.method,
+      analysisPayload: { notes: parsed.data.analysisPayload },
+      contributors: parsed.data.contributors ? { notes: parsed.data.contributors } : null,
+      conclusion: parsed.data.conclusion,
+      actorUserId: context.userId,
+    });
+    revalidateNonconformities(parsed.data.nonconformityId);
+    return { ...emptyState, message: "Root-cause analysis recorded." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function approveRootCauseAnalysisAction(_previous: NonconformityActionState, formData: FormData): Promise<NonconformityActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = approveRootCauseAnalysisFormSchema.safeParse({
+      rootCauseAnalysisId: formData.get("rootCauseAnalysisId"),
+      nonconformityId: formData.get("nonconformityId"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Choose a root-cause analysis." };
+    await approveRootCauseAnalysis(context, parsed.data.rootCauseAnalysisId, { actorUserId: context.userId });
+    revalidateNonconformities(parsed.data.nonconformityId);
+    return { ...emptyState, message: "Root-cause analysis approved." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function createCorrectiveActionAction(_previous: NonconformityActionState, formData: FormData): Promise<NonconformityActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = createCorrectiveActionFormSchema.safeParse({
+      nonconformityId: formData.get("nonconformityId"),
+      description: formData.get("description"),
+      completionCriteria: formData.get("completionCriteria"),
+      ownerMembershipId: formData.get("ownerMembershipId"),
+      dueDate: formData.get("dueDate"),
+      sharedActionItemId: formData.get("sharedActionItemId"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the corrective action." };
+    await createCorrectiveAction(context, parsed.data.nonconformityId, {
+      description: parsed.data.description,
+      completionCriteria: parsed.data.completionCriteria || null,
+      ownerMembershipId: parsed.data.ownerMembershipId,
+      dueDate: parsed.data.dueDate,
+      sharedActionItemId: parsed.data.sharedActionItemId || null,
+      actorUserId: context.userId,
+    });
+    revalidateNonconformities(parsed.data.nonconformityId);
+    return { ...emptyState, message: "Corrective action created." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function setCorrectiveActionStatusAction(_previous: NonconformityActionState, formData: FormData): Promise<NonconformityActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = setCorrectiveActionStatusFormSchema.safeParse({
+      correctiveActionId: formData.get("correctiveActionId"),
+      nonconformityId: formData.get("nonconformityId"),
+      status: formData.get("status"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the status change." };
+    await setCorrectiveActionStatus(context, parsed.data.correctiveActionId, parsed.data.status, context.userId);
+    revalidateNonconformities(parsed.data.nonconformityId);
+    return { ...emptyState, message: "Corrective action status updated." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function completeCorrectiveActionAction(_previous: NonconformityActionState, formData: FormData): Promise<NonconformityActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = completeCorrectiveActionFormSchema.safeParse({
+      correctiveActionId: formData.get("correctiveActionId"),
+      nonconformityId: formData.get("nonconformityId"),
+      completionEvidenceNote: formData.get("completionEvidenceNote"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Describe the completion evidence." };
+    await completeCorrectiveAction(context, parsed.data.correctiveActionId, {
+      completionEvidenceNote: parsed.data.completionEvidenceNote,
+      actorUserId: context.userId,
+    });
+    revalidateNonconformities(parsed.data.nonconformityId);
+    return { ...emptyState, message: "Corrective action completed." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function verifyCorrectiveActionAction(_previous: NonconformityActionState, formData: FormData): Promise<NonconformityActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = verifyCorrectiveActionFormSchema.safeParse({
+      correctiveActionId: formData.get("correctiveActionId"),
+      nonconformityId: formData.get("nonconformityId"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Choose a corrective action." };
+    await verifyCorrectiveAction(context, parsed.data.correctiveActionId, { actorUserId: context.userId });
+    revalidateNonconformities(parsed.data.nonconformityId);
+    return { ...emptyState, message: "Corrective action verified." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function reopenCorrectiveActionAction(_previous: NonconformityActionState, formData: FormData): Promise<NonconformityActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = reopenCorrectiveActionFormSchema.safeParse({
+      correctiveActionId: formData.get("correctiveActionId"),
+      nonconformityId: formData.get("nonconformityId"),
+      reopenReason: formData.get("reopenReason"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Enter a reason for reopening." };
+    await reopenCorrectiveAction(context, parsed.data.correctiveActionId, { reopenReason: parsed.data.reopenReason, actorUserId: context.userId });
+    revalidateNonconformities(parsed.data.nonconformityId);
+    return { ...emptyState, message: "Corrective action reopened." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function requestEffectivenessReviewAction(_previous: NonconformityActionState, formData: FormData): Promise<NonconformityActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = requestEffectivenessReviewFormSchema.safeParse({ nonconformityId: formData.get("nonconformityId") });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Choose a nonconformity." };
+    await requestEffectivenessReview(context, parsed.data.nonconformityId, { actorUserId: context.userId });
+    revalidateNonconformities(parsed.data.nonconformityId);
+    return { ...emptyState, message: "Effectiveness review requested." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function performEffectivenessReviewAction(_previous: NonconformityActionState, formData: FormData): Promise<NonconformityActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = performEffectivenessReviewFormSchema.safeParse({
+      nonconformityId: formData.get("nonconformityId"),
+      criteria: formData.get("criteria"),
+      reviewDate: formData.get("reviewDate"),
+      result: formData.get("result"),
+      decision: formData.get("decision"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the effectiveness review." };
+    await performEffectivenessReview(context, parsed.data.nonconformityId, {
+      criteria: parsed.data.criteria,
+      reviewDate: parsed.data.reviewDate,
+      result: parsed.data.result,
+      decision: parsed.data.decision,
+      actorUserId: context.userId,
+    });
+    revalidateNonconformities(parsed.data.nonconformityId);
+    return { ...emptyState, message: "Effectiveness review recorded." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }

@@ -50,6 +50,7 @@ const RESOURCE_TYPE_LABELS: Record<string, string> = {
   operational_control: "an operational control",
   external_provider_control: "an external-provider control",
   emergency_plan: "an emergency plan",
+  corrective_action: "a corrective action",
 };
 
 function resourceLabel(resourceType: string): string {

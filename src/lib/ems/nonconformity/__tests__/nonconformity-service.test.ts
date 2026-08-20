@@ -28,6 +28,10 @@ const tables = vi.hoisted(() => ({
   nonconformities: [] as Row[],
   sourceLinks: [] as Row[],
   containmentRecords: [] as Row[],
+  rootCauseAnalyses: [] as Row[],
+  correctiveActions: [] as Row[],
+  effectivenessReviews: [] as Row[],
+  nonconformityClosures: [] as Row[],
   nextId: 1,
 }));
 
@@ -84,6 +88,10 @@ vi.mock("@/lib/prisma", () => {
   const nonconformity = simpleModel(tables.nonconformities, "nc", { status: "OPEN" });
   const nonconformitySourceLink = simpleModel(tables.sourceLinks, "link", { linkedAt: new Date() });
   const containmentRecord = simpleModel(tables.containmentRecords, "containment", { adequacyReviewed: false, adequate: null });
+  const rootCauseAnalysis = simpleModel(tables.rootCauseAnalyses, "rca", { approvedAt: null });
+  const correctiveAction = simpleModel(tables.correctiveActions, "corrective-action", { status: "OPEN" });
+  const effectivenessReview = simpleModel(tables.effectivenessReviews, "review");
+  const nonconformityClosure = simpleModel(tables.nonconformityClosures, "closure");
 
   const prismaClient = {
     organisationMembership,
@@ -98,6 +106,10 @@ vi.mock("@/lib/prisma", () => {
     nonconformity,
     nonconformitySourceLink,
     containmentRecord,
+    rootCauseAnalysis,
+    correctiveAction,
+    effectivenessReview,
+    nonconformityClosure,
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prismaClient)),
   };
   return { prisma: prismaClient };
