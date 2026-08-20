@@ -51,6 +51,9 @@ const runB = { id: "run-b-1", assessmentId: ASSESSMENT_B };
 const resultA = { id: "result-a-1", assessmentId: ASSESSMENT_A, runId: runA.id };
 const resultB = { id: "result-b-1", assessmentId: ASSESSMENT_B, runId: runB.id };
 
+const evidenceBlobA = { evidenceId: EVIDENCE_A, bytes: Buffer.from("synthetic-a") };
+const evidenceBlobB = { evidenceId: EVIDENCE_B, bytes: Buffer.from("synthetic-b") };
+
 const methodologyPlatform = { id: "methodology-platform", organisationId: null, name: "Platform default" };
 const methodologyOwnedByA = { id: "methodology-a", organisationId: ORG_A, name: "A custom" };
 
@@ -83,7 +86,11 @@ vi.mock("@/lib/prisma", () => ({
     product: { findFirst: fakeFindFirst([productA, productB]) },
     supplier: { findFirst: fakeFindFirst([supplierA, supplierB]) },
     lcaEvidence: { findFirst: fakeFindFirst([evidenceA, evidenceB]) },
-    lcaEvidenceBlob: { findUnique: vi.fn(async () => null) },
+    lcaEvidenceBlob: {
+      findUnique: vi.fn(async ({ where }: { where: { evidenceId: string } }) =>
+        [evidenceBlobA, evidenceBlobB].find((blob) => blob.evidenceId === where.evidenceId) ?? null,
+      ),
+    },
     lcaAssessmentVersion: { findFirst: fakeFindFirst([assessmentVersionA, assessmentVersionB]) },
     lcaSupplierPcf: { findFirst: fakeFindFirst([supplierPcfA, supplierPcfB]) },
     lcaMethodologyProfile: { findFirst: fakeFindFirst([methodologyPlatform, methodologyOwnedByA]) },
@@ -97,6 +104,7 @@ vi.mock("@/lib/prisma", () => ({
 const {
   findTenantAssessmentVersion,
   findTenantEvidence,
+  findTenantEvidenceBlob,
   findTenantInventoryItem,
   findTenantProcess,
   findTenantResult,
@@ -153,6 +161,22 @@ describe("findTenantEvidence (evidence download path)", () => {
 
   it("allows A's evidence when the expected assessment id matches", async () => {
     await expect(findTenantEvidence(ctxA, EVIDENCE_A, ASSESSMENT_A)).resolves.toEqual(evidenceA);
+  });
+});
+
+describe("findTenantEvidenceBlob (evidence bytes, gated on findTenantEvidence's tenant check)", () => {
+  const ctxA = toTenantRepositoryContext(lcaOrgContextA);
+
+  it("returns A's own evidence blob", async () => {
+    await expect(findTenantEvidenceBlob(ctxA, EVIDENCE_A)).resolves.toEqual(evidenceBlobA);
+  });
+
+  it("returns null for B's evidence blob — never resolves a foreign-tenant blob by guessing its evidence id", async () => {
+    await expect(findTenantEvidenceBlob(ctxA, EVIDENCE_B)).resolves.toBeNull();
+  });
+
+  it("returns null for a missing evidence id identically to a foreign one", async () => {
+    await expect(findTenantEvidenceBlob(ctxA, "does-not-exist")).resolves.toBeNull();
   });
 });
 
