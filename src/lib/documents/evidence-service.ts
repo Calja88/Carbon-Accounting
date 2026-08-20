@@ -105,6 +105,9 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   // containment record in the tenant repository before linking.
   "nonconformity",
   "containment_record",
+  // Root cause, corrective action and effectiveness (task T64). Callers
+  // resolve the corrective action in the tenant repository before linking.
+  "corrective_action",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 

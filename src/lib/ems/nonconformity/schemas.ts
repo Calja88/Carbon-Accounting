@@ -76,3 +76,69 @@ export const reopenNonconformityFormSchema = z.object({
   nonconformityId: z.string().trim().min(1),
   reason: z.string().trim().min(1, "Enter a reason for reopening this nonconformity.").max(2000),
 });
+
+// ---------------------------------------------------------------------------
+// Root cause, corrective action and effectiveness (T64) — form input
+// validation, form-submitted shapes only.
+// ---------------------------------------------------------------------------
+
+export const rootCauseMethodSchema = z.enum(["FIVE_WHYS", "FISHBONE", "FAULT_TREE", "OTHER"]);
+
+export const recordRootCauseAnalysisFormSchema = z.object({
+  nonconformityId: z.string().trim().min(1),
+  method: rootCauseMethodSchema,
+  analysisPayload: z.string().trim().min(1, "Describe the analysis."),
+  contributors: z.string().trim().max(2000).optional().or(z.literal("")),
+  conclusion: z.string().trim().min(1, "Enter the root-cause conclusion.").max(4000),
+});
+
+export const approveRootCauseAnalysisFormSchema = z.object({
+  rootCauseAnalysisId: z.string().trim().min(1),
+  nonconformityId: z.string().trim().min(1),
+});
+
+export const createCorrectiveActionFormSchema = z.object({
+  nonconformityId: z.string().trim().min(1),
+  description: z.string().trim().min(1, "Describe the corrective action.").max(4000),
+  completionCriteria: z.string().trim().max(2000).optional().or(z.literal("")),
+  ownerMembershipId: z.string().trim().min(1, "Choose an owner."),
+  dueDate: z.coerce.date(),
+  sharedActionItemId: z.string().trim().optional().or(z.literal("")),
+});
+
+export const setCorrectiveActionStatusFormSchema = z.object({
+  correctiveActionId: z.string().trim().min(1),
+  nonconformityId: z.string().trim().min(1),
+  status: z.enum(["IN_PROGRESS", "CANCELLED"]),
+});
+
+export const completeCorrectiveActionFormSchema = z.object({
+  correctiveActionId: z.string().trim().min(1),
+  nonconformityId: z.string().trim().min(1),
+  completionEvidenceNote: z.string().trim().min(1, "Describe the completion evidence.").max(4000),
+});
+
+export const verifyCorrectiveActionFormSchema = z.object({
+  correctiveActionId: z.string().trim().min(1),
+  nonconformityId: z.string().trim().min(1),
+});
+
+export const reopenCorrectiveActionFormSchema = z.object({
+  correctiveActionId: z.string().trim().min(1),
+  nonconformityId: z.string().trim().min(1),
+  reopenReason: z.string().trim().min(1, "Enter a reason for reopening.").max(2000),
+});
+
+export const requestEffectivenessReviewFormSchema = z.object({
+  nonconformityId: z.string().trim().min(1),
+});
+
+export const effectivenessResultSchema = z.enum(["EFFECTIVE", "PARTIALLY_EFFECTIVE", "INEFFECTIVE"]);
+
+export const performEffectivenessReviewFormSchema = z.object({
+  nonconformityId: z.string().trim().min(1),
+  criteria: z.string().trim().min(1, "Enter the review criteria.").max(2000),
+  reviewDate: z.coerce.date(),
+  result: effectivenessResultSchema,
+  decision: z.string().trim().min(1, "Enter the review decision.").max(4000),
+});

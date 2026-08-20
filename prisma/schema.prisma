@@ -301,6 +301,12 @@ model Organisation {
   nonconformitySourceLinks      NonconformitySourceLink[]
   containmentRecords            ContainmentRecord[]
 
+  // Root cause, corrective action and effectiveness (T64).
+  rootCauseAnalyses    RootCauseAnalysis[]
+  correctiveActions    CorrectiveAction[]
+  effectivenessReviews EffectivenessReview[]
+  nonconformityClosures NonconformityClosure[]
+
   @@index([status])
 }
 
@@ -410,6 +416,11 @@ model OrganisationMembership {
   nonconformitySourceLinksLinked  NonconformitySourceLink[] @relation("NonconformitySourceLinkedBy")
   ownedContainmentRecords         ContainmentRecord[]       @relation("ContainmentRecordOwner")
   reviewedContainmentAdequacy     ContainmentRecord[]       @relation("ContainmentRecordAdequacyReviewer")
+
+  // Root cause, corrective action and effectiveness (T64).
+  approvedRootCauseAnalyses  RootCauseAnalysis[]    @relation("RootCauseAnalysisApprover")
+  ownedCorrectiveActions     CorrectiveAction[]     @relation("CorrectiveActionOwner")
+  performedEffectivenessReviews EffectivenessReview[] @relation("EffectivenessReviewReviewer")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -6021,6 +6032,11 @@ model ActionItem {
   progressUpdates ActionProgressUpdate[]
   statusHistory   ActionStatusHistory[]
 
+  // Corrective actions (T64) may optionally share this ActionItem for
+  // dashboard/reminder reuse; the link is one-directional and never
+  // implied — see corrective-action-service.ts.
+  correctiveActionLinks CorrectiveAction[]
+
   @@unique([organisationId, id])
   @@index([organisationId, programmeId])
   @@index([organisationId, status])
@@ -6954,6 +6970,15 @@ model NonconformityClosurePolicy {
   requireCorrectiveActionsComplete Boolean @default(false)
   requireEffectivenessReview       Boolean @default(false)
 
+  /// Which action `effectiveness-service.ts#performEffectivenessReview` takes
+  /// on a `PARTIALLY_EFFECTIVE`/`INEFFECTIVE` result (T64 acceptance:
+  /// "ineffective outcome reopens or creates follow-up as required by the
+  /// configured policy"). `REOPEN_NONCONFORMITY` moves the same
+  /// Nonconformity back to `REOPENED`; `CREATE_FOLLOW_UP` leaves it in
+  /// `EFFECTIVENESS_REVIEW` (still not closeable) and creates a new,
+  /// separately tracked Nonconformity sourced from it.
+  ineffectiveOutcomePolicy IneffectiveOutcomePolicy @default(REOPEN_NONCONFORMITY)
+
   updatedByUserId String
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -7016,6 +7041,12 @@ model Nonconformity {
 
   sourceLinks        NonconformitySourceLink[]
   containmentRecords ContainmentRecord[]
+
+  // Root cause, corrective action and effectiveness (T64).
+  rootCauseAnalyses    RootCauseAnalysis[]
+  correctiveActions    CorrectiveAction[]
+  effectivenessReviews EffectivenessReview[]
+  closures             NonconformityClosure[]
 
   @@unique([organisationId, id])
   @@unique([organisationId, reference])
@@ -7080,6 +7111,203 @@ model ContainmentRecord {
   createdByUserId String
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@index([organisationId, nonconformityId])
+}
+
+// ---------------------------------------------------------------------------
+// Root cause, corrective action and effectiveness (task T64,
+// Docs/PHASE6_AUDIT_INCIDENT_CAPA_SPEC.md §§1,4,8-9). Depends on T63
+// (`Nonconformity`, `NonconformityClosurePolicy`) and T52 (`ActionItem`),
+// both already above. Completes the state machine T63 left unimplemented:
+//
+//   CONTAINED -> ROOT_CAUSE_APPROVED -> ACTIONS_IN_PROGRESS
+//     -> EFFECTIVENESS_REVIEW -> CLOSED / REOPENED
+//
+// Fixed decisions this block enforces (spec §1, T64 acceptance):
+//  - root cause, corrective action, completion and effectiveness stay
+//    separate models/decisions, exactly like containment in T63;
+//  - `CorrectiveAction` may optionally point at a shared `ActionItem` for
+//    dashboard/reminder reuse (spec §6, "shared action service") but is
+//    never required to — the CAPA workflow's own status/evidence/history is
+//    always on this model, not borrowed from the ActionItem;
+//  - `EffectivenessReview.reviewerMembershipId` is checked by
+//    `effectiveness-service.ts` against every CorrectiveAction owner on the
+//    same Nonconformity whenever four-eyes is enabled (T64 acceptance:
+//    "action owner cannot perform independent effectiveness review");
+//  - a `PARTIALLY_EFFECTIVE`/`INEFFECTIVE` result can never close the
+//    Nonconformity — `NonconformityClosurePolicy.ineffectiveOutcomePolicy`
+//    only chooses between reopening this same record or creating a
+//    follow-up, both handled by `effectiveness-service.ts`;
+//  - `NonconformityClosure` freezes a snapshot of the exact root cause,
+//    corrective action and effectiveness review state at close time, so a
+//    later edit to those rows (there is none — they are append-only/history
+//    tracked) could never rewrite what a past closure asserted.
+// ---------------------------------------------------------------------------
+
+enum RootCauseMethod {
+  FIVE_WHYS
+  FISHBONE
+  FAULT_TREE
+  OTHER
+}
+
+enum CorrectiveActionStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  VERIFIED
+  REOPENED
+  CANCELLED
+}
+
+enum EffectivenessResult {
+  EFFECTIVE
+  PARTIALLY_EFFECTIVE
+  INEFFECTIVE
+}
+
+/// Policy switch for `effectiveness-service.ts#performEffectivenessReview`
+/// on a non-`EFFECTIVE` result — see `NonconformityClosurePolicy` above.
+enum IneffectiveOutcomePolicy {
+  REOPEN_NONCONFORMITY
+  CREATE_FOLLOW_UP
+}
+
+/// A root-cause analysis attempt against a Nonconformity (spec §4 "method,
+/// analysis payload, contributors, conclusion, reviewer/approval"). Multiple
+/// rows may exist per Nonconformity (e.g. a reopened NC gets a fresh
+/// analysis); only an approved one satisfies
+/// `NonconformityClosurePolicy.requireRootCauseApproval` and only the most
+/// recent approval moves the Nonconformity to `ROOT_CAUSE_APPROVED`
+/// (`root-cause-service.ts`). Never edited after approval — a correction is
+/// a new row, preserving root-cause history.
+model RootCauseAnalysis {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  nonconformityId String
+  nonconformity   Nonconformity @relation(fields: [organisationId, nonconformityId], references: [organisationId, id], onDelete: Cascade)
+
+  method          RootCauseMethod
+  analysisPayload Json
+  contributors    Json?
+  conclusion      String
+
+  approvedByMembershipId String?
+  approver                OrganisationMembership? @relation("RootCauseAnalysisApprover", fields: [organisationId, approvedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  approvedAt              DateTime?
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@index([organisationId, nonconformityId])
+}
+
+/// A corrective (or preventive) action against a Nonconformity (spec §4
+/// "NC, optional shared action link, description, owner, due date,
+/// completion criteria, status, evidence"). Status machine per spec §2:
+/// OPEN -> IN_PROGRESS -> COMPLETED -> VERIFIED / REOPENED / CANCELLED.
+/// `sharedActionItemId` is an optional link to an existing T52 `ActionItem`
+/// (spec §6 "shared action service") purely for dashboard/reminder reuse —
+/// `corrective-action-service.ts` never writes to the linked ActionItem, so
+/// linking one can never silently change its own state.
+model CorrectiveAction {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  nonconformityId String
+  nonconformity   Nonconformity @relation(fields: [organisationId, nonconformityId], references: [organisationId, id], onDelete: Cascade)
+
+  sharedActionItemId String?
+  sharedActionItem   ActionItem? @relation(fields: [organisationId, sharedActionItemId], references: [organisationId, id], onDelete: Restrict)
+
+  description         String
+  completionCriteria  String?
+
+  ownerMembershipId String
+  owner             OrganisationMembership @relation("CorrectiveActionOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  dueDate DateTime
+
+  status CorrectiveActionStatus @default(OPEN)
+
+  completedAt            DateTime?
+  completedByUserId      String?
+  completionEvidenceNote String?
+
+  verifiedAt            DateTime?
+  verifiedByMembershipId String?
+
+  reopenedAt       DateTime?
+  reopenedByUserId String?
+  reopenReason     String?
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@index([organisationId, nonconformityId])
+  @@index([organisationId, status])
+  @@index([organisationId, ownerMembershipId])
+  @@index([organisationId, dueDate])
+}
+
+/// An independent effectiveness review of a Nonconformity's corrective
+/// actions (spec §4 "NC/actions, criteria, review date, reviewer, evidence,
+/// result, decision"). `effectiveness-service.ts` enforces four-eyes
+/// against every CorrectiveAction owner on the same Nonconformity (T64
+/// acceptance: "action owner cannot perform independent effectiveness
+/// review when policy enabled"). Never edited after creation — a later
+/// review is a new row, preserving review history.
+model EffectivenessReview {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  nonconformityId String
+  nonconformity   Nonconformity @relation(fields: [organisationId, nonconformityId], references: [organisationId, id], onDelete: Cascade)
+
+  criteria   String
+  reviewDate DateTime
+
+  reviewerMembershipId String
+  reviewer              OrganisationMembership @relation("EffectivenessReviewReviewer", fields: [organisationId, reviewerMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  result   EffectivenessResult
+  decision String
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, id])
+  @@index([organisationId, nonconformityId])
+}
+
+/// Exact snapshot of a Nonconformity's containment/root-cause/corrective
+/// action/effectiveness-review state at the moment it was closed (spec §4
+/// "exact NC/action/review snapshot, closer/time, rationale"). Reopening
+/// (`nonconformity-service.ts#reopenNonconformity`) never deletes or edits
+/// this row — closure history is append-only, matching the T63 convention
+/// that reopening a closed Nonconformity preserves its closure fields.
+model NonconformityClosure {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  nonconformityId String
+  nonconformity   Nonconformity @relation(fields: [organisationId, nonconformityId], references: [organisationId, id], onDelete: Cascade)
+
+  snapshot  Json
+  rationale String?
+
+  closedByUserId String
+  closedAt       DateTime @default(now())
 
   @@unique([organisationId, id])
   @@index([organisationId, nonconformityId])

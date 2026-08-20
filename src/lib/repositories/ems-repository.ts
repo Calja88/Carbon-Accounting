@@ -489,6 +489,51 @@ export async function findTenantContainmentRecord(
   return assertChildOwnership(ctx, row, expectedNonconformityId, "nonconformityId");
 }
 
+// ---------------------------------------------------------------------------
+// Root cause, corrective action and effectiveness (task T64).
+// ---------------------------------------------------------------------------
+
+/**
+ * Loads a T64 root-cause analysis only inside the current organisation, and
+ * (when `expectedNonconformityId` is supplied) attached to that exact
+ * nonconformity — the nested-parent-substitution guard.
+ */
+export async function findTenantRootCauseAnalysis(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedNonconformityId?: string,
+) {
+  const row = await prisma.rootCauseAnalysis.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedNonconformityId, "nonconformityId");
+}
+
+/**
+ * Loads a T64 corrective action only inside the current organisation, and
+ * (when `expectedNonconformityId` is supplied) attached to that exact
+ * nonconformity — the nested-parent-substitution guard.
+ */
+export async function findTenantCorrectiveAction(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedNonconformityId?: string,
+) {
+  const row = await prisma.correctiveAction.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedNonconformityId, "nonconformityId");
+}
+
+/** Loads a T64 effectiveness review only inside the current organisation. */
+export async function findTenantEffectivenessReview(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedNonconformityId?: string,
+) {
+  const row = await prisma.effectivenessReview.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedNonconformityId, "nonconformityId");
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain

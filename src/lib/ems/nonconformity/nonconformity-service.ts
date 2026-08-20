@@ -1,12 +1,18 @@
 /**
- * Nonconformity workflow (task T63, Docs/PHASE6_AUDIT_INCIDENT_CAPA_SPEC.md
- * §§1-3,6-9). Depends on T61 (`AuditFinding`), T62 (`EnvironmentalIncident`)
- * and T45 (`ComplianceEvaluationItem`/`ComplianceEvaluationFindingLink`).
- * State machine per spec §2, T63 scope only:
+ * Nonconformity workflow (task T63, extended by T64 for the closure gate —
+ * see `root-cause-service.ts`, `corrective-action-service.ts` and
+ * `effectiveness-service.ts` for the rest of the T64 state machine),
+ * Docs/PHASE6_AUDIT_INCIDENT_CAPA_SPEC.md §§1-3,6-9. Depends on T61
+ * (`AuditFinding`), T62 (`EnvironmentalIncident`) and T45
+ * (`ComplianceEvaluationItem`/`ComplianceEvaluationFindingLink`). Full state
+ * machine per spec §2 (this module only ever writes OPEN/CONTAINED/CLOSED/
+ * REOPENED directly — ROOT_CAUSE_APPROVED/ACTIONS_IN_PROGRESS/
+ * EFFECTIVENESS_REVIEW are written by the T64 services above):
  *
- *   OPEN -> CONTAINED -> CLOSED / REOPENED
+ *   OPEN -> CONTAINED -> ROOT_CAUSE_APPROVED -> ACTIONS_IN_PROGRESS
+ *     -> EFFECTIVENESS_REVIEW -> CLOSED / REOPENED
  *
- * Fixed decisions this module enforces (spec §§1,4,8, T63 acceptance):
+ * Fixed decisions this module enforces (spec §§1,4,8, T63/T64 acceptance):
  *  - `createNonconformityFromSource` always requires a source (type + id, or
  *    a free-text reference note when the source type has no backing model
  *    yet) and a requirement reference — a nonconformity can never be created
@@ -22,18 +28,20 @@
  *    own traceability (spec acceptance: "duplicate linking supported without
  *    losing source traceability");
  *  - containment is captured via `ContainmentRecord`, separate from root
- *    cause/corrective action/effectiveness review, which this module does
- *    not implement (spec §1) — those belong to T64;
+ *    cause/corrective action/effectiveness review, which live in their own
+ *    T64 modules;
  *  - every status transition is audited (`recordAuditEvent`);
  *  - `closeNonconformity` checks the organisation's
- *    `NonconformityClosurePolicy`: it always refuses to close while
- *    `requireRootCauseApproval`/`requireCorrectiveActionsComplete`/
- *    `requireEffectivenessReview` is set, because nothing in T63 can prove
- *    those steps happened — T64 is expected to replace that refusal with a
- *    real completion check once its models land. When only
- *    `requireContainment` applies, closing is only possible once an adequate
- *    containment record exists (T63 acceptance: "closing is impossible
- *    without configured mandatory steps").
+ *    `NonconformityClosurePolicy` live, on every call, against the real T64
+ *    models: `requireRootCauseApproval` needs an approved
+ *    `RootCauseAnalysis`, `requireCorrectiveActionsComplete` needs every
+ *    non-cancelled `CorrectiveAction` COMPLETED/VERIFIED, and
+ *    `requireEffectivenessReview` needs the most recent
+ *    `EffectivenessReview` to be `EFFECTIVE` (T64 acceptance: "ineffective
+ *    outcome ... it cannot close"). When only `requireContainment` applies,
+ *    closing is only possible once an adequate containment record exists
+ *    (T63 acceptance: "closing is impossible without configured mandatory
+ *    steps").
  */
 
 import { prisma } from "@/lib/prisma";
@@ -454,10 +462,12 @@ export interface RecordContainmentInput {
 
 /**
  * Records a containment action against a Nonconformity and (on the first
- * containment record) moves it from `OPEN` to `CONTAINED`. Root cause,
- * corrective action and effectiveness review are separate decisions this
- * module does not implement (spec §1) — only containment and its own
- * adequacy review are captured here.
+ * containment record while `OPEN`) moves it to `CONTAINED`. Root cause,
+ * corrective action and effectiveness review are separate decisions handled
+ * by the T64 services — only containment and its own adequacy review are
+ * captured here. Also accepted while `REOPENED` (T64: a nonconformity sent
+ * back for remediation by an ineffective effectiveness review may need a
+ * fresh containment record before it re-enters the root-cause/action cycle).
  */
 export async function recordContainment(context: OrganisationContext, nonconformityId: string, input: RecordContainmentInput) {
   requirePermission(context, NONCONFORMITY_MANAGE_PERMISSION);
@@ -465,7 +475,7 @@ export async function recordContainment(context: OrganisationContext, nonconform
   const ctx = toTenantRepositoryContext(context);
   const nonconformity = await findTenantNonconformity(ctx, nonconformityId);
   if (!nonconformity) throw new TenantOwnershipError();
-  if (nonconformity.status !== "OPEN" && nonconformity.status !== "CONTAINED") {
+  if (!["OPEN", "CONTAINED", "REOPENED"].includes(nonconformity.status)) {
     throw new NonconformityError(`Containment cannot be recorded while the nonconformity is ${nonconformity.status}.`);
   }
   const owner = await prisma.organisationMembership.findFirst({
@@ -582,11 +592,19 @@ export async function uploadEvidenceToNonconformity(
 // Closure and reopen
 // ---------------------------------------------------------------------------
 
+/** Statuses a nonconformity may be closed directly from (spec §2 state machine: OPEN -> CONTAINED -> ... -> EFFECTIVENESS_REVIEW -> CLOSED). */
+const CLOSABLE_STATUSES = new Set(["OPEN", "CONTAINED", "EFFECTIVENESS_REVIEW"]);
+
 /**
  * Throws with a typed reason unless every step the organisation's
- * `NonconformityClosurePolicy` marks mandatory is satisfied. Steps this
- * module does not implement (root cause approval, corrective actions
- * complete, effectiveness review) always block — see the module docblock.
+ * `NonconformityClosurePolicy` marks mandatory is satisfied. Checked live,
+ * on every call — a permission or policy change since the record last moved
+ * takes effect immediately (T64 acceptance: "closure permission checked
+ * live"). `requireRootCauseApproval`/`requireCorrectiveActionsComplete`/
+ * `requireEffectivenessReview` are backed by the real T64 models
+ * (`root-cause-service.ts`, `corrective-action-service.ts`,
+ * `effectiveness-service.ts`) — this function only reads their state, it
+ * never mutates it.
  */
 async function assertMandatoryCloseStepsComplete(
   ctx: ReturnType<typeof toTenantRepositoryContext>,
@@ -598,12 +616,6 @@ async function assertMandatoryCloseStepsComplete(
   const requireCorrectiveActionsComplete = policy?.requireCorrectiveActionsComplete ?? false;
   const requireEffectivenessReview = policy?.requireEffectivenessReview ?? false;
 
-  if (requireRootCauseApproval || requireCorrectiveActionsComplete || requireEffectivenessReview) {
-    throw new NonconformityError(
-      "This organisation's closure policy requires root cause approval, corrective actions, or effectiveness review before closing — those steps are not yet implemented, so this nonconformity cannot be closed.",
-    );
-  }
-
   if (requireContainment) {
     const containmentRecords = await prisma.containmentRecord.findMany({ where: tenantWhere(ctx, { nonconformityId: nonconformity.id }) });
     const hasAdequateContainment = containmentRecords.some((record) => record.adequacyReviewed && record.adequate === true);
@@ -611,6 +623,44 @@ async function assertMandatoryCloseStepsComplete(
       throw new NonconformityError("Closing requires an adequate, reviewed containment record.");
     }
   }
+
+  if (requireRootCauseApproval) {
+    const approvedAnalysis = await prisma.rootCauseAnalysis.findFirst({
+      where: tenantWhere(ctx, { nonconformityId: nonconformity.id, approvedAt: { not: null } }),
+    });
+    if (!approvedAnalysis) {
+      throw new NonconformityError("Closing requires an approved root-cause analysis.");
+    }
+  }
+
+  if (requireCorrectiveActionsComplete) {
+    const actions = await prisma.correctiveAction.findMany({ where: tenantWhere(ctx, { nonconformityId: nonconformity.id }) });
+    const nonCancelled = actions.filter((action) => action.status !== "CANCELLED");
+    const allComplete = nonCancelled.length > 0 && nonCancelled.every((action) => action.status === "COMPLETED" || action.status === "VERIFIED");
+    if (!allComplete) {
+      throw new NonconformityError("Closing requires every corrective action to be completed.");
+    }
+  }
+
+  if (requireEffectivenessReview) {
+    const latestReview = await prisma.effectivenessReview.findFirst({
+      where: tenantWhere(ctx, { nonconformityId: nonconformity.id }),
+      orderBy: { createdAt: "desc" },
+    });
+    // T64 acceptance: "INEFFECTIVE reopens/follow-up; it cannot close" —
+    // only the most recent review's EFFECTIVE result satisfies this gate. A
+    // PARTIALLY_EFFECTIVE/INEFFECTIVE result already moved the
+    // nonconformity out of a closable status (effectiveness-service.ts), so
+    // this check is defence-in-depth against a stale/superseded review.
+    if (!latestReview || latestReview.result !== "EFFECTIVE") {
+      throw new NonconformityError("Closing requires the most recent effectiveness review to have found the corrective actions effective.");
+    }
+  }
+}
+
+/** JSON-safe copy of Prisma rows for a `NonconformityClosure` snapshot (Date objects are not valid Prisma Json input). */
+function toJsonSafe<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 export async function closeNonconformity(context: OrganisationContext, nonconformityId: string, actorUserId: string) {
@@ -618,15 +668,29 @@ export async function closeNonconformity(context: OrganisationContext, nonconfor
   const ctx = toTenantRepositoryContext(context);
   const nonconformity = await findTenantNonconformity(ctx, nonconformityId);
   if (!nonconformity) throw new TenantOwnershipError();
-  if (nonconformity.status !== "OPEN" && nonconformity.status !== "CONTAINED") {
+  if (!CLOSABLE_STATUSES.has(nonconformity.status)) {
     throw new NonconformityError(`A nonconformity in status ${nonconformity.status} cannot be closed directly.`);
   }
   await assertMandatoryCloseStepsComplete(ctx, nonconformity);
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    const [containmentRecords, rootCauseAnalyses, correctiveActions, effectivenessReviews] = await Promise.all([
+      tx.containmentRecord.findMany({ where: tenantWhere(txCtx, { nonconformityId: nonconformity.id }) }),
+      tx.rootCauseAnalysis.findMany({ where: tenantWhere(txCtx, { nonconformityId: nonconformity.id }) }),
+      tx.correctiveAction.findMany({ where: tenantWhere(txCtx, { nonconformityId: nonconformity.id }) }),
+      tx.effectivenessReview.findMany({ where: tenantWhere(txCtx, { nonconformityId: nonconformity.id }) }),
+    ]);
     const updated = await tx.nonconformity.update({
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: nonconformity.id } },
       data: { status: "CLOSED", closedAt: new Date(), closedByUserId: actorUserId },
+    });
+    await tx.nonconformityClosure.create({
+      data: {
+        organisationId: txCtx.organisationId,
+        nonconformityId: nonconformity.id,
+        snapshot: toJsonSafe({ containmentRecords, rootCauseAnalyses, correctiveActions, effectivenessReviews }),
+        closedByUserId: actorUserId,
+      },
     });
     await recordAuditEvent(tx, txCtx, {
       eventType: "nonconformity.closed",

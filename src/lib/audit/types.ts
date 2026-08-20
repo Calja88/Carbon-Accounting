@@ -195,6 +195,20 @@ export const AUDIT_EVENT_TYPES = [
   "nonconformity.contained",
   "nonconformity.closed",
   "nonconformity.reopened",
+  // Root cause, corrective action and effectiveness (task T64).
+  "root_cause_analysis.recorded",
+  "root_cause_analysis.approved",
+  "nonconformity.root_cause_approved",
+  "corrective_action.created",
+  "nonconformity.actions_in_progress",
+  "corrective_action.reassigned",
+  "corrective_action.status_changed",
+  "corrective_action.completed",
+  "corrective_action.verified",
+  "corrective_action.reopened",
+  "nonconformity.effectiveness_review_requested",
+  "effectiveness_review.recorded",
+  "nonconformity.follow_up_created",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -259,7 +273,10 @@ export type AuditResourceType =
   | "nonconformity_closure_policy"
   | "nonconformity"
   | "nonconformity_source_link"
-  | "containment_record";
+  | "containment_record"
+  | "root_cause_analysis"
+  | "corrective_action"
+  | "effectiveness_review";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept
