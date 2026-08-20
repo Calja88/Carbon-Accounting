@@ -173,6 +173,17 @@ export const AUDIT_EVENT_TYPES = [
   "audit_finding.closed",
   "ems_audit.report_draft_started",
   "ems_audit.report_issued",
+  // Environmental incident intake (task T62).
+  "incident_severity_level.created",
+  "incident_escalation_rule.upserted",
+  "environmental_incident.reported",
+  "environmental_incident.triaged",
+  "environmental_incident.investigation_started",
+  "environmental_incident.response_completed",
+  "environmental_incident.closed",
+  "environmental_incident.reopened",
+  "incident_correction.recorded",
+  "incident_notification_assessment.recorded",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -231,7 +242,8 @@ export type AuditResourceType =
   | "audit_team_member"
   | "audit_checklist_version"
   | "audit_question_response"
-  | "audit_finding";
+  | "audit_finding"
+  | "environmental_incident";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

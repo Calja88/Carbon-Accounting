@@ -416,6 +416,48 @@ export async function findTenantAuditReportRevision(ctx: TenantRepositoryContext
   return assertOwned(ctx, row);
 }
 
+// ---------------------------------------------------------------------------
+// Environmental incident intake (task T62).
+// ---------------------------------------------------------------------------
+
+/** Loads a T62 incident severity level only inside the current organisation. */
+export async function findTenantIncidentSeverityLevel(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.incidentSeverityLevel.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/** Loads a T62 environmental incident only inside the current organisation. */
+export async function findTenantEnvironmentalIncident(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.environmentalIncident.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads a T62 incident correction only inside the current organisation, and
+ * (when `expectedIncidentId` is supplied) attached to that exact incident —
+ * the nested-parent-substitution guard.
+ */
+export async function findTenantIncidentCorrection(ctx: TenantRepositoryContext, id: string, expectedIncidentId?: string) {
+  const row = await prisma.incidentCorrection.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedIncidentId, "incidentId");
+}
+
+/**
+ * Loads a T62 incident notification assessment only inside the current
+ * organisation, and (when `expectedIncidentId` is supplied) attached to that
+ * exact incident — the nested-parent-substitution guard.
+ */
+export async function findTenantIncidentNotificationAssessment(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedIncidentId?: string,
+) {
+  const row = await prisma.incidentNotificationAssessment.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedIncidentId, "incidentId");
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain

@@ -88,6 +88,7 @@ export const PERMISSION_CATALOGUE: PermissionCatalogueEntry[] = [
   entry("ems.audit_report.issue", "Issue an internal audit report", true),
   entry("ems.incident.report", "Report an environmental incident"),
   entry("ems.incident.manage", "Manage and close out incident records", true),
+  entry("ems.incident.restricted.view", "View restricted/confidential incident records", true),
   entry("ems.nonconformity.manage", "Manage nonconformity records"),
   entry("ems.corrective_action.manage", "Manage corrective actions"),
   entry("ems.corrective_action.effectiveness_review", "Review corrective action effectiveness", true),
