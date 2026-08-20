@@ -623,3 +623,85 @@ export async function findTenantCompetenceAssessment(
   if (!row) return null;
   return assertChildOwnership(ctx, row, expectedAssignmentId, "assignmentId");
 }
+
+// ---------------------------------------------------------------------------
+// Management review model and agenda (task T72).
+// ---------------------------------------------------------------------------
+
+/** Loads a T72 ManagementReviewAgendaTemplate only inside the current organisation. */
+export async function findTenantManagementReviewAgendaTemplate(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.managementReviewAgendaTemplate.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads a T72 ManagementReviewAgendaTemplateVersion only inside the current
+ * organisation, and (when `expectedTemplateId` is supplied) attached to
+ * that exact template — the nested-parent-substitution guard.
+ */
+export async function findTenantManagementReviewAgendaTemplateVersion(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedTemplateId?: string,
+) {
+  const row = await prisma.managementReviewAgendaTemplateVersion.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedTemplateId, "templateId");
+}
+
+/**
+ * Loads a T72 ManagementReviewAgendaItemDefinition only inside the current
+ * organisation, and (when `expectedTemplateVersionId` is supplied) attached
+ * to that exact template version — the nested-parent-substitution guard.
+ */
+export async function findTenantManagementReviewAgendaItemDefinition(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedTemplateVersionId?: string,
+) {
+  const row = await prisma.managementReviewAgendaItemDefinition.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedTemplateVersionId, "templateVersionId");
+}
+
+/** Loads a T72 ManagementReviewInputDefinition only inside the current organisation. */
+export async function findTenantManagementReviewInputDefinition(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.managementReviewInputDefinition.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/** Loads a T72 ManagementReview only inside the current organisation. */
+export async function findTenantManagementReview(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.managementReview.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads a T72 ManagementReviewAttendee only inside the current
+ * organisation, and (when `expectedReviewId` is supplied) attached to that
+ * exact review — the nested-parent-substitution guard.
+ */
+export async function findTenantManagementReviewAttendee(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedReviewId?: string,
+) {
+  const row = await prisma.managementReviewAttendee.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedReviewId, "reviewId");
+}
+
+/**
+ * Loads a T72 ManagementReviewInputLink only inside the current
+ * organisation, and (when `expectedReviewId` is supplied) attached to that
+ * exact review — the nested-parent-substitution guard.
+ */
+export async function findTenantManagementReviewInputLink(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedReviewId?: string,
+) {
+  const row = await prisma.managementReviewInputLink.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedReviewId, "reviewId");
+}

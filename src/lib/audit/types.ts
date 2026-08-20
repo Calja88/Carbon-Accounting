@@ -228,6 +228,18 @@ export const AUDIT_EVENT_TYPES = [
   "competence_assessment.created",
   "competence_assessment.completed",
   "competence_assignment.expired",
+  // Management review model and agenda (task T72).
+  "management_review_agenda_template_version.created",
+  "management_review_agenda_template_version.approved",
+  "management_review_agenda_template_version.activated",
+  "management_review_agenda_template_version.superseded",
+  "management_review.scheduled",
+  "management_review.rescheduled",
+  "management_review.input_collection_started",
+  "management_review_attendee.added",
+  "management_review_attendee.removed",
+  "management_review_input_link.linked",
+  "management_review_input_link.removed",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -300,7 +312,11 @@ export type AuditResourceType =
   | "competence_requirement_version"
   | "competence_assignment"
   | "competence_evidence"
-  | "competence_assessment";
+  | "competence_assessment"
+  | "management_review_agenda_template_version"
+  | "management_review"
+  | "management_review_attendee"
+  | "management_review_input_link";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept
