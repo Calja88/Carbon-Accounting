@@ -184,6 +184,17 @@ export const AUDIT_EVENT_TYPES = [
   "environmental_incident.reopened",
   "incident_correction.recorded",
   "incident_notification_assessment.recorded",
+  // Nonconformity workflow (task T63).
+  "nonconformity_classification.created",
+  "nonconformity_closure_policy.upserted",
+  "nonconformity.created",
+  "nonconformity.classified",
+  "nonconformity_source_link.created",
+  "containment_record.created",
+  "containment_record.adequacy_reviewed",
+  "nonconformity.contained",
+  "nonconformity.closed",
+  "nonconformity.reopened",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -243,7 +254,12 @@ export type AuditResourceType =
   | "audit_checklist_version"
   | "audit_question_response"
   | "audit_finding"
-  | "environmental_incident";
+  | "environmental_incident"
+  | "nonconformity_classification"
+  | "nonconformity_closure_policy"
+  | "nonconformity"
+  | "nonconformity_source_link"
+  | "containment_record";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept
