@@ -547,3 +547,45 @@ export async function findProcessProfileTemplate(id: string) {
     include: { items: { orderBy: { sortOrder: "asc" } } },
   });
 }
+
+/** Loads a T70 PersonProfile only inside the current organisation. */
+export async function findTenantPersonProfile(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.personProfile.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/** Loads a T70 CompetenceRequirement only inside the current organisation. */
+export async function findTenantCompetenceRequirement(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.competenceRequirement.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads a T70 CompetenceRequirementVersion only inside the current
+ * organisation, and (when `expectedRequirementId` is supplied) attached to
+ * that exact requirement — the nested-parent-substitution guard.
+ */
+export async function findTenantCompetenceRequirementVersion(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedRequirementId?: string,
+) {
+  const row = await prisma.competenceRequirementVersion.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedRequirementId, "requirementId");
+}
+
+/**
+ * Loads a T70 CompetenceAssignment only inside the current organisation,
+ * and (when `expectedPersonId` is supplied) attached to that exact person —
+ * the nested-parent-substitution guard.
+ */
+export async function findTenantCompetenceAssignment(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedPersonId?: string,
+) {
+  const row = await prisma.competenceAssignment.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedPersonId, "personId");
+}

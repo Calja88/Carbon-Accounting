@@ -26,6 +26,13 @@ describe("system role templates", () => {
     }
   });
 
+  it("grants ems.competence.sensitive.view to Sustainability Lead only", () => {
+    for (const template of SYSTEM_ROLE_TEMPLATES) {
+      const hasSensitiveView = template.permissionCodes.includes("ems.competence.sensitive.view");
+      expect(hasSensitiveView).toBe(template.templateKey === RoleTemplateKey.SUSTAINABILITY_LEAD);
+    }
+  });
+
   it("gives Organisation Administrator role-management but not compliance-obligation approval", () => {
     const admin = getRoleTemplate(RoleTemplateKey.ORGANISATION_ADMINISTRATOR);
     expect(admin.permissionCodes).toContain("organisation.role.manage");

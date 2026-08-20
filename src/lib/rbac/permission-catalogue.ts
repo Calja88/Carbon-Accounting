@@ -94,6 +94,7 @@ export const PERMISSION_CATALOGUE: PermissionCatalogueEntry[] = [
   entry("ems.corrective_action.effectiveness_review", "Review corrective action effectiveness", true),
   entry("ems.competence.view", "View competence records"),
   entry("ems.competence.manage", "Manage competence records and evidence", true),
+  entry("ems.competence.sensitive.view", "View restricted personal/training contact detail", true),
   entry("ems.management_review.manage", "Prepare and manage management review inputs"),
   entry("ems.management_review.approve", "Approve management review outputs", true),
   entry("ems.controlled_document.manage", "Manage controlled documents"),

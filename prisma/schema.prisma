@@ -307,6 +307,14 @@ model Organisation {
   effectivenessReviews EffectivenessReview[]
   nonconformityClosures NonconformityClosure[]
 
+  // Competence requirements and person assignments (T70).
+  personProfiles                 PersonProfile[]
+  personSensitiveProfiles        PersonSensitiveProfile[]
+  competenceRequirements         CompetenceRequirement[]
+  competenceRequirementVersions  CompetenceRequirementVersion[]
+  competenceRequirementScopes    CompetenceRequirementScope[]
+  competenceAssignments          CompetenceAssignment[]
+
   @@index([status])
 }
 
@@ -422,6 +430,12 @@ model OrganisationMembership {
   ownedCorrectiveActions     CorrectiveAction[]     @relation("CorrectiveActionOwner")
   performedEffectivenessReviews EffectivenessReview[] @relation("EffectivenessReviewReviewer")
 
+  // Competence requirements and person assignments (T70).
+  linkedPersonProfile         PersonProfile?            @relation("PersonProfileMembership")
+  createdPersonProfiles       PersonProfile[]           @relation("PersonProfileCreatedBy")
+  updatedPersonSensitiveProfiles PersonSensitiveProfile[] @relation("PersonSensitiveProfileUpdatedBy")
+  assignedCompetenceAssignments  CompetenceAssignment[]  @relation("CompetenceAssignmentAssignedBy")
+
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
   @@unique([inviteTokenHash])
@@ -465,6 +479,9 @@ model RoleDefinition {
   organisation Organisation     @relation(fields: [organisationId], references: [id])
   permissions  RolePermission[]
   memberships  MembershipRole[]
+
+  // Competence requirements and person assignments (T70).
+  competenceRequirementScopes CompetenceRequirementScope[]
 
   @@unique([organisationId, name])
   @@unique([organisationId, id])
@@ -568,6 +585,9 @@ model Entity {
   // Environmental incident intake (T62).
   environmentalIncidents EnvironmentalIncident[]
 
+  // Competence requirements and person assignments (T70).
+  personProfiles PersonProfile[]
+
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy global-unique Entity name —
   // two organisations may now use the same Entity name.
@@ -631,6 +651,9 @@ model Site {
 
   // Environmental incident intake (T62).
   environmentalIncidents EnvironmentalIncident[]
+
+  // Competence requirements and person assignments (T70).
+  personProfiles PersonProfile[]
 
   @@unique([organisationId, id])
   // T1A contract migration: replaces the legacy [entityId, name] unique —
@@ -3459,6 +3482,9 @@ model ActivityProcess {
   // Environmental incident intake (T62).
   environmentalIncidents EnvironmentalIncident[]
 
+  // Competence requirements and person assignments (T70).
+  competenceRequirementScopes CompetenceRequirementScope[]
+
   @@unique([organisationId, id])
   @@index([organisationId, programmeId, status])
   @@index([organisationId, siteId])
@@ -3512,6 +3538,9 @@ model EnvironmentalAspect {
 
   // Environmental incident intake (T62).
   environmentalIncidents EnvironmentalIncident[]
+
+  // Competence requirements and person assignments (T70).
+  competenceRequirementScopes CompetenceRequirementScope[]
 
   @@unique([organisationId, id])
   @@index([organisationId, processId])
@@ -3752,6 +3781,9 @@ model OperationalControl {
 
   // Nonconformity workflow (T63).
   nonconformities Nonconformity[]
+
+  // Competence requirements and person assignments (T70).
+  competenceRequirementScopes CompetenceRequirementScope[]
 
   @@unique([organisationId, id])
   @@unique([organisationId, controlKey, version])
@@ -4064,6 +4096,9 @@ model EmergencyScenario {
 
   plans     EmergencyPlan[]
   exercises EmergencyExercise[]
+
+  // Competence requirements and person assignments (T70).
+  competenceRequirementScopes CompetenceRequirementScope[]
 
   @@unique([organisationId, id])
   @@index([organisationId, status, reviewDueDate])
@@ -5149,6 +5184,9 @@ model ComplianceObligationVersion {
 
   // Objective source links (T50).
   objectiveSourceLinks ObjectiveSourceLink[]
+
+  // Competence requirements and person assignments (T70).
+  competenceRequirementScopes CompetenceRequirementScope[]
 
   @@unique([organisationId, id])
   @@unique([organisationId, obligationId, version])
@@ -7311,4 +7349,280 @@ model NonconformityClosure {
 
   @@unique([organisationId, id])
   @@index([organisationId, nonconformityId])
+}
+
+// ---------------------------------------------------------------------------
+// Competence requirements and person assignments (task T70,
+// Docs/PHASE7_COMPETENCE_MANAGEMENT_REVIEW_SPEC.md §§1-3,6). Depends on T23
+// (EmsProgramme/context foundation) and T33 (OperationalControl), both
+// already on this branch. Deliberately narrow: this is P7-01/P7-02 only —
+// evidence, assessment, training courses/events, expiry reminders and
+// awareness campaigns are T71 and are not modelled here (spec §9 PR
+// sequence; task packet "do not implement beyond T70").
+//
+// `PersonProfile` links a login identity (`OrganisationMembership`) or
+// stands alone for a contractor/other person who never logs in — the spec
+// §1 fixed decision "login identity and person/contractor profile are
+// linked, not duplicated" is enforced by never copying the membership's
+// name/email onto this row; `membershipId` is the only pointer. Personal
+// contact detail is split into `PersonSensitiveProfile`, gated by the new
+// `ems.competence.sensitive.view` permission, separately from the
+// non-sensitive `ems.competence.view`/`ems.competence.manage` pair (spec §6).
+//
+// `CompetenceRequirement`/`CompetenceRequirementVersion` follow the exact
+// stable-reference-plus-version shape as `EnvironmentalObjective`/
+// `EnvironmentalObjectiveVersion` (T50): `activeVersionId` only ever moves
+// inside `requirement-service.ts#activateCompetenceRequirementVersion`.
+// State machine (spec §2, narrower than T44/T50 — no IN_REVIEW step):
+// DRAFT -> APPROVED -> ACTIVE -> SUPERSEDED.
+//
+// `CompetenceRequirementScope` maps one version to what it applies to —
+// role, process, aspect, operational control, compliance obligation version
+// or emergency scenario (spec §3 "applies-to role/process/aspect/control/
+// obligation/emergency role") — one target per row, same convention as
+// `ObjectiveSourceLink`.
+//
+// `CompetenceAssignment` links an exact requirement version to a person
+// (spec §3). Status is deliberately limited to the subset reachable without
+// evidence/assessment (REQUIRED/IN_PROGRESS/GAP) — T71 extends this enum
+// with EVIDENCE_SUBMITTED/COMPETENT/EXPIRED when it adds the evidence and
+// assessment models the fuller spec §2 state machine needs.
+// ---------------------------------------------------------------------------
+
+enum PersonProfileType {
+  EMPLOYEE
+  CONTRACTOR
+  OTHER
+}
+
+enum CompetenceRequirementVersionStatus {
+  DRAFT
+  APPROVED
+  ACTIVE
+  SUPERSEDED
+}
+
+enum CompetenceRequirementScopeType {
+  ROLE
+  PROCESS
+  ASPECT
+  CONTROL
+  OBLIGATION
+  EMERGENCY_ROLE
+}
+
+enum CompetenceAssignmentStatus {
+  REQUIRED
+  IN_PROGRESS
+  GAP
+}
+
+/// A person a competence requirement can be assigned to — an
+/// `OrganisationMembership` (someone who logs in) or a standalone
+/// contractor/other person who never logs in. Never duplicates the
+/// membership's own name/email (spec §1); `displayName` is only populated
+/// for a person without a membership.
+model PersonProfile {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  membershipId String?
+  membership   OrganisationMembership? @relation("PersonProfileMembership", fields: [organisationId, membershipId], references: [organisationId, id], onDelete: Restrict)
+
+  personType  PersonProfileType
+  displayName String?
+
+  entityId String?
+  entity   Entity? @relation(fields: [organisationId, entityId], references: [organisationId, id], onDelete: Restrict)
+  siteId   String?
+  site     Site?   @relation(fields: [organisationId, siteId], references: [organisationId, id], onDelete: Restrict)
+
+  activeFrom DateTime  @default(now())
+  activeTo   DateTime?
+  isActive   Boolean   @default(true)
+
+  createdByMembershipId String
+  createdBy             OrganisationMembership @relation("PersonProfileCreatedBy", fields: [organisationId, createdByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  sensitiveProfile PersonSensitiveProfile?
+  assignments      CompetenceAssignment[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, membershipId])
+  @@index([organisationId, entityId])
+  @@index([organisationId, siteId])
+  @@index([organisationId, isActive])
+}
+
+/// Restricted personal contact/notes for a `PersonProfile`, gated by
+/// `ems.competence.sensitive.view` (spec §6) separately from the
+/// non-sensitive gap/status view. No real personal data is ever seeded
+/// (spec §1).
+model PersonSensitiveProfile {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  personId String        @unique
+  person   PersonProfile @relation(fields: [organisationId, personId], references: [organisationId, id], onDelete: Cascade)
+
+  contactEmail String?
+  contactPhone String?
+  notes        String?
+
+  updatedByMembershipId String
+  updatedBy             OrganisationMembership @relation("PersonSensitiveProfileUpdatedBy", fields: [organisationId, updatedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  updatedAt              DateTime @default(now())
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, personId])
+}
+
+/// Stable reference to one competence requirement; only ever points at
+/// whichever `CompetenceRequirementVersion` is currently ACTIVE. Mirrors
+/// `EnvironmentalObjective`/`ObjectiveMetricDefinition` exactly.
+model CompetenceRequirement {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  requirementKey String
+
+  activeVersionId String?                        @unique
+  activeVersion   CompetenceRequirementVersion? @relation("CompetenceRequirementActiveVersion", fields: [organisationId, activeVersionId], references: [organisationId, id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions CompetenceRequirementVersion[] @relation("CompetenceRequirementVersions")
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, requirementKey])
+  @@unique([organisationId, activeVersionId])
+  @@index([organisationId])
+}
+
+/// One version of a competence requirement's content — description,
+/// validity/renewal rule (free text; T71 formalises expiry logic), and what
+/// it applies to via `CompetenceRequirementScope` (spec §3).
+model CompetenceRequirementVersion {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  requirementId String
+  requirement   CompetenceRequirement @relation("CompetenceRequirementVersions", fields: [organisationId, requirementId], references: [organisationId, id])
+  version       Int
+
+  title              String
+  description        String
+  renewalRule        String?
+  acceptableEvidence String?
+
+  status CompetenceRequirementVersionStatus @default(DRAFT)
+
+  preparedByUserId String
+  preparedAt       DateTime  @default(now())
+  approvedByUserId String?
+  approvedAt       DateTime?
+
+  revisionRationale String?
+
+  supersedesVersionId String?
+  supersedesVersion   CompetenceRequirementVersion? @relation("CompetenceRequirementVersionSuccessor", fields: [organisationId, supersedesVersionId], references: [organisationId, id])
+  successorVersion    CompetenceRequirementVersion? @relation("CompetenceRequirementVersionSuccessor")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activeForRequirement CompetenceRequirement? @relation("CompetenceRequirementActiveVersion")
+
+  scopes      CompetenceRequirementScope[]
+  assignments CompetenceAssignment[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, requirementId, version])
+  @@unique([organisationId, supersedesVersionId])
+  @@index([organisationId, requirementId, status])
+  @@index([organisationId, status])
+}
+
+/// One "applies-to" target for a requirement version — exactly one of
+/// role/process/aspect/control/obligation-version is set, or (for
+/// EMERGENCY_ROLE, which has no dedicated org-scoped model of its own yet)
+/// `emergencyRoleLabel` carries a free-text label.
+model CompetenceRequirementScope {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  requirementVersionId String
+  requirementVersion   CompetenceRequirementVersion @relation(fields: [organisationId, requirementVersionId], references: [organisationId, id], onDelete: Cascade)
+
+  scopeType CompetenceRequirementScopeType
+
+  roleId    String?
+  role      RoleDefinition?    @relation(fields: [organisationId, roleId], references: [organisationId, id], onDelete: Restrict)
+  processId String?
+  process   ActivityProcess?   @relation(fields: [organisationId, processId], references: [organisationId, id], onDelete: Restrict)
+  aspectId  String?
+  aspect    EnvironmentalAspect? @relation(fields: [organisationId, aspectId], references: [organisationId, id], onDelete: Restrict)
+  controlId String?
+  control   OperationalControl? @relation(fields: [organisationId, controlId], references: [organisationId, id], onDelete: Restrict)
+
+  obligationVersionId String?
+  obligationVersion   ComplianceObligationVersion? @relation(fields: [organisationId, obligationVersionId], references: [organisationId, id], onDelete: Restrict)
+
+  emergencyScenarioId String?
+  emergencyScenario   EmergencyScenario? @relation(fields: [organisationId, emergencyScenarioId], references: [organisationId, id], onDelete: Restrict)
+  emergencyRoleLabel  String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([organisationId, requirementVersionId, scopeType, roleId, processId, aspectId, controlId, obligationVersionId, emergencyScenarioId, emergencyRoleLabel], map: "CompetenceRequirementScope_scope_key")
+  @@index([organisationId, requirementVersionId])
+  @@index([organisationId, roleId])
+  @@index([organisationId, processId])
+  @@index([organisationId, aspectId])
+  @@index([organisationId, controlId])
+  @@index([organisationId, obligationVersionId])
+  @@index([organisationId, emergencyScenarioId])
+}
+
+/// Links one exact `CompetenceRequirementVersion` to one `PersonProfile`
+/// (spec §3). A requirement revision never alters an existing assignment's
+/// `requirementVersionId` (T70 acceptance: "requirement revision does not
+/// alter historical assignment") — a new version needs a new assignment.
+model CompetenceAssignment {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  requirementVersionId String
+  requirementVersion   CompetenceRequirementVersion @relation(fields: [organisationId, requirementVersionId], references: [organisationId, id], onDelete: Restrict)
+
+  personId String
+  person   PersonProfile @relation(fields: [organisationId, personId], references: [organisationId, id], onDelete: Cascade)
+
+  status CompetenceAssignmentStatus @default(REQUIRED)
+
+  assignedByMembershipId String
+  assignedBy             OrganisationMembership @relation("CompetenceAssignmentAssignedBy", fields: [organisationId, assignedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  assignedAt             DateTime               @default(now())
+  dueDate                DateTime?
+
+  gapNote   String?
+  gapSince  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, requirementVersionId, personId])
+  @@index([organisationId, personId])
+  @@index([organisationId, requirementVersionId])
+  @@index([organisationId, status])
 }
