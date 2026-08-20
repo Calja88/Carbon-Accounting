@@ -458,6 +458,37 @@ export async function findTenantIncidentNotificationAssessment(
   return assertChildOwnership(ctx, row, expectedIncidentId, "incidentId");
 }
 
+// ---------------------------------------------------------------------------
+// Nonconformity workflow (task T63).
+// ---------------------------------------------------------------------------
+
+/** Loads a T63 nonconformity classification only inside the current organisation. */
+export async function findTenantNonconformityClassification(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.nonconformityClassification.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/** Loads a T63 nonconformity only inside the current organisation. */
+export async function findTenantNonconformity(ctx: TenantRepositoryContext, id: string) {
+  const row = await prisma.nonconformity.findFirst({ where: tenantWhere(ctx, { id }) });
+  return assertOwned(ctx, row);
+}
+
+/**
+ * Loads a T63 containment record only inside the current organisation, and
+ * (when `expectedNonconformityId` is supplied) attached to that exact
+ * nonconformity — the nested-parent-substitution guard.
+ */
+export async function findTenantContainmentRecord(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedNonconformityId?: string,
+) {
+  const row = await prisma.containmentRecord.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedNonconformityId, "nonconformityId");
+}
+
 /**
  * Loads a ProcessProfileTemplate by id. Templates are platform content, not
  * tenant data (task T30 — no organisationId column), so this is a plain

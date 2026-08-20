@@ -101,6 +101,10 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   // in the tenant repository, and re-check restricted-incident clearance,
   // before invoking linkEvidence.
   "environmental_incident",
+  // Nonconformity workflow (task T63). Callers resolve the nonconformity/
+  // containment record in the tenant repository before linking.
+  "nonconformity",
+  "containment_record",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 

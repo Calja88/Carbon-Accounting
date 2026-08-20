@@ -294,6 +294,13 @@ model Organisation {
   incidentCorrections             IncidentCorrection[]
   incidentNotificationAssessments IncidentNotificationAssessment[]
 
+  // Nonconformity workflow (T63).
+  nonconformityClassifications NonconformityClassification[]
+  nonconformityClosurePolicies NonconformityClosurePolicy[]
+  nonconformities               Nonconformity[]
+  nonconformitySourceLinks      NonconformitySourceLink[]
+  containmentRecords            ContainmentRecord[]
+
   @@index([status])
 }
 
@@ -397,6 +404,12 @@ model OrganisationMembership {
   // Environmental incident intake (T62).
   reportedIncidents                  EnvironmentalIncident[]          @relation("EnvironmentalIncidentReporter")
   reviewedIncidentNotificationChecks IncidentNotificationAssessment[] @relation("IncidentNotificationAssessmentReviewer")
+
+  // Nonconformity workflow (T63).
+  ownedNonconformities            Nonconformity[]           @relation("NonconformityOwner")
+  nonconformitySourceLinksLinked  NonconformitySourceLink[] @relation("NonconformitySourceLinkedBy")
+  ownedContainmentRecords         ContainmentRecord[]       @relation("ContainmentRecordOwner")
+  reviewedContainmentAdequacy     ContainmentRecord[]       @relation("ContainmentRecordAdequacyReviewer")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -3726,6 +3739,9 @@ model OperationalControl {
   // Compliance obligation version control links (T44).
   complianceObligationVersionLinks ComplianceObligationVersionControl[]
 
+  // Nonconformity workflow (T63).
+  nonconformities Nonconformity[]
+
   @@unique([organisationId, id])
   @@unique([organisationId, controlKey, version])
   @@unique([organisationId, supersedesControlId])
@@ -5037,6 +5053,9 @@ model ComplianceObligation {
   // Audit programme/execution scopes (T60).
   auditProgrammeItemScopes AuditProgrammeItemScope[]
   emsAuditScopes           EmsAuditScope[]
+
+  // Nonconformity workflow (T63).
+  nonconformities Nonconformity[]
 
   @@unique([organisationId, id])
   @@unique([organisationId, activeVersionId])
@@ -6842,4 +6861,226 @@ model IncidentNotificationAssessment {
 
   @@unique([organisationId, id])
   @@index([organisationId, incidentId])
+}
+
+// ---------------------------------------------------------------------------
+// Nonconformity workflow (task T63, Docs/PHASE6_AUDIT_INCIDENT_CAPA_SPEC.md
+// §§1-9). Depends on T61 (`AuditFinding`), T62 (`EnvironmentalIncident`) and
+// T45 (`ComplianceEvaluationItem`/`ComplianceEvaluationFindingLink`) — all
+// already present above. State machine per spec §2, T63 scope only:
+//
+//   OPEN -> CONTAINED -> CLOSED / REOPENED
+//
+// The remaining states (`ROOT_CAUSE_APPROVED`, `ACTIONS_IN_PROGRESS`,
+// `EFFECTIVENESS_REVIEW`) and the root-cause/corrective-action/effectiveness
+// models that would drive them belong to T64 and are not modelled here (spec
+// §1 "containment, root cause, corrective action, completion, effectiveness
+// and closure are separate decisions"). `NonconformityClosurePolicy` still
+// lets an organisation *require* those steps; `nonconformity-service.ts#closeNonconformity`
+// always refuses to close while any such flag is set, since nothing in T63
+// can prove those steps happened — T64 is expected to replace that refusal
+// with a real completion check once its models exist (T63 acceptance:
+// "closing is impossible without configured mandatory steps").
+//
+// `Nonconformity.sourceType`/`sourceId` pin the source that created the
+// record; `NonconformitySourceLink` additionally records every further
+// source later linked to this same Nonconformity (T63 acceptance: "duplicate
+// linking supported without losing source traceability") — a second audit
+// finding, incident, or evaluation item found to describe the same
+// underlying nonconformity is linked here instead of spawning a second
+// Nonconformity, while every source it came from stays individually
+// traceable via its own row.
+// ---------------------------------------------------------------------------
+
+enum NonconformitySourceType {
+  AUDIT_FINDING
+  INCIDENT
+  COMPLIANCE_EVALUATION_ITEM
+  CONTROL_CHECK
+  COMPLAINT
+  MANUAL
+}
+
+enum NonconformityStatus {
+  OPEN
+  CONTAINED
+  ROOT_CAUSE_APPROVED
+  ACTIONS_IN_PROGRESS
+  EFFECTIVENESS_REVIEW
+  CLOSED
+  REOPENED
+}
+
+/// Organisation-configurable nonconformity classification (spec §4
+/// "classification config snapshot") — same convention as
+/// `IncidentSeverityLevel` (T62): a level already referenced by a
+/// Nonconformity is never deleted, only deactivated
+/// (`nonconformity-service.ts` enforces this).
+model NonconformityClassification {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  key      String
+  label    String
+  rank     Int
+  isActive Boolean @default(true)
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  nonconformities Nonconformity[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, key])
+  @@index([organisationId, isActive])
+}
+
+/// One organisation's mandatory-close-step policy (spec acceptance: "closing
+/// is impossible without configured mandatory steps"). Single row per
+/// organisation, upserted by `ems.nonconformity.manage`.
+/// `requireRootCauseApproval`/`requireCorrectiveActionsComplete`/
+/// `requireEffectivenessReview` name steps T63 does not implement — see the
+/// module docblock above for why setting any of them always blocks close
+/// rather than being silently ignored.
+model NonconformityClosurePolicy {
+  id             String       @id @default(cuid())
+  organisationId String       @unique
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  requireContainment               Boolean @default(true)
+  requireRootCauseApproval         Boolean @default(false)
+  requireCorrectiveActionsComplete Boolean @default(false)
+  requireEffectivenessReview       Boolean @default(false)
+
+  updatedByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+/// A controlled nonconformity record (spec §4). `sourceType`/`sourceId` pin
+/// the source that created this record; for source types with a backing
+/// model (`AUDIT_FINDING`, `INCIDENT`, `COMPLIANCE_EVALUATION_ITEM`,
+/// `CONTROL_CHECK`) `sourceId` is validated against that model in the same
+/// Organisation before the row is created — see
+/// `nonconformity-service.ts#resolveAndValidateSource`. `COMPLAINT` and
+/// `MANUAL` have no backing model in this codebase yet, so `sourceId` stays
+/// null for them and `sourceReferenceNote` carries the free-text reference
+/// instead — either way a source is always recorded (T63 acceptance: "source
+/// linkage ... required for each nonconformity"). `requirementReference` is
+/// always required free text; `complianceObligationId`/`operationalControlId`
+/// are optional FK links to the exact record when the reference names one.
+/// `classificationConfigSnapshot` freezes the exact
+/// `NonconformityClassification` row in effect when classification was
+/// assigned (same convention as `EnvironmentalIncident.severityConfigSnapshot`,
+/// T62) so a later config edit never rewrites a past record.
+model Nonconformity {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  reference String
+
+  sourceType          NonconformitySourceType
+  sourceId            String?
+  sourceReferenceNote String?
+
+  statement            String
+  requirementReference String
+
+  complianceObligationId String?
+  complianceObligation   ComplianceObligation? @relation(fields: [organisationId, complianceObligationId], references: [organisationId, id], onDelete: Restrict)
+  operationalControlId   String?
+  operationalControl     OperationalControl?   @relation(fields: [organisationId, operationalControlId], references: [organisationId, id], onDelete: Restrict)
+
+  classificationId              String?
+  classification                NonconformityClassification? @relation(fields: [organisationId, classificationId], references: [organisationId, id], onDelete: Restrict)
+  classificationConfigSnapshot  Json?
+
+  status NonconformityStatus @default(OPEN)
+
+  ownerMembershipId String?
+  owner             OrganisationMembership? @relation("NonconformityOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id], onDelete: Restrict)
+  dueDate           DateTime?
+
+  closedAt         DateTime?
+  closedByUserId   String?
+  reopenedAt       DateTime?
+  reopenedByUserId String?
+  reopenReason     String?
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  sourceLinks        NonconformitySourceLink[]
+  containmentRecords ContainmentRecord[]
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, reference])
+  @@index([organisationId, status])
+  @@index([organisationId, sourceType, sourceId])
+  @@index([organisationId, classificationId])
+}
+
+/// Every source ever linked to a Nonconformity, including the one that
+/// created it (`isPrimary = true`, written once by `createNonconformityFromSource`)
+/// and any later duplicate source linked instead of spawning a second
+/// Nonconformity (spec acceptance: "duplicate linking supported without
+/// losing source traceability").
+model NonconformitySourceLink {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  nonconformityId String
+  nonconformity   Nonconformity @relation(fields: [organisationId, nonconformityId], references: [organisationId, id], onDelete: Cascade)
+
+  sourceType          NonconformitySourceType
+  sourceId            String?
+  sourceReferenceNote String?
+  isPrimary           Boolean @default(false)
+
+  linkedByMembershipId String
+  linkedBy              OrganisationMembership @relation("NonconformitySourceLinkedBy", fields: [organisationId, linkedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  linkedAt              DateTime @default(now())
+
+  @@unique([organisationId, id])
+  @@index([organisationId, nonconformityId])
+  @@index([organisationId, sourceType, sourceId])
+}
+
+/// Containment action taken against a Nonconformity (spec §4 "action taken,
+/// owner/time, evidence, adequacy review"). Root cause, corrective action,
+/// completion and effectiveness are explicitly separate decisions T63 does
+/// not implement (spec §1) — this model captures containment and its own
+/// adequacy review only.
+model ContainmentRecord {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  nonconformityId String
+  nonconformity   Nonconformity @relation(fields: [organisationId, nonconformityId], references: [organisationId, id], onDelete: Cascade)
+
+  actionTaken   String
+  actionTakenAt DateTime
+
+  ownerMembershipId String
+  owner             OrganisationMembership @relation("ContainmentRecordOwner", fields: [organisationId, ownerMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  adequacyReviewed              Boolean   @default(false)
+  adequate                      Boolean?
+  adequacyReviewNotes           String?
+  adequacyReviewerMembershipId  String?
+  adequacyReviewer              OrganisationMembership? @relation("ContainmentRecordAdequacyReviewer", fields: [organisationId, adequacyReviewerMembershipId], references: [organisationId, id], onDelete: Restrict)
+  adequacyReviewedAt            DateTime?
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@index([organisationId, nonconformityId])
 }
