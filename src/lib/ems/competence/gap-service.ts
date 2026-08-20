@@ -13,10 +13,12 @@
  *    `listPersonProfiles`/`accessiblePersonProfileFilter` (person-service.ts)
  *    — a Site Manager only ever sees gaps for persons scoped to their
  *    granted Entity/Site, never the wider organisation;
- *  - a gap includes both an assignment already marked GAP and one that is
- *    REQUIRED/IN_PROGRESS past its `dueDate` — the latter is reported as
- *    "OVERDUE" severity without mutating the assignment's own status, so
- *    listing gaps is never itself a write;
+ *  - a gap includes an assignment already marked GAP, one whose competence
+ *    has EXPIRED (task T71 acceptance: "expired competence appears as
+ *    gap"), and one that is REQUIRED/IN_PROGRESS/EVIDENCE_SUBMITTED past
+ *    its `dueDate` — the last is reported as "OVERDUE" severity without
+ *    mutating the assignment's own status, so listing gaps is never itself
+ *    a write;
  *  - the report never joins `PersonSensitiveProfile` — only
  *    `PersonProfile.displayName`/membership are surfaced, keeping the gap
  *    view usable by anyone with `ems.competence.view` regardless of the
@@ -32,7 +34,7 @@ import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 const VIEW_PERMISSION = "ems.competence.view" as const;
 
-export type CompetenceGapSeverity = "GAP" | "OVERDUE";
+export type CompetenceGapSeverity = "GAP" | "OVERDUE" | "EXPIRED";
 
 export interface CompetenceGapRow {
   assignmentId: string;
@@ -40,7 +42,7 @@ export interface CompetenceGapRow {
   personDisplayName: string | null;
   requirementVersionId: string;
   requirementTitle: string;
-  status: "REQUIRED" | "IN_PROGRESS" | "GAP";
+  status: CompetenceAssignmentStatus;
   severity: CompetenceGapSeverity;
   dueDate: Date | null;
   gapSince: Date | null;
@@ -69,7 +71,7 @@ export async function listCompetenceGaps(context: OrganisationContext, filter: L
   const ctx = toTenantRepositoryContext(context);
   const now = new Date();
 
-  const openStatuses: CompetenceAssignmentStatus[] = ["REQUIRED", "IN_PROGRESS", "GAP"];
+  const openStatuses: CompetenceAssignmentStatus[] = ["REQUIRED", "IN_PROGRESS", "EVIDENCE_SUBMITTED", "GAP", "EXPIRED"];
   const assignments = await prisma.competenceAssignment.findMany({
     where: tenantWhere(ctx, {
       status: { in: openStatuses },
@@ -88,8 +90,15 @@ export async function listCompetenceGaps(context: OrganisationContext, filter: L
 
   const rows: CompetenceGapRow[] = [];
   for (const assignment of assignments) {
-    const isOverdue = assignment.status !== "GAP" && Boolean(assignment.dueDate) && assignment.dueDate! < now;
-    if (assignment.status !== "GAP" && !isOverdue) continue;
+    const isOverdue =
+      assignment.status !== "GAP" &&
+      assignment.status !== "EXPIRED" &&
+      Boolean(assignment.dueDate) &&
+      assignment.dueDate! < now;
+    if (assignment.status !== "GAP" && assignment.status !== "EXPIRED" && !isOverdue) continue;
+
+    const severity: CompetenceGapSeverity =
+      assignment.status === "GAP" ? "GAP" : assignment.status === "EXPIRED" ? "EXPIRED" : "OVERDUE";
 
     rows.push({
       assignmentId: assignment.id,
@@ -98,7 +107,7 @@ export async function listCompetenceGaps(context: OrganisationContext, filter: L
       requirementVersionId: assignment.requirementVersion.id,
       requirementTitle: assignment.requirementVersion.title,
       status: assignment.status,
-      severity: assignment.status === "GAP" ? "GAP" : "OVERDUE",
+      severity,
       dueDate: assignment.dueDate,
       gapSince: assignment.gapSince,
       gapNote: assignment.gapNote,

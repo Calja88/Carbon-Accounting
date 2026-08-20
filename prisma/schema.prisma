@@ -315,6 +315,10 @@ model Organisation {
   competenceRequirementScopes    CompetenceRequirementScope[]
   competenceAssignments          CompetenceAssignment[]
 
+  // Training, evidence, assessment and expiry (T71).
+  competenceEvidence   CompetenceEvidence[]
+  competenceAssessments CompetenceAssessment[]
+
   @@index([status])
 }
 
@@ -435,6 +439,11 @@ model OrganisationMembership {
   createdPersonProfiles       PersonProfile[]           @relation("PersonProfileCreatedBy")
   updatedPersonSensitiveProfiles PersonSensitiveProfile[] @relation("PersonSensitiveProfileUpdatedBy")
   assignedCompetenceAssignments  CompetenceAssignment[]  @relation("CompetenceAssignmentAssignedBy")
+
+  // Training, evidence, assessment and expiry (T71).
+  submittedCompetenceEvidence CompetenceEvidence[]  @relation("CompetenceEvidenceSubmittedBy")
+  verifiedCompetenceEvidence  CompetenceEvidence[]  @relation("CompetenceEvidenceVerifiedBy")
+  createdCompetenceAssessments CompetenceAssessment[] @relation("CompetenceAssessmentCreatedBy")
 
   @@unique([organisationId, userId])
   @@unique([organisationId, id])
@@ -7414,7 +7423,39 @@ enum CompetenceRequirementScopeType {
 enum CompetenceAssignmentStatus {
   REQUIRED
   IN_PROGRESS
+  EVIDENCE_SUBMITTED
+  COMPETENT
   GAP
+  EXPIRED
+}
+
+/// Evidence type captured against a `CompetenceAssignment` (task T71, spec
+/// §3). `TRAINING` is deliberately not synonymous with proof of competence —
+/// see `CompetenceRequirementVersion.trainingSatisfiesRequirement`.
+enum CompetenceEvidenceType {
+  TRAINING
+  QUALIFICATION
+  LICENCE
+  EXPERIENCE
+  ASSESSMENT
+  OTHER
+}
+
+enum CompetenceEvidenceStatus {
+  SUBMITTED
+  VERIFIED
+  REJECTED
+}
+
+enum CompetenceAssessmentStatus {
+  DRAFT
+  COMPLETED
+  SUPERSEDED
+}
+
+enum CompetenceAssessmentOutcome {
+  COMPETENT
+  NOT_COMPETENT
 }
 
 /// A person a competence requirement can be assigned to — an
@@ -7449,6 +7490,7 @@ model PersonProfile {
 
   sensitiveProfile PersonSensitiveProfile?
   assignments      CompetenceAssignment[]
+  evidence         CompetenceEvidence[]
 
   @@unique([organisationId, id])
   @@unique([organisationId, membershipId])
@@ -7521,6 +7563,13 @@ model CompetenceRequirementVersion {
   description        String
   renewalRule        String?
   acceptableEvidence String?
+
+  /// T71: whether verified TRAINING-type evidence alone can complete this
+  /// requirement (move an assignment straight to COMPETENT) without a
+  /// separate `CompetenceAssessment`. Defaults to false — "competence is
+  /// not synonymous with attendance" (spec §1) — every other evidence type
+  /// still requires a completed assessment with outcome COMPETENT.
+  trainingSatisfiesRequirement Boolean @default(false)
 
   status CompetenceRequirementVersionStatus @default(DRAFT)
 
@@ -7617,12 +7666,106 @@ model CompetenceAssignment {
   gapNote   String?
   gapSince  DateTime?
 
+  /// T71: the date current competence (evidence verification or a COMPETENT
+  /// assessment outcome) lapses. Null until the assignment first reaches
+  /// COMPETENT. `checkCompetenceExpiry` moves the assignment to EXPIRED once
+  /// this date has passed.
+  competentUntil DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  evidence    CompetenceEvidence[]
+  assessments CompetenceAssessment[]
 
   @@unique([organisationId, id])
   @@unique([organisationId, requirementVersionId, personId])
   @@index([organisationId, personId])
   @@index([organisationId, requirementVersionId])
   @@index([organisationId, status])
+  @@index([organisationId, status, competentUntil])
+}
+
+/// Training/experience/licence/qualification evidence captured against one
+/// `CompetenceAssignment` (task T71, spec §3). The underlying file/checksum
+/// lives in T22's `EvidenceObject`, linked via `EvidenceLink` with
+/// resourceType "competence_evidence" and resourceId = this row's id —
+/// T71 never duplicates T22's storage/classification/retention model.
+model CompetenceEvidence {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  assignmentId String
+  assignment   CompetenceAssignment @relation(fields: [organisationId, assignmentId], references: [organisationId, id], onDelete: Cascade)
+
+  personId String
+  person   PersonProfile @relation(fields: [organisationId, personId], references: [organisationId, id], onDelete: Cascade)
+
+  evidenceType CompetenceEvidenceType
+
+  issuedDate DateTime?
+  expiryDate DateTime?
+
+  status CompetenceEvidenceStatus @default(SUBMITTED)
+
+  submittedByMembershipId String
+  submittedBy             OrganisationMembership @relation("CompetenceEvidenceSubmittedBy", fields: [organisationId, submittedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  submittedAt              DateTime @default(now())
+
+  verifiedByMembershipId String?
+  verifiedBy             OrganisationMembership? @relation("CompetenceEvidenceVerifiedBy", fields: [organisationId, verifiedByMembershipId], references: [organisationId, id], onDelete: Restrict)
+  verifiedAt              DateTime?
+
+  rejectionReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@index([organisationId, assignmentId])
+  @@index([organisationId, personId])
+  @@index([organisationId, expiryDate])
+}
+
+/// Competence assessment against one `CompetenceAssignment` (task T71, spec
+/// §3). DRAFT -> COMPLETED -> SUPERSEDED, mirroring the
+/// CompetenceRequirementVersion successor convention exactly: a completed
+/// assessment is never edited in place — `completeCompetenceAssessment`
+/// supersedes the prior COMPLETED assessment (if any) when a reassessment is
+/// recorded.
+model CompetenceAssessment {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  assignmentId String
+  assignment   CompetenceAssignment @relation(fields: [organisationId, assignmentId], references: [organisationId, id], onDelete: Cascade)
+
+  status CompetenceAssessmentStatus @default(DRAFT)
+
+  method   String
+  criteria String?
+
+  assessorUserId String?
+  assessedAt     DateTime?
+
+  outcome   CompetenceAssessmentOutcome?
+  rationale String?
+
+  reassessmentDueDate DateTime?
+
+  supersedesAssessmentId String?
+  supersedesAssessment   CompetenceAssessment? @relation("CompetenceAssessmentSuccessor", fields: [organisationId, supersedesAssessmentId], references: [organisationId, id])
+  successorAssessment    CompetenceAssessment? @relation("CompetenceAssessmentSuccessor")
+
+  createdByMembershipId String
+  createdBy             OrganisationMembership @relation("CompetenceAssessmentCreatedBy", fields: [organisationId, createdByMembershipId], references: [organisationId, id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@unique([organisationId, supersedesAssessmentId])
+  @@index([organisationId, assignmentId, status])
 }

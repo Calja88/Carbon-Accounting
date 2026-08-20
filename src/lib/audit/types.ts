@@ -221,6 +221,13 @@ export const AUDIT_EVENT_TYPES = [
   "competence_requirement_version.superseded",
   "competence_assignment.created",
   "competence_assignment.status_changed",
+  // Training, evidence, assessment and expiry (task T71).
+  "competence_evidence.submitted",
+  "competence_evidence.verified",
+  "competence_evidence.rejected",
+  "competence_assessment.created",
+  "competence_assessment.completed",
+  "competence_assignment.expired",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -291,7 +298,9 @@ export type AuditResourceType =
   | "effectiveness_review"
   | "person_profile"
   | "competence_requirement_version"
-  | "competence_assignment";
+  | "competence_assignment"
+  | "competence_evidence"
+  | "competence_assessment";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

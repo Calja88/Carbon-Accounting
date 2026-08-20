@@ -589,3 +589,37 @@ export async function findTenantCompetenceAssignment(
   if (!row) return null;
   return assertChildOwnership(ctx, row, expectedPersonId, "personId");
 }
+
+// ---------------------------------------------------------------------------
+// Training, evidence, assessment and expiry (task T71).
+// ---------------------------------------------------------------------------
+
+/**
+ * Loads a T71 CompetenceEvidence row only inside the current organisation,
+ * and (when `expectedAssignmentId` is supplied) attached to that exact
+ * assignment — the nested-parent-substitution guard.
+ */
+export async function findTenantCompetenceEvidence(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedAssignmentId?: string,
+) {
+  const row = await prisma.competenceEvidence.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedAssignmentId, "assignmentId");
+}
+
+/**
+ * Loads a T71 CompetenceAssessment row only inside the current organisation,
+ * and (when `expectedAssignmentId` is supplied) attached to that exact
+ * assignment — the nested-parent-substitution guard.
+ */
+export async function findTenantCompetenceAssessment(
+  ctx: TenantRepositoryContext,
+  id: string,
+  expectedAssignmentId?: string,
+) {
+  const row = await prisma.competenceAssessment.findFirst({ where: tenantWhere(ctx, { id }) });
+  if (!row) return null;
+  return assertChildOwnership(ctx, row, expectedAssignmentId, "assignmentId");
+}
