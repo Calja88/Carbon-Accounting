@@ -209,6 +209,18 @@ export const AUDIT_EVENT_TYPES = [
   "nonconformity.effectiveness_review_requested",
   "effectiveness_review.recorded",
   "nonconformity.follow_up_created",
+  // Competence requirements and person assignments (task T70).
+  "person_profile.created",
+  "person_profile.updated",
+  "person_profile.deactivated",
+  "person_profile.reactivated",
+  "person_sensitive_profile.updated",
+  "competence_requirement_version.created",
+  "competence_requirement_version.approved",
+  "competence_requirement_version.activated",
+  "competence_requirement_version.superseded",
+  "competence_assignment.created",
+  "competence_assignment.status_changed",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -276,7 +288,10 @@ export type AuditResourceType =
   | "containment_record"
   | "root_cause_analysis"
   | "corrective_action"
-  | "effectiveness_review";
+  | "effectiveness_review"
+  | "person_profile"
+  | "competence_requirement_version"
+  | "competence_assignment";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

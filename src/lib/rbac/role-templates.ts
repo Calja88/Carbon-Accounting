@@ -67,6 +67,14 @@
  *    pattern used for `ems.compliance_obligation.approve` — every other
  *    template can report/work incidents (`EMS_INCIDENT_WORK`) but not read a
  *    restricted one. Flagged as an owner decision to confirm.
+ *  - T70 (competence requirements and person assignments) added
+ *    `ems.competence.sensitive.view` (Phase 7 spec §6: "add
+ *    `ems.competence.sensitive.view` for detailed certificates/results
+ *    where needed"). Granted only to Sustainability Lead, the same
+ *    default-only pattern as `ems.incident.restricted.view` — every other
+ *    template keeps `ems.competence.view` (non-sensitive gap/status) but not
+ *    a person's restricted contact detail. Flagged as an owner decision to
+ *    confirm.
  */
 
 // Type-only: RoleTemplateKey is never read as a runtime value in this file —
@@ -138,6 +146,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       ...EMS_INCIDENT_MANAGE,
       "ems.competence.view",
       "ems.competence.manage",
+      "ems.competence.sensitive.view",
       "ems.management_review.manage",
       "ems.management_review.approve",
       ...EMS_DOCUMENT_MANAGE,
