@@ -27,6 +27,7 @@ import {
   ClipboardCheck,
   Search,
   AlertTriangle,
+  Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -62,6 +63,7 @@ const MORE_ITEMS: NavItem[] = [
   { href: "/ems/processes", label: "EMS process profiles", icon: Workflow },
   { href: "/ems/aspects", label: "EMS aspect register", icon: Leaf },
   { href: "/ems/controls", label: "EMS operational controls", icon: ShieldCheck },
+  { href: "/ems/monitoring", label: "EMS monitoring", icon: Gauge },
   { href: "/ems/providers", label: "EMS external providers", icon: Truck },
   { href: "/ems/legal/provider-health", label: "Legal sync health", icon: HeartPulse },
   { href: "/ems/legal/applicability", label: "Legal applicability workflow", icon: Scale },
