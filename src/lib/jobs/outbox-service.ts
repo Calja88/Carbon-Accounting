@@ -146,10 +146,15 @@ export interface LeaseBatchOptions {
 
 /**
  * Atomically claims up to `batchSize` due messages for `leaseOwner`.
- * Candidates are `PENDING`/`RETRY`, due (`availableAt <= now()`), and either
- * never leased or past a stale `leaseUntil` — a crashed worker's lease
- * expires and the message becomes claimable again without any recovery
- * step. `attempts` increments as part of the same claim, so a message that
+ * Candidates are `PENDING`/`RETRY`/`LEASED`, due (`availableAt <= now()`),
+ * and either never leased or past a stale `leaseUntil` — a crashed worker's
+ * lease expires and the message becomes claimable again without any
+ * recovery step (task T83 fix: `LEASED` was missing from this list, so a
+ * message whose worker crashed after claiming it — never reaching
+ * `completeJob`/`failJob` — stayed `LEASED` forever once its lease expired,
+ * silently violating that exact guarantee; found by the T83 resume-after-
+ * crash load test, `scripts/load-test/outbox-throughput.ts`).
+ * `attempts` increments as part of the same claim, so a message that
  * is leased but never completed still counts toward `maxAttempts`.
  */
 export async function leaseNextBatch(options: LeaseBatchOptions): Promise<OutboxMessageRecord[]> {
@@ -159,7 +164,7 @@ export async function leaseNextBatch(options: LeaseBatchOptions): Promise<Outbox
   const rows = await prisma.$queryRaw<OutboxMessageRecord[]>(Prisma.sql`
     WITH candidate AS (
       SELECT "id" FROM "OutboxMessage"
-      WHERE "status" IN ('PENDING', 'RETRY')
+      WHERE "status" IN ('PENDING', 'RETRY', 'LEASED')
         AND "availableAt" <= now()
         AND ("leaseUntil" IS NULL OR "leaseUntil" < now())
         AND "topic" IN (${topicsList})
@@ -231,6 +236,49 @@ export async function failJob(options: FailJobOptions): Promise<boolean> {
         },
   });
   return result.count > 0;
+}
+
+/**
+ * Requeues a `DEAD_LETTER` message for another attempt (task T83,
+ * Docs/PHASE8_HARDENING_READINESS_SPEC.md §6 "outbox backlog/retry/dead-
+ * letter/recovery"). Attempts resets to 0 so the message gets a fresh
+ * `maxAttempts` budget rather than immediately dead-lettering again on its
+ * next failure — an operator requeues a poison message only after fixing
+ * whatever made it poison (a bad handler, a since-resolved provider outage),
+ * so it deserves a clean slate, not its old attempt count.
+ *
+ * Scoped by `where: { status: "DEAD_LETTER" }`, so calling this twice on
+ * the same message is safe: the first call moves it to `PENDING` and
+ * returns `true`; the second finds no matching `DEAD_LETTER` row and
+ * returns `false` rather than requeueing an already-requeued message.
+ */
+async function requeueDeadLetterRow(id: string): Promise<boolean> {
+  const result = await prisma.outboxMessage.updateMany({
+    where: { id, status: "DEAD_LETTER" },
+    data: {
+      status: "PENDING",
+      attempts: 0,
+      availableAt: new Date(),
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      deadLetteredAt: null,
+    },
+  });
+  return result.count > 0;
+}
+
+/** Tenant-scoped dead-letter requeue — denies a foreign-organisation id identically to a missing one. */
+export async function requeueDeadLetterMessage(ctx: TenantRepositoryContext, id: string): Promise<boolean> {
+  const message = await prisma.outboxMessage.findFirst({ where: { id } });
+  assertOwned(ctx, message);
+  return requeueDeadLetterRow(id);
+}
+
+/** Platform-operator dead-letter requeue for a platform job (e.g. `legal.sync`) — no tenant context to check. */
+export async function requeuePlatformDeadLetterMessage(id: string): Promise<boolean> {
+  const message = await prisma.outboxMessage.findFirst({ where: { id } });
+  if (!message || message.organisationId !== null) return false;
+  return requeueDeadLetterRow(id);
 }
 
 /** Tenant-scoped read — a foreign-organisation id is denied identically to a missing one. */

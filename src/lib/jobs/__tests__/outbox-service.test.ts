@@ -111,6 +111,8 @@ const {
   failJob,
   getOutboxMessageForOrganisation,
   listOutboxMessagesForOrganisation,
+  requeueDeadLetterMessage,
+  requeuePlatformDeadLetterMessage,
   OutboxTopicError,
 } = await import("@/lib/jobs/outbox-service");
 
@@ -219,6 +221,70 @@ describe("completeJob / failJob", () => {
     const ok = await failJob({ messageId: row.id, leaseOwner: "worker-1", error: { code: "E1", message: "boom" }, retryAfterMs: 5000 });
     expect(ok).toBe(false);
     expect(row.status).toBe("LEASED");
+  });
+});
+
+describe("requeueDeadLetterMessage / requeuePlatformDeadLetterMessage (T83)", () => {
+  async function deadLetteredTenantMessage() {
+    const { id } = await enqueueTenantJob(db as never, contextA, baseInput());
+    const row = rows.find((r) => r.id === id)!;
+    Object.assign(row, {
+      status: "DEAD_LETTER",
+      attempts: 8,
+      maxAttempts: 8,
+      lastErrorCode: "E1",
+      lastErrorMessage: "boom",
+      deadLetteredAt: new Date(),
+    });
+    return row;
+  }
+
+  it("moves a tenant DEAD_LETTER message back to PENDING with a reset attempt count", async () => {
+    rows.length = 0;
+    const row = await deadLetteredTenantMessage();
+
+    const ok = await requeueDeadLetterMessage(contextA, row.id);
+    expect(ok).toBe(true);
+    expect(row.status).toBe("PENDING");
+    expect(row.attempts).toBe(0);
+    expect(row.lastErrorCode).toBeNull();
+    expect(row.deadLetteredAt).toBeNull();
+  });
+
+  it("is idempotent: requeueing an already-requeued message is a no-op", async () => {
+    rows.length = 0;
+    const row = await deadLetteredTenantMessage();
+
+    expect(await requeueDeadLetterMessage(contextA, row.id)).toBe(true);
+    expect(await requeueDeadLetterMessage(contextA, row.id)).toBe(false);
+    expect(row.status).toBe("PENDING");
+  });
+
+  it("denies requeueing another organisation's dead-lettered message", async () => {
+    rows.length = 0;
+    const row = await deadLetteredTenantMessage();
+    await expect(requeueDeadLetterMessage(contextB, row.id)).rejects.toThrow(TenantOwnershipError);
+    expect(row.status).toBe("DEAD_LETTER");
+  });
+
+  it("requeues a dead-lettered platform job with no organisationId", async () => {
+    rows.length = 0;
+    const { id } = await enqueuePlatformJob(db as never, baseInput({ topic: "legal.sync" }));
+    const row = rows.find((r) => r.id === id)!;
+    Object.assign(row, { status: "DEAD_LETTER", attempts: 8, maxAttempts: 8, deadLetteredAt: new Date() });
+
+    const ok = await requeuePlatformDeadLetterMessage(row.id);
+    expect(ok).toBe(true);
+    expect(row.status).toBe("PENDING");
+    expect(row.attempts).toBe(0);
+  });
+
+  it("refuses to requeue a tenant message through the platform entry point", async () => {
+    rows.length = 0;
+    const row = await deadLetteredTenantMessage();
+    const ok = await requeuePlatformDeadLetterMessage(row.id);
+    expect(ok).toBe(false);
+    expect(row.status).toBe("DEAD_LETTER");
   });
 });
 
