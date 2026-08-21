@@ -116,6 +116,11 @@ export const EVIDENCE_LINK_RESOURCE_TYPES = [
   // the CompetenceEvidence row in the tenant repository before linking —
   // the underlying training/qualification/licence file.
   "competence_evidence",
+  // Licensed standard and competent review checklist (task T84). Callers
+  // resolve the StandardRequirementMap row in the tenant repository before
+  // linking — evidence supporting an implemented control against a
+  // requirement key.
+  "standard_requirement_map",
 ] as const;
 export type EvidenceLinkResourceType = (typeof EVIDENCE_LINK_RESOURCE_TYPES)[number];
 
