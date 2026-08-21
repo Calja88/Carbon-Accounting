@@ -83,6 +83,15 @@
  *    other template can create/edit the records these operations act on,
  *    but not hold, delete, or bulk-export them. Flagged as an owner
  *    decision to confirm.
+ *  - T84 (licensed standard and competent review checklist) added
+ *    `ems.readiness.review` — sensitive, for recording a competent human
+ *    review outcome on a StandardRequirementMap row. Granted only to
+ *    Sustainability Lead and Organisation Administrator, the same
+ *    default-only pattern as `organisation.legal_hold.manage`: every other
+ *    template can still read/edit the mapping's gap and owner-decision
+ *    fields through `ems.programme.manage`, but only these two roles may
+ *    record that a competent review took place. Flagged as an owner
+ *    decision to confirm.
  */
 
 // Type-only: RoleTemplateKey is never read as a runtime value in this file —
@@ -165,6 +174,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       "organisation.legal_hold.manage",
       "organisation.retention.manage",
       "organisation.export.generate",
+      "ems.readiness.review",
       "ai.use",
       "ai.settings.manage",
       "ai.audit.view",
@@ -254,6 +264,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       "organisation.legal_hold.manage",
       "organisation.retention.manage",
       "organisation.export.generate",
+      "ems.readiness.review",
       "ai.use",
       "ai.settings.manage",
       "ai.audit.view",

@@ -758,6 +758,9 @@ model User {
   legalHoldsCreated  LegalHold[] @relation("LegalHoldCreatedBy")
   legalHoldsReleased LegalHold[] @relation("LegalHoldReleasedBy")
 
+  // Licensed standard and competent review checklist (T84).
+  competentReviewedStandardRequirementMaps StandardRequirementMap[] @relation("StandardRequirementMapCompetentReviewer")
+
   // --- AI layer / evidence documents ---
   aiSettingsUpdates    AiSettings[]         @relation("AiSettingsUpdatedBy")
   aiInteractions       AiInteraction[]      @relation("AiInteractionUser")
@@ -3036,6 +3039,14 @@ model EmsScopeActivity {
 /// `requirementKey` are bare identifiers — never the standard's text; no
 /// `licensedText` column exists here or anywhere else in this schema (Phase 2
 /// spec §1: "ISO references store identifiers/internal mappings only").
+///
+/// Task T84 (Docs/PHASE8_HARDENING_READINESS_SPEC.md §8) adds gap tracking,
+/// an owner decision, and a competent-review record so the EMS owner and a
+/// competent human reviewer can map this row against their own licensed
+/// standard copy. `gapDescription`, `ownerDecision` and
+/// `competentReviewNotes` are organisation-authored free text — never a
+/// substitute for, or excerpt of, standard wording; the platform never sets
+/// `gapStatus` or `competentReviewOutcome` itself.
 model StandardRequirementMap {
   id          String       @id @default(cuid())
   programmeId String
@@ -3055,6 +3066,17 @@ model StandardRequirementMap {
   reviewDate DateTime?
   notes      String?
 
+  gapStatus       StandardRequirementGapStatus @default(NOT_ASSESSED)
+  gapDescription  String?
+  ownerDecision   String?
+  ownerDecisionAt DateTime?
+
+  competentReviewerUserId String?
+  competentReviewer       User?                             @relation("StandardRequirementMapCompetentReviewer", fields: [competentReviewerUserId], references: [id])
+  competentReviewedAt     DateTime?
+  competentReviewOutcome  StandardRequirementReviewOutcome? @default(NOT_REVIEWED)
+  competentReviewNotes    String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -3065,6 +3087,23 @@ model StandardRequirementMap {
   @@unique([programmeId, standardProfile, requirementKey])
   @@unique([organisationId, id])
   @@index([organisationId, programmeId])
+}
+
+enum StandardRequirementGapStatus {
+  NOT_ASSESSED
+  NO_GAP
+  GAP_IDENTIFIED
+  REMEDIATION_PLANNED
+  RESOLVED
+}
+
+/// Outcome of a competent human review of this requirement mapping (source
+/// coverage, applicability method, evaluation cadence). Never set by the
+/// platform or by AI — recorded only when a named reviewer performs it.
+enum StandardRequirementReviewOutcome {
+  NOT_REVIEWED
+  REVIEWED_NO_ISSUES
+  REVIEWED_ISSUES_FOUND
 }
 
 /// An internal or external factor, or environmental condition, relevant to

@@ -32,6 +32,7 @@ import { requirePermission } from "@/lib/rbac/authorize";
 import {
   findTenantEmsProgramme,
   findTenantEmsScopeVersion,
+  findTenantStandardRequirementMap,
   toTenantRepositoryContext,
 } from "@/lib/repositories/ems-repository";
 import { tenantWhere, TenantOwnershipError, assertOwned } from "@/lib/repositories/tenant-scope";
@@ -530,6 +531,13 @@ export interface UpsertStandardRequirementMapInput {
   ownerMembershipId?: string | null;
   reviewDate?: Date | null;
   notes?: string | null;
+  // T84: gap tracking and owner decision — organisation-authored text only,
+  // never the standard's wording. `gapStatus`/`ownerDecision` are the owner's
+  // own call; this service never infers or defaults them from content.
+  gapStatus?: "NOT_ASSESSED" | "NO_GAP" | "GAP_IDENTIFIED" | "REMEDIATION_PLANNED" | "RESOLVED";
+  gapDescription?: string | null;
+  ownerDecision?: string | null;
+  ownerDecisionAt?: Date | null;
   actorUserId: string;
 }
 
@@ -556,12 +564,20 @@ export async function upsertStandardRequirementMap(context: OrganisationContext,
         ownerMembershipId: input.ownerMembershipId ?? null,
         reviewDate: input.reviewDate ?? null,
         notes: input.notes ?? null,
+        gapStatus: input.gapStatus ?? "NOT_ASSESSED",
+        gapDescription: input.gapDescription ?? null,
+        ownerDecision: input.ownerDecision ?? null,
+        ownerDecisionAt: input.ownerDecisionAt ?? null,
       },
       update: {
         implementationStatus: input.implementationStatus ?? undefined,
         ownerMembershipId: input.ownerMembershipId ?? undefined,
         reviewDate: input.reviewDate ?? undefined,
         notes: input.notes ?? undefined,
+        gapStatus: input.gapStatus ?? undefined,
+        gapDescription: input.gapDescription ?? undefined,
+        ownerDecision: input.ownerDecision ?? undefined,
+        ownerDecisionAt: input.ownerDecisionAt ?? undefined,
       },
     });
 
@@ -573,7 +589,57 @@ export async function upsertStandardRequirementMap(context: OrganisationContext,
       actorUserId: input.actorUserId,
       correlationId: txCtx.correlationId,
       source: "web-app",
-      after: { standardProfile: input.standardProfile, requirementKey: input.requirementKey, implementationStatus: row.implementationStatus },
+      after: {
+        standardProfile: input.standardProfile,
+        requirementKey: input.requirementKey,
+        implementationStatus: row.implementationStatus,
+        gapStatus: row.gapStatus,
+      },
+    });
+
+    return row;
+  });
+}
+
+export interface RecordCompetentReviewInput {
+  requirementMapId: string;
+  outcome: "NOT_REVIEWED" | "REVIEWED_NO_ISSUES" | "REVIEWED_ISSUES_FOUND";
+  notes?: string | null;
+  actorUserId: string;
+}
+
+/**
+ * Records that a named, competent human reviewer assessed this requirement
+ * mapping's source coverage, applicability method and evaluation cadence
+ * (Phase 8 spec §8). Distinct permission from `ems.programme.manage` because
+ * this asserts a competent review took place, not just an edit to the
+ * mapping — the platform never performs or infers this review itself.
+ */
+export async function recordCompetentReview(context: OrganisationContext, input: RecordCompetentReviewInput) {
+  requirePermission(context, "ems.readiness.review");
+  const ctx = toTenantRepositoryContext(context);
+  const existing = await findTenantStandardRequirementMap(ctx, input.requirementMapId);
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    const row = await tx.standardRequirementMap.update({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: existing.id } },
+      data: {
+        competentReviewerUserId: input.actorUserId,
+        competentReviewedAt: new Date(),
+        competentReviewOutcome: input.outcome,
+        competentReviewNotes: input.notes ?? null,
+      },
+    });
+
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "standard_requirement_map.competent_review_recorded",
+      resourceType: "standard_requirement_map",
+      resourceId: row.id,
+      summary: `Competent review recorded for requirement "${row.requirementKey}" (${row.standardProfile}): ${input.outcome}.`,
+      actorUserId: input.actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      after: { competentReviewOutcome: row.competentReviewOutcome },
     });
 
     return row;

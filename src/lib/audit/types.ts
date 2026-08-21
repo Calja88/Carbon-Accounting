@@ -47,6 +47,7 @@ export const AUDIT_EVENT_TYPES = [
   "ems_scope_version.approved",
   "ems_scope_version.superseded",
   "standard_requirement_map.upserted",
+  "standard_requirement_map.competent_review_recorded",
   "context_issue.created",
   "context_issue.updated",
   "interested_party.created",
