@@ -278,6 +278,14 @@ export const AUDIT_EVENT_TYPES = [
   "external_file_reference.marked_stale",
   // Controlled-document SharePoint revision integration (task SP04).
   "external_file_reference.relinked",
+  // SharePoint delta reconciliation and external-file status sync (task SP06).
+  "external_file_reference.reconciliation_deleted",
+  "external_file_reference.reconciliation_moved_out_of_scope",
+  "external_file_reference.reconciliation_version_drift",
+  "external_file_reference.reconciliation_draft_updated",
+  "external_file_reference.reconciliation_renamed",
+  "external_file_reference.reconciliation_resolved",
+  "storage_site_binding.reconciliation_unreachable",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];

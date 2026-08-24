@@ -163,6 +163,7 @@ function fakeGraphClient(overrides: Partial<GraphClient> = {}): GraphClient {
     downloadContent: vi.fn(async (): Promise<Buffer> => Buffer.from("synthetic bytes")),
     deleteItem: vi.fn(async () => {}),
     checkHealth: vi.fn(async (): Promise<GraphHealthCheckResult> => ({ ok: true, checkedAt: new Date().toISOString(), detail: "ok" })),
+    getDelta: vi.fn(async () => ({ items: [], nextLink: null, deltaLink: null })),
     ...overrides,
   };
 }
