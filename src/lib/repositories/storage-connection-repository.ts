@@ -56,4 +56,16 @@ export async function findExternalFileReferenceByEvidenceObjectId(evidenceObject
   return prisma.externalFileReference.findUnique({ where: { evidenceObjectId } });
 }
 
+/**
+ * Loads an ExternalFileReference by its unique `controlledDocumentRevisionId`
+ * (task SP04), or null if that revision has no SharePoint-backed reference.
+ * Tenant-scoped like `findTenantExternalFileReference` (unlike the
+ * `evidenceObjectId` lookup above, which is only reachable from the
+ * SP03 provider's own trust boundary): callers here already hold a
+ * `TenantRepositoryContext` for the revision itself.
+ */
+export async function findTenantExternalFileReferenceForRevision(ctx: TenantRepositoryContext, controlledDocumentRevisionId: string) {
+  return prisma.externalFileReference.findFirst({ where: tenantWhere(ctx, { controlledDocumentRevisionId }) });
+}
+
 export { tenantWhere };

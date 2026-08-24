@@ -276,6 +276,8 @@ export const AUDIT_EVENT_TYPES = [
   "external_file_reference.created",
   "external_file_reference.pinned",
   "external_file_reference.marked_stale",
+  // Controlled-document SharePoint revision integration (task SP04).
+  "external_file_reference.relinked",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
