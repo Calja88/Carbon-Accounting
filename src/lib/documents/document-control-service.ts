@@ -24,7 +24,7 @@
  * creates successor").
  */
 
-import type { ControlledDocumentStatus, EvidenceClassification } from "@prisma/client";
+import type { ControlledDocumentStatus, EvidenceClassification, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import { requirePermission, assertFourEyes } from "@/lib/rbac/authorize";
@@ -38,6 +38,8 @@ import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-sco
 import { runInTenantTransaction } from "@/lib/repositories/transaction";
 import { recordAuditEvent } from "@/lib/repositories/audit-repository";
 import { enqueueTenantJob } from "@/lib/jobs/outbox-service";
+import { resolveApprovalPin } from "@/lib/documents/storage/controlled-document-link-service";
+import type { GraphClient } from "@/lib/documents/storage/graph/types";
 
 export { TenantOwnershipError };
 
@@ -235,6 +237,24 @@ async function transitionStatus(
     summary: string;
     extraData?: Record<string, unknown>;
     guard?: (revision: NonNullable<Awaited<ReturnType<typeof findTenantControlledDocumentRevision>>>) => void;
+    /**
+     * Optional async work performed before the transaction opens (e.g. a
+     * Microsoft Graph read, task SP04). Its returned fields are merged into
+     * the same `controlledDocumentRevision.update` call that changes
+     * `status`, so a field the immutability trigger guards (e.g.
+     * `checksumSha256`) can still be set here: at that moment `OLD.status`
+     * is still the pre-transition value the trigger allows editing under.
+     * Throwing here aborts the whole transition before any write happens.
+     */
+    prepare?: (
+      revision: NonNullable<Awaited<ReturnType<typeof findTenantControlledDocumentRevision>>>,
+    ) => Promise<Record<string, unknown> | void>;
+    /** Optional extra writes performed in the same transaction, after the main status update and its audit event. */
+    extraTransaction?: (
+      tx: Prisma.TransactionClient,
+      txCtx: ReturnType<typeof toTenantRepositoryContext>,
+      revision: NonNullable<Awaited<ReturnType<typeof findTenantControlledDocumentRevision>>>,
+    ) => Promise<void>;
   },
 ) {
   requirePermission(context, options.permission);
@@ -246,11 +266,12 @@ async function transitionStatus(
     );
   }
   options.guard?.(revision);
+  const prepared = (await options.prepare?.(revision)) ?? {};
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const updated = await tx.controlledDocumentRevision.update({
       where: { id: revision.id, organisationId: txCtx.organisationId },
-      data: { status: options.to, ...options.extraData },
+      data: { status: options.to, ...options.extraData, ...prepared },
     });
 
     await recordAuditEvent(tx, txCtx, {
@@ -264,6 +285,8 @@ async function transitionStatus(
       before: { status: revision.status },
       after: { status: options.to },
     });
+
+    await options.extraTransaction?.(tx, txCtx, revision);
 
     await enqueueTenantJob(tx, txCtx, {
       topic: REVISION_STATUS_TOPIC,
@@ -304,9 +327,22 @@ export interface ApproveRevisionOptions {
   actorUserId: string;
   /** Whether four-eyes (author cannot approve their own revision) is enforced. Defaults to enabled — no organisation-level toggle exists yet (T14 note), so T22 defaults to the safer setting. */
   fourEyesEnabled?: boolean;
+  /** Injectable Graph client for tests (task SP04) — defaults to the shared `MicrosoftGraphClient`. Ignored when the revision has no SharePoint reference. */
+  graphClient?: GraphClient;
 }
 
+/**
+ * Approves an IN_REVIEW revision. If the revision has a SharePoint-linked
+ * (task SP04) external file reference, the exact version/checksum in force
+ * right now is resolved and pinned atomically with the APPROVED transition
+ * — `resolveApprovalPin` throws a blocking error rather than approving
+ * against a missing/pruned/inaccessible version, and a revision with no
+ * SharePoint reference approves exactly as before (T22 fallback behaviour
+ * unchanged).
+ */
 export async function approveRevision(context: OrganisationContext, revisionId: string, options: ApproveRevisionOptions) {
+  let pin: Awaited<ReturnType<typeof resolveApprovalPin>> = null;
+
   return transitionStatus(context, revisionId, {
     from: ["IN_REVIEW"],
     to: "APPROVED",
@@ -323,6 +359,28 @@ export async function approveRevision(context: OrganisationContext, revisionId: 
         enabled: options.fourEyesEnabled ?? true,
         actorUserId: options.actorUserId,
         authorUserId: revision.preparedByUserId ?? options.actorUserId,
+      });
+    },
+    prepare: async (revision) => {
+      pin = await resolveApprovalPin(revision.organisationId, revision.id, options.graphClient);
+      if (!pin) return;
+      return { checksumSha256: pin.checksumSha256, mimeType: pin.mimeType, sizeBytes: pin.byteSize };
+    },
+    extraTransaction: async (tx, txCtx) => {
+      if (!pin) return;
+      const updatedReference = await tx.externalFileReference.update({
+        where: { id: pin.referenceId, organisationId: txCtx.organisationId },
+        data: { versionId: pin.versionId, checksumSha256: pin.checksumSha256, byteSize: pin.byteSize, pinnedAt: new Date(), lastObservedAt: new Date() },
+      });
+      await recordAuditEvent(tx, txCtx, {
+        eventType: "external_file_reference.pinned",
+        resourceType: "external_file_reference",
+        resourceId: updatedReference.id,
+        summary: `External file reference pinned to version ${updatedReference.versionId} at approval.`,
+        actorUserId: options.actorUserId,
+        correlationId: txCtx.correlationId,
+        source: "web-app",
+        after: { versionId: updatedReference.versionId, checksumSha256: updatedReference.checksumSha256 },
       });
     },
   });
