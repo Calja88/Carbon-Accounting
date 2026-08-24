@@ -268,6 +268,14 @@ export const AUDIT_EVENT_TYPES = [
   "evidence_object.retention_previewed",
   "evidence_object.retention_executed",
   "organisation_export.generated",
+  // Organisation storage configuration and external-file references (task SP01).
+  "storage_connection.created",
+  "storage_connection.status_changed",
+  "storage_site_binding.created",
+  "storage_site_binding.status_changed",
+  "external_file_reference.created",
+  "external_file_reference.pinned",
+  "external_file_reference.marked_stale",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -355,7 +363,10 @@ export type AuditResourceType =
   | "management_review_minute_revision"
   | "management_review_action_link"
   | "legal_hold"
-  | "organisation_export";
+  | "organisation_export"
+  | "organisation_storage_connection"
+  | "storage_site_binding"
+  | "external_file_reference";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

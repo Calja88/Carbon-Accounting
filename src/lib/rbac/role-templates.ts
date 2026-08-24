@@ -92,6 +92,20 @@
  *    fields through `ems.programme.manage`, but only these two roles may
  *    record that a competent review took place. Flagged as an owner
  *    decision to confirm.
+ *  - SP01 (organisation storage configuration and external-file reference
+ *    schema) added `ems.storage_connection.manage` — sensitive, for
+ *    administering an organisation's SharePoint connection/site bindings
+ *    (connect, disable, offboard). Granted only to Sustainability Lead and
+ *    Organisation Administrator, the same default-only oversight pattern as
+ *    `organisation.legal_hold.manage`/`ems.readiness.review`. This is
+ *    deliberately a *connection-administration* permission only: it carries
+ *    no document-content access by itself — reading/managing controlled
+ *    documents and evidence still requires `ems.view`/
+ *    `ems.controlled_document.manage`/`.approve` as before, so granting
+ *    Organisation Administrator this permission (an existing org-admin
+ *    duty, alongside legal hold/retention/export) does not give it implicit
+ *    access to document content, per SP01's explicit requirement. Flagged
+ *    as an owner decision to confirm.
  */
 
 // Type-only: RoleTemplateKey is never read as a runtime value in this file —
@@ -175,6 +189,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       "organisation.retention.manage",
       "organisation.export.generate",
       "ems.readiness.review",
+      "ems.storage_connection.manage",
       "ai.use",
       "ai.settings.manage",
       "ai.audit.view",
@@ -265,6 +280,7 @@ export const SYSTEM_ROLE_TEMPLATES: RoleTemplateDefinition[] = [
       "organisation.retention.manage",
       "organisation.export.generate",
       "ems.readiness.review",
+      "ems.storage_connection.manage",
       "ai.use",
       "ai.settings.manage",
       "ai.audit.view",
