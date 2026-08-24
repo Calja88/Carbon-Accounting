@@ -96,6 +96,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <NavLinks
             canViewPlatformAdmin={canViewPlatformAdmin}
             canManageOrganisation={organisation !== null && hasPermission(organisation, "organisation.membership.manage")}
+            canViewEms={organisation !== null && hasPermission(organisation, "ems.view")}
           />
         </div>
       </header>

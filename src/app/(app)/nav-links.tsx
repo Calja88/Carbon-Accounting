@@ -12,22 +12,12 @@ import {
   Database,
   FileBarChart,
   FileScan,
-  HeartPulse,
   HelpCircle,
   LayoutDashboard,
   Package,
   Truck,
   Users,
-  Workflow,
   Leaf,
-  ShieldCheck,
-  MessageSquare,
-  Siren,
-  Scale,
-  ClipboardCheck,
-  Search,
-  AlertTriangle,
-  Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -37,7 +27,7 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
 }
 
-const BASE_ITEMS: NavItem[] = [
+export const BASE_ITEMS: NavItem[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/entry", label: "Data entry", icon: ClipboardList },
   { href: "/documents", label: "Documents", icon: FileScan },
@@ -49,6 +39,9 @@ const BASE_ITEMS: NavItem[] = [
   { href: "/assessments", label: "Assessments", icon: Boxes },
 ];
 
+/** Shown only when the current membership holds `ems.view` — see AppLayout. */
+export const EMS_ITEM: NavItem = { href: "/ems", label: "EMS", icon: Leaf };
+
 const ADMIN_ITEMS: NavItem[] = [
   { href: "/admin/factors", label: "Emission factors", icon: Database },
   { href: "/admin/ai", label: "AI settings", icon: Bot },
@@ -56,22 +49,18 @@ const ADMIN_ITEMS: NavItem[] = [
 
 const ORGANISATION_ITEMS: NavItem[] = [{ href: "/admin/organisation/members", label: "Members & roles", icon: Users }];
 
-/** Reachable but not everyday — kept out of the main row so it stays readable. */
-const MORE_ITEMS: NavItem[] = [
+/**
+ * Reachable but not everyday — kept out of the main row so it stays
+ * readable. EMS routes live under the dedicated `/ems` hub (see EMS_ITEM)
+ * rather than being listed here individually: with 19 modules across 7
+ * task phases, a flat "More" list stopped being a coherent navigation
+ * pattern and several routes (T46/T50/T52/T63) were never actually linked
+ * from it. `EMS_MODULES` (src/lib/ems/navigation/registry.ts) is the
+ * single source of truth for every EMS route now.
+ */
+export const MORE_ITEMS: NavItem[] = [
   { href: "/suppliers", label: "Suppliers & supplier PCFs", icon: Truck },
   { href: "/methodologies", label: "Methodology register", icon: BookMarked },
-  { href: "/ems/processes", label: "EMS process profiles", icon: Workflow },
-  { href: "/ems/aspects", label: "EMS aspect register", icon: Leaf },
-  { href: "/ems/controls", label: "EMS operational controls", icon: ShieldCheck },
-  { href: "/ems/monitoring", label: "EMS monitoring", icon: Gauge },
-  { href: "/ems/providers", label: "EMS external providers", icon: Truck },
-  { href: "/ems/legal/provider-health", label: "Legal sync health", icon: HeartPulse },
-  { href: "/ems/legal/applicability", label: "Legal applicability workflow", icon: Scale },
-  { href: "/ems/legal/evaluations", label: "Compliance evaluations", icon: ClipboardCheck },
-  { href: "/ems/audits", label: "Audit programme and execution", icon: Search },
-  { href: "/ems/incidents", label: "Environmental incidents", icon: AlertTriangle },
-  { href: "/ems/communications", label: "EMS communications", icon: MessageSquare },
-  { href: "/ems/emergency", label: "EMS emergency preparedness", icon: Siren },
   { href: "/help/lca", label: "Product LCA guidance", icon: HelpCircle },
 ];
 
@@ -83,14 +72,20 @@ function isActive(pathname: string, href: string) {
 export function NavLinks({
   canViewPlatformAdmin,
   canManageOrganisation = false,
+  canViewEms = false,
 }: {
   canViewPlatformAdmin: boolean;
   canManageOrganisation?: boolean;
+  canViewEms?: boolean;
 }) {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
   const items = [
     ...BASE_ITEMS,
+    // Gated on this membership's own current `ems.view` grant, not the
+    // legacy JWT role — a member without EMS access never sees the link,
+    // rather than seeing it and hitting a redirect on click.
+    ...(canViewEms ? [EMS_ITEM] : []),
     ...(canViewPlatformAdmin ? ADMIN_ITEMS : []),
     // Gated on this organisation's own current permission grant
     // (organisation.membership.manage), not the legacy JWT role — an
