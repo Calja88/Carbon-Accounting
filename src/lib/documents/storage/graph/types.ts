@@ -23,7 +23,9 @@ export type GraphErrorKind =
   | "SERVER_ERROR"
   | "TIMEOUT"
   | "MALFORMED_RESPONSE"
-  | "NETWORK";
+  | "NETWORK"
+  /** HTTP 410 on a delta query — the supplied deltaLink/nextLink token has expired; Graph requires a fresh (non-token) delta query, which SP06's reconciliation service treats as a bounded resync, never an unbounded full-history scan (SP00 §9). */
+  | "GONE";
 
 /**
  * Thrown by every function in this module. `message` is always safe to log —
@@ -115,6 +117,44 @@ export interface GraphHealthCheckResult {
 }
 
 /**
+ * One driveItem entry from a Graph delta page (SP00 §9, task SP06). Mirrors
+ * `GraphItemMetadata` but adds the fields delta reconciliation specifically
+ * needs: `deleted` (Graph's tombstone facet — the item has been removed from
+ * the drive), and `parentPath`/`parentDriveId`/`parentSiteId` so a
+ * move-outside-scope can be distinguished from a rename/move-within-scope
+ * without a second lookup. `webUrl` is again authorised-display-only.
+ */
+export interface GraphDeltaItem {
+  itemId: string;
+  name: string | null;
+  eTag: string | null;
+  webUrl: string | null;
+  lastModifiedDateTime: string | null;
+  sha256: string | null;
+  size: number | null;
+  /** True when Graph reports this item deleted (its `deleted` facet is present). */
+  deleted: boolean;
+  /** The parent folder's driveItem id, when Graph supplied one — used to detect a move outside the configured root folder. */
+  parentItemId: string | null;
+  /** The parent's drive id — a value other than the target drive means the item left the connected drive entirely (a cross-drive move, SP00 §9's "move outside the granted site/library scope"). */
+  parentDriveId: string | null;
+  /** Cached display path only (SP00 §6/§9) — never used for resolution. */
+  parentPath: string | null;
+}
+
+/**
+ * One page of a Graph `/drive/root/delta` walk (task SP06). Exactly one of
+ * `nextLink`/`deltaLink` is ever non-null per Graph's own contract: more
+ * pages remain (`nextLink`) or this page is the walk's final page and
+ * `deltaLink` is the cursor to resume from on the next reconciliation run.
+ */
+export interface GraphDeltaPage {
+  items: GraphDeltaItem[];
+  nextLink: string | null;
+  deltaLink: string | null;
+}
+
+/**
  * The client boundary. `SharePointEvidenceStorageProvider` (SP03) is the
  * intended sole caller; nothing here performs an upload/download of file
  * bytes — that is explicitly out of SP02 scope.
@@ -158,6 +198,17 @@ export interface GraphClient {
   /** Deletes a driveItem (task SP03, used when Paragon-side retention removes evidence bytes it owns). */
   deleteItem(target: GraphSiteTarget, itemId: string, correlationId: string): Promise<void>;
   checkHealth(target: GraphSiteTarget, correlationId: string): Promise<GraphHealthCheckResult>;
+  /**
+   * One page of `target`'s drive delta walk (task SP06, SP00 §9). `cursor`
+   * is an opaque `deltaLink`/`nextLink` URL from a previous page/run, or
+   * null to start a fresh walk from the drive root. Throws a `GraphClientError`
+   * with kind `GONE` (HTTP 410) when `cursor` has expired — the caller must
+   * restart with `cursor: null` and treat the result as a bounded resync,
+   * never resolve it against the target's `rootFolderPath`/`rootFolderId`
+   * itself (delta is always scoped to the whole drive; the reconciliation
+   * service filters to the configured root).
+   */
+  getDelta(target: GraphSiteTarget, cursor: string | null, correlationId: string): Promise<GraphDeltaPage>;
 }
 
 /** Cached app-only token plus its expiry, so a caching provider can decide whether to reuse it (SP02 "mocked unit/contract tests for token caching/expiry"). */

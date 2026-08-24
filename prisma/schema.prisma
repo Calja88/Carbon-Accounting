@@ -195,9 +195,10 @@ model Organisation {
 
   // Provider-neutral organisation storage configuration and external-file
   // references (SP01).
-  storageConnection      OrganisationStorageConnection?
-  storageSiteBindings    StorageSiteBinding[]
-  externalFileReferences ExternalFileReference[]
+  storageConnection            OrganisationStorageConnection?
+  storageSiteBindings          StorageSiteBinding[]
+  externalFileReferences       ExternalFileReference[]
+  storageReconciliationCursors StorageReconciliationCursor[]
 
   // EMS programme, scope, context and interested parties (T23).
   emsProgrammes               EmsProgramme[]
@@ -2937,7 +2938,8 @@ model StorageSiteBinding {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  fileReferences ExternalFileReference[]
+  fileReferences       ExternalFileReference[]
+  reconciliationCursor StorageReconciliationCursor?
 
   @@unique([organisationId, id])
   @@unique([connectionId, siteId, driveId])
@@ -2994,12 +2996,103 @@ model ExternalFileReference {
   staleReason     String?
   lastObservedAt  DateTime?
 
+  /// Set only by SP06 reconciliation (never by SP03/SP04's own put/pin
+  /// path) — the specific change-type a delta-reconciliation pass detected
+  /// for this reference, kept distinct from `staleReason`'s free-text
+  /// summary so health/reporting can group by kind. Cleared back to null
+  /// once a run observes the item matching its pinned/tracked state again
+  /// (SP00 §9's per-change-type handling).
+  reconciliationIssue ExternalFileReconciliationIssue?
+
+  /// Display-only cache of the item's most recently observed name/path
+  /// (SP00 §9 "Paragon updates only the display name/path it may
+  /// separately cache for UI purposes" on rename/move) — never used for
+  /// retrieval or as a stable identifier; `itemId`/`versionId` remain the
+  /// only resolution keys.
+  lastKnownName String?
+  lastKnownPath String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([organisationId, id])
   @@index([organisationId, siteBindingId])
   @@index([organisationId, referenceStatus])
+  @@index([organisationId, reconciliationIssue])
+}
+
+/// SP06 delta-reconciliation change-type classification for one
+/// `ExternalFileReference`. Distinguishes what a reconciliation pass
+/// observed from the coarser `referenceStatus`/`staleReason` pair that
+/// already existed from SP01 — several issue kinds (e.g. `RENAMED`,
+/// `VERSION_DRIFT_BEHIND_ISSUED`) do not themselves flip `referenceStatus`
+/// away from `ACTIVE`, since the pinned reference is still resolvable
+/// (SP00 §9: a rename/move-within-scope never breaks an existing pinned
+/// reference; a content change behind an issued revision is surfaced for
+/// review, never silently applied).
+enum ExternalFileReconciliationIssue {
+  /// The pinned item/version could not be located by the last reconciliation pass, but no explicit delete/move-out-of-scope was observed (e.g. a transient Graph error) — distinct from `DELETED`.
+  MISSING
+  /// Graph's delta feed reported the item deleted.
+  DELETED
+  /// The item still exists but resolved outside the configured site/drive scope (SP00 §9's "move outside the granted site/library scope").
+  MOVED_OUT_OF_SCOPE
+  /// Item ID unchanged but name/path differs from `lastKnownName`/`lastKnownPath` — informational only (SP00 §9: item ID persists, so this never breaks the pinned reference).
+  RENAMED
+  /// The last reconciled checksum no longer matches the currently observed SharePoint content hash.
+  CHECKSUM_DRIFT
+  /// Graph denied access to the item/drive/site (403) on an otherwise-configured connection.
+  PERMISSION_REVOKED
+  /// The organisation's connection now resolves to a different Entra tenant than the one the reference was created under.
+  TENANT_MISMATCH
+  /// A newer SharePoint version exists on an item behind an issued (pinned) revision/evidence reference — never auto-applied (SP00 §7/§9's hard invariant); surfaced for a successor-revision decision.
+  VERSION_DRIFT_BEHIND_ISSUED
+}
+
+/// SP06 per-(organisation, site binding) delta-reconciliation cursor
+/// (SP00 §9's Graph `/drive/root/delta` query), mirroring T42's
+/// `LegalSyncCursor` pattern exactly: `deltaLink` only advances after the
+/// batch it accounts for has committed (enforced in the reconciliation
+/// service, not by this schema), `status` reflects the *last attempt's*
+/// outcome, and a missing/expired `deltaLink` (Graph 410) forces a bounded
+/// resync rather than an unbounded full scan.
+model StorageReconciliationCursor {
+  id String @id @default(cuid())
+
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  siteBindingId String
+  siteBinding   StorageSiteBinding @relation(fields: [organisationId, siteBindingId], references: [organisationId, id])
+
+  /// Graph's opaque `@odata.deltaLink`/`@odata.nextLink` cursor. Null before
+  /// the first successful run, or after a 410 forces a resync.
+  deltaLink String?
+  status    StorageReconciliationCursorStatus @default(ACTIVE)
+
+  /// The connection's `entraTenantId` as observed the last time this cursor
+  /// successfully called Graph. Compared before every run, *before* any
+  /// Graph call is made: a mismatch (an organisation admin repointed the
+  /// connection at a different Microsoft 365 tenant without re-binding
+  /// sites) means this binding's siteId/driveId belong to a tenant the
+  /// current credential no longer represents, so the run is refused rather
+  /// than risking a cross-tenant Graph call (multi-tenant isolation).
+  lastKnownEntraTenantId String?
+
+  lastSuccessAt DateTime?
+  lastAttemptAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, siteBindingId])
+  @@index([organisationId, status])
+}
+
+enum StorageReconciliationCursorStatus {
+  ACTIVE
+  STALE
+  ERROR
 }
 
 // ---------------------------------------------------------------------------

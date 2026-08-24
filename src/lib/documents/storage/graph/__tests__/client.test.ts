@@ -311,4 +311,106 @@ describe("MicrosoftGraphClient", () => {
       expect(fetchImpl).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("getDelta", () => {
+    it("starts a fresh delta walk from the drive root when cursor is null", async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(
+        jsonResponse(200, {
+          value: [{ id: "item-1", name: "policy.docx", eTag: '"etag-1"', size: 100, file: { hashes: { sha256Hash: "hash-1" } } }],
+          "@odata.deltaLink": "https://graph.microsoft.com/v1.0/sites/synthetic-site/drives/synthetic-drive/root/delta?token=abc",
+        }),
+      );
+      const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+
+      const page = await client.getDelta(TARGET, null, CORRELATION_ID);
+
+      expect(page.items).toHaveLength(1);
+      expect(page.items[0]).toMatchObject({ itemId: "item-1", name: "policy.docx", sha256: "hash-1", deleted: false });
+      expect(page.nextLink).toBeNull();
+      expect(page.deltaLink).toBe("https://graph.microsoft.com/v1.0/sites/synthetic-site/drives/synthetic-drive/root/delta?token=abc");
+      const [url] = fetchImpl.mock.calls[0];
+      expect(String(url)).toContain("/drives/synthetic-drive/root/delta");
+    });
+
+    it("resumes from a supplied nextLink/deltaLink cursor, calling it verbatim rather than re-deriving it", async () => {
+      const cursor = "https://graph.microsoft.com/v1.0/sites/synthetic-site/drives/synthetic-drive/root/delta?token=page-2";
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { value: [], "@odata.deltaLink": "https://graph.microsoft.com/final" }));
+      const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+
+      await client.getDelta(TARGET, cursor, CORRELATION_ID);
+
+      const [url] = fetchImpl.mock.calls[0];
+      expect(String(url)).toBe(cursor);
+    });
+
+    it("reports a deleted item via the `deleted` facet", async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(
+        jsonResponse(200, { value: [{ id: "item-2", deleted: { state: "deleted" } }], "@odata.deltaLink": "https://graph.microsoft.com/final" }),
+      );
+      const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+
+      const page = await client.getDelta(TARGET, null, CORRELATION_ID);
+
+      expect(page.items[0]).toMatchObject({ itemId: "item-2", deleted: true });
+    });
+
+    it("reports parentReference fields for move/rename detection", async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(
+        jsonResponse(200, {
+          value: [{ id: "item-3", name: "renamed.docx", parentReference: { id: "folder-1", driveId: "synthetic-drive", path: "/drive/root:/EMS" } }],
+          "@odata.deltaLink": "https://graph.microsoft.com/final",
+        }),
+      );
+      const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+
+      const page = await client.getDelta(TARGET, null, CORRELATION_ID);
+
+      expect(page.items[0]).toMatchObject({ parentItemId: "folder-1", parentDriveId: "synthetic-drive", parentPath: "/drive/root:/EMS" });
+    });
+
+    it("pages via @odata.nextLink until the final page returns @odata.deltaLink", async () => {
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(200, { value: [{ id: "item-1" }], "@odata.nextLink": "https://graph.microsoft.com/page-2" }))
+        .mockResolvedValueOnce(jsonResponse(200, { value: [{ id: "item-2" }], "@odata.deltaLink": "https://graph.microsoft.com/final" }));
+      const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+
+      const page1 = await client.getDelta(TARGET, null, CORRELATION_ID);
+      expect(page1.nextLink).toBe("https://graph.microsoft.com/page-2");
+      expect(page1.deltaLink).toBeNull();
+
+      const page2 = await client.getDelta(TARGET, page1.nextLink, CORRELATION_ID);
+      expect(page2.nextLink).toBeNull();
+      expect(page2.deltaLink).toBe("https://graph.microsoft.com/final");
+      expect(String(fetchImpl.mock.calls[1][0])).toBe("https://graph.microsoft.com/page-2");
+    });
+
+    it("classifies a 410 as GONE (expired cursor) without retrying", async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(410, { error: { message: "resyncNeeded" } }));
+      const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+
+      await expect(client.getDelta(TARGET, "https://graph.microsoft.com/expired", CORRELATION_ID)).rejects.toMatchObject({ kind: "GONE" });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it("retries a 429 on a delta page honouring Retry-After", async () => {
+      vi.useFakeTimers();
+      try {
+        const fetchImpl = vi
+          .fn()
+          .mockResolvedValueOnce(jsonResponse(429, { error: { message: "throttled" } }, { "Retry-After": "1" }))
+          .mockResolvedValueOnce(jsonResponse(200, { value: [], "@odata.deltaLink": "https://graph.microsoft.com/final" }));
+        const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+
+        const promise = client.getDelta(TARGET, null, CORRELATION_ID);
+        await vi.advanceTimersByTimeAsync(1000);
+        const page = await promise;
+
+        expect(page.deltaLink).toBe("https://graph.microsoft.com/final");
+        expect(fetchImpl).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });

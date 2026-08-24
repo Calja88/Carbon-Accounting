@@ -12,7 +12,7 @@
  * reaches a log line or thrown error.
  */
 
-import { GraphAccessToken, GraphClient, GraphClientError, GraphDownloadMetadata, GraphDriveMetadata, GraphErrorKind, GraphHealthCheckResult, GraphItemMetadata, GraphSiteTarget, GraphTokenProvider, GraphUploadResult, GraphUploadSession, GraphVersionMetadata } from "./types";
+import { GraphAccessToken, GraphClient, GraphClientError, GraphDeltaItem, GraphDeltaPage, GraphDownloadMetadata, GraphDriveMetadata, GraphErrorKind, GraphHealthCheckResult, GraphItemMetadata, GraphSiteTarget, GraphTokenProvider, GraphUploadResult, GraphUploadSession, GraphVersionMetadata } from "./types";
 import { scrubGraphSecrets } from "./token-provider";
 
 const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
@@ -38,6 +38,7 @@ function statusToErrorKind(status: number): GraphErrorKind {
   if (status === 403) return "PERMISSION_DENIED";
   if (status === 404) return "NOT_FOUND";
   if (status === 409) return "CONFLICT";
+  if (status === 410) return "GONE";
   if (status === 412) return "PRECONDITION_FAILED";
   if (status === 429) return "RATE_LIMITED";
   if (status >= 500) return "SERVER_ERROR";
@@ -59,6 +60,8 @@ function describeError(kind: GraphErrorKind, status: number | null): string {
       return "Microsoft Graph reported a precondition failure (an eTag/cTag mismatch).";
     case "RATE_LIMITED":
       return "Microsoft Graph rate-limited this request.";
+    case "GONE":
+      return "Microsoft Graph reported the delta cursor has expired; a resync is required.";
     case "TIMEOUT":
       return "The request to Microsoft Graph timed out.";
     case "MALFORMED_RESPONSE":
@@ -119,6 +122,11 @@ export class MicrosoftGraphClient implements GraphClient {
    * a mutating request (e.g. `createUploadSession`) is called with
    * `idempotent: false` so a single ambiguous failure is surfaced rather than
    * silently retried.
+   *
+   * `path` is normally relative to `baseUrl`, but a caller may instead pass
+   * an absolute `https://` URL (task SP06's `getDelta`, resuming from a
+   * previously returned `nextLink`/`deltaLink`) — used as-is rather than
+   * prefixed, since Graph's own paging links are already fully-qualified.
    */
   private async request(
     path: string,
@@ -129,6 +137,7 @@ export class MicrosoftGraphClient implements GraphClient {
     assertServerSide();
     const idempotent = options.idempotent ?? true;
     const method = options.method ?? "GET";
+    const url = path.startsWith("https://") ? path : `${this.baseUrl}${path}`;
 
     let token: GraphAccessToken;
     try {
@@ -146,7 +155,7 @@ export class MicrosoftGraphClient implements GraphClient {
 
       let response: Response;
       try {
-        response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        response = await this.fetchImpl(url, {
           method,
           headers: {
             Authorization: `Bearer ${token.accessToken}`,
@@ -491,5 +500,56 @@ export class MicrosoftGraphClient implements GraphClient {
       const detail = err instanceof GraphClientError ? describeError(err.kind, err.status) : "Unexpected error checking Graph health.";
       return { ok: false, checkedAt: new Date().toISOString(), detail };
     }
+  }
+
+  private parseDeltaItem(raw: unknown): GraphDeltaItem {
+    const item = raw as {
+      id?: unknown;
+      name?: unknown;
+      eTag?: unknown;
+      webUrl?: unknown;
+      lastModifiedDateTime?: unknown;
+      size?: unknown;
+      deleted?: unknown;
+      file?: { hashes?: { sha256Hash?: unknown } };
+      parentReference?: { id?: unknown; driveId?: unknown; path?: unknown };
+    };
+    return {
+      itemId: typeof item?.id === "string" ? item.id : "",
+      name: typeof item?.name === "string" ? item.name : null,
+      eTag: typeof item?.eTag === "string" ? item.eTag : null,
+      webUrl: typeof item?.webUrl === "string" ? item.webUrl : null,
+      lastModifiedDateTime: typeof item?.lastModifiedDateTime === "string" ? item.lastModifiedDateTime : null,
+      sha256: typeof item?.file?.hashes?.sha256Hash === "string" ? item.file.hashes.sha256Hash : null,
+      size: typeof item?.size === "number" ? item.size : null,
+      deleted: typeof item?.deleted === "object" && item.deleted !== null,
+      parentItemId: typeof item?.parentReference?.id === "string" ? item.parentReference.id : null,
+      parentDriveId: typeof item?.parentReference?.driveId === "string" ? item.parentReference.driveId : null,
+      parentPath: typeof item?.parentReference?.path === "string" ? item.parentReference.path : null,
+    };
+  }
+
+  /**
+   * One page of `target`'s drive delta walk (task SP06, SP00 §9). A null
+   * `cursor` starts a fresh walk scoped to the whole drive (Graph's delta
+   * query has no server-side folder filter finer than the drive root; the
+   * reconciliation service is responsible for filtering to the configured
+   * root folder). A non-null `cursor` is always a previously-returned
+   * `nextLink`/`deltaLink` used verbatim — this method never constructs one
+   * itself, so it can never drift from what Graph actually issued.
+   */
+  async getDelta(target: GraphSiteTarget, cursor: string | null, correlationId: string): Promise<GraphDeltaPage> {
+    const path = cursor ?? `/sites/${encodeURIComponent(target.siteId)}/drives/${encodeURIComponent(target.driveId)}/root/delta`;
+    const raw = (await this.request(path, target, correlationId)) as {
+      value?: unknown;
+      "@odata.nextLink"?: unknown;
+      "@odata.deltaLink"?: unknown;
+    };
+    const list = Array.isArray(raw?.value) ? raw.value : [];
+    return {
+      items: list.map((entry) => this.parseDeltaItem(entry)),
+      nextLink: typeof raw?.["@odata.nextLink"] === "string" ? raw["@odata.nextLink"] : null,
+      deltaLink: typeof raw?.["@odata.deltaLink"] === "string" ? raw["@odata.deltaLink"] : null,
+    };
   }
 }
