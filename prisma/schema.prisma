@@ -193,6 +193,12 @@ model Organisation {
   evidenceLinks               EvidenceLink[]
   documentDistributions       DocumentDistribution[]
 
+  // Provider-neutral organisation storage configuration and external-file
+  // references (SP01).
+  storageConnection      OrganisationStorageConnection?
+  storageSiteBindings    StorageSiteBinding[]
+  externalFileReferences ExternalFileReference[]
+
   // EMS programme, scope, context and interested parties (T23).
   emsProgrammes               EmsProgramme[]
   emsScopeVersions            EmsScopeVersion[]
@@ -776,6 +782,10 @@ model User {
   approvedControlledDocumentRevisions ControlledDocumentRevision[] @relation("ControlledDocumentRevisionApprovedBy")
   uploadedEvidenceObjects             EvidenceObject[]             @relation("EvidenceObjectUploadedBy")
   linkedEvidence                      EvidenceLink[]               @relation("EvidenceLinkLinkedBy")
+
+  // Organisation storage configuration and external-file references (SP01).
+  connectedStorageConnections OrganisationStorageConnection[] @relation("StorageConnectionConnectedBy")
+  disabledStorageConnections  OrganisationStorageConnection[] @relation("StorageConnectionDisabledBy")
 
   // EMS programme foundation (T23).
   preparedEmsScopeVersions      EmsScopeVersion[]           @relation("EmsScopeVersionPreparedBy")
@@ -2665,6 +2675,11 @@ model ControlledDocumentRevision {
   emergencyPlans       EmergencyPlan[]
   communicationRecords CommunicationRecord[]
 
+  /// SharePoint-backed exact-version reference for this revision, when the
+  /// content lives in an organisation's connected storage rather than (or in
+  /// addition to) `evidenceObject` (SP01).
+  externalFileReference ExternalFileReference?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2727,6 +2742,11 @@ model EvidenceObject {
   links                      EvidenceLink[]
   controlledDocumentRevision ControlledDocumentRevision?
   blob                       EvidenceObjectBlob?
+
+  /// SharePoint-backed exact-version reference for this object, when the
+  /// bytes live in an organisation's connected storage rather than (or in
+  /// addition to) the "database" provider's own blob (SP01).
+  externalFileReference ExternalFileReference?
 
   @@unique([organisationId, id])
   @@index([organisationId, classification])
@@ -2794,6 +2814,192 @@ model DocumentDistribution {
   acknowledgedAt DateTime?
 
   @@index([organisationId, revisionId])
+}
+
+// ---------------------------------------------------------------------------
+// Provider-neutral organisation storage configuration and SharePoint
+// external-file reference schema (task SP01,
+// Docs/SP00_SHAREPOINT_INTEGRATION_SPEC.md §§2,6-7,9,11). No Microsoft Graph
+// calls, credentials, or UI are implemented here — this is the tenant-scoped
+// configuration and exact-version reference schema the connector (SP02+)
+// will populate. The existing "database" EvidenceStorageProvider and its
+// EvidenceObjectBlob fallback are untouched: an EvidenceObject/
+// ControlledDocumentRevision only gains an ExternalFileReference once an
+// organisation's storage connection is actually used for it.
+// ---------------------------------------------------------------------------
+
+/// Storage backend a connection targets. A single member today so the field
+/// (not a boolean) is what stays provider-neutral as further backends are
+/// added, per SP01's "provider-neutral ... configuration" requirement.
+enum StorageConnectionProvider {
+  SHAREPOINT
+}
+
+/// Connection/site-binding lifecycle (SP00 §2). `SUSPENDED` keeps the
+/// binding's own rows and every pinned reference intact but blocks new use;
+/// `OFFBOARDED` is the terminal, non-cascading state SP00 §11 describes —
+/// audit/evidence history is retained, only future access stops.
+enum StorageConnectionStatus {
+  NOT_CONNECTED
+  CONNECTED
+  SUSPENDED
+  OFFBOARDED
+}
+
+/// SP00 §3's Option A/B application-identity choice, recorded per
+/// organisation once decided — never a credential, only which model is in
+/// effect so the (out-of-Neon) secret store knows where to look.
+enum ApplicationIdentityMode {
+  PARAGON_MULTI_TENANT
+  CUSTOMER_OWNED
+}
+
+/// SP00 §9 delta-reconciliation outcome for one pinned reference. `ACTIVE`
+/// is resolvable; `STALE`/`UNREACHABLE` are set only by a reconciliation job
+/// (a later task) and never by this schema itself — recorded here so the
+/// service layer has somewhere to put that state without inventing it later
+/// as a breaking migration.
+enum ExternalFileReferenceStatus {
+  ACTIVE
+  STALE
+  UNREACHABLE
+}
+
+/// One organisation's document-storage connection — at most one per
+/// Organisation (SP00 §2's "per-organisation configuration record"),
+/// independent of whether it is actually connected yet. Never stores an
+/// access token, client secret, or private key: SP00 §11 keeps those in
+/// Paragon's existing secrets-management mechanism, never in Neon.
+/// Organisations that never create this row keep using the existing
+/// EvidenceStorageProvider database fallback unchanged.
+model OrganisationStorageConnection {
+  id             String       @id @default(cuid())
+  organisationId String       @unique
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  provider StorageConnectionProvider @default(SHAREPOINT)
+  status   StorageConnectionStatus  @default(NOT_CONNECTED)
+
+  /// Entra tenant ID of the customer's Microsoft 365 tenant (SP00 §2) — an
+  /// identifier, never a credential.
+  entraTenantId           String?
+  applicationIdentityMode ApplicationIdentityMode?
+
+  connectedByUserId String?
+  connectedBy       User?     @relation("StorageConnectionConnectedBy", fields: [connectedByUserId], references: [id])
+  connectedAt       DateTime?
+  lastVerifiedAt    DateTime?
+
+  /// Set on suspend/offboard (SP00 §11 "safe offboarding"). The row and its
+  /// site bindings/references are never deleted by this action alone — see
+  /// `status` for the non-cascading lifecycle.
+  disabledByUserId String?
+  disabledBy       User?     @relation("StorageConnectionDisabledBy", fields: [disabledByUserId], references: [id])
+  disabledAt       DateTime?
+  disabledReason   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  siteBindings StorageSiteBinding[]
+
+  @@unique([organisationId, id])
+}
+
+/// One SharePoint site/drive an organisation's connection is bound to (SP00
+/// §5's site/library/folder topology). An organisation may bind more than
+/// one site over time (SP00 §2: "one or more site bindings"), each still
+/// only ever reachable through this organisation's own connection.
+model StorageSiteBinding {
+  id           String                        @id @default(cuid())
+  connectionId String
+  connection   OrganisationStorageConnection @relation(fields: [connectionId], references: [id])
+
+  /// Denormalised from the connection so every child row (this one, and
+  /// ExternalFileReference below) is organisation-consistent through a
+  /// composite FK rather than a join back through connectionId — the same
+  /// pattern this schema already uses for e.g.
+  /// `ControlledDocumentRevision`/`EmsScopeVersion` parent-child pairs.
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  /// Graph site/drive identifiers — stable, opaque, never a "latest" alias.
+  siteId         String
+  driveId        String
+  rootFolderId   String?
+  rootFolderPath String?
+  /// Organisation-chosen label for admin UI display only (e.g. "EMS
+  /// Controlled Documents"); never used for resolution.
+  label String?
+
+  status StorageConnectionStatus @default(CONNECTED)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  fileReferences ExternalFileReference[]
+
+  @@unique([organisationId, id])
+  @@unique([connectionId, siteId, driveId])
+  @@index([organisationId, status])
+}
+
+/// The exact external-file/version reference for one EvidenceObject or
+/// ControlledDocumentRevision (SP01 requirement; SP00 §6-7). Retrieval is
+/// always by this row's pinned `itemId`/`versionId` — the record an issued
+/// revision is pinned to is set once (`pinnedAt`) and the service layer must
+/// never resolve it as "latest" or rewrite it to a newer SharePoint version
+/// (SP00 §7's hard invariant; enforced in the SP01 service layer here, ready
+/// for the SP03+ connector to rely on).
+model ExternalFileReference {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+
+  siteBindingId String
+  siteBinding   StorageSiteBinding @relation(fields: [organisationId, siteBindingId], references: [organisationId, id])
+
+  /// Exactly one of these two is set (DB-level CHECK constraint in the
+  /// migration, defence-in-depth over the service-layer rule) — this row
+  /// references either a generic EvidenceObject or a controlled-document
+  /// revision directly, never both, matching the two record kinds SP00 §6
+  /// names ("EvidenceObject (or controlled revision)").
+  evidenceObjectId String? @unique
+  evidenceObject   EvidenceObject? @relation(fields: [evidenceObjectId], references: [id])
+
+  controlledDocumentRevisionId String?                     @unique
+  controlledDocumentRevision   ControlledDocumentRevision? @relation(fields: [controlledDocumentRevisionId], references: [id])
+
+  /// Stable across rename/move (SP00 §6, §9).
+  itemId String
+  /// Pins the exact SharePoint version this reference resolves to (SP00
+  /// §6-7). Never overwritten once `pinnedAt` is set.
+  versionId String
+  eTag      String?
+  /// Authorised-display convenience only (SP00 §6/§8) — never used for
+  /// server-side retrieval or as a stable identifier.
+  webUrl String?
+
+  checksumSha256 String
+  byteSize       Int?
+  mimeType       String?
+
+  /// Null while this reference still tracks a DRAFT/IN_REVIEW author's
+  /// evolving content; set once (by the SP01 service layer's pin operation)
+  /// the moment an approval is recorded, after which the row's
+  /// itemId/versionId/checksum must never change (SP00 §7).
+  pinnedAt DateTime?
+
+  referenceStatus ExternalFileReferenceStatus @default(ACTIVE)
+  staleReason     String?
+  lastObservedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organisationId, id])
+  @@index([organisationId, siteBindingId])
+  @@index([organisationId, referenceStatus])
 }
 
 // ---------------------------------------------------------------------------

@@ -108,6 +108,7 @@ export const PERMISSION_CATALOGUE: PermissionCatalogueEntry[] = [
   entry("ems.export", "Export EMS records", true),
   entry("ems.notification.manage", "Configure reminder rules and notification preferences"),
   entry("ems.readiness.review", "Record a competent review of a licensed standard requirement mapping", true),
+  entry("ems.storage_connection.manage", "Administer an organisation's external document-storage connection (e.g. SharePoint site/drive binding, status, offboarding)", true),
 
   // --- Platform audit trail ---
   entry("audit.view", "View the platform audit trail"),
