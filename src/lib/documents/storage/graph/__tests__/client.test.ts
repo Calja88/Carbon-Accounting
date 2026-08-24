@@ -203,4 +203,112 @@ describe("MicrosoftGraphClient", () => {
     await expect(client.getDrive(TARGET, CORRELATION_ID)).rejects.toMatchObject({ kind: "CONFIGURATION" });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  // ---------------------------------------------------------------------
+  // Byte-level upload/download/delete (task SP03)
+  // ---------------------------------------------------------------------
+
+  describe("uploadContent", () => {
+    it("uploads a small file with a single authenticated PUT and resolves the newest version id", async () => {
+      const uploadResponse = jsonResponse(201, {
+        id: "item-42",
+        eTag: '"etag-1"',
+        webUrl: "https://contoso.example/item-42",
+        size: 11,
+        file: { hashes: { sha256Hash: "synthetic-hash" } },
+      });
+      const versionsResponse = jsonResponse(200, { value: [{ id: "2.0" }, { id: "1.0" }] });
+      const fetchImpl = vi.fn().mockResolvedValueOnce(uploadResponse).mockResolvedValueOnce(versionsResponse);
+      const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+
+      const result = await client.uploadContent(TARGET, "/EMS/Category", "evidence.pdf", Buffer.from("hello world"), CORRELATION_ID);
+
+      expect(result).toEqual({
+        itemId: "item-42",
+        versionId: "2.0",
+        eTag: '"etag-1"',
+        webUrl: "https://contoso.example/item-42",
+        sha256: "synthetic-hash",
+        size: 11,
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      const [uploadUrl, uploadInit] = fetchImpl.mock.calls[0];
+      expect(String(uploadUrl)).toContain("/content");
+      expect(uploadInit.method).toBe("PUT");
+      expect((uploadInit.headers as Record<string, string>).Authorization).toBe("Bearer synthetic-token");
+    });
+
+    it("uploads a large file via an unauthenticated PUT to the prepared session URL", async () => {
+      const sessionResponse = jsonResponse(200, { uploadUrl: "https://contoso.example/upload?token=secret", expirationDateTime: null });
+      const uploadResponse = jsonResponse(201, { id: "item-99", eTag: null, webUrl: null, size: 5_000_000 });
+      const versionsResponse = jsonResponse(200, { value: [{ id: "1.0" }] });
+      const fetchImpl = vi.fn().mockResolvedValueOnce(sessionResponse).mockResolvedValueOnce(uploadResponse).mockResolvedValueOnce(versionsResponse);
+      const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+      const bytes = Buffer.alloc(5_000_000, 1);
+
+      const result = await client.uploadContent(TARGET, "/EMS", "large.bin", bytes, CORRELATION_ID);
+
+      expect(result.itemId).toBe("item-99");
+      expect(result.versionId).toBe("1.0");
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      const [sessionPutUrl, sessionPutInit] = fetchImpl.mock.calls[1];
+      expect(sessionPutUrl).toBe("https://contoso.example/upload?token=secret");
+      expect((sessionPutInit.headers as Record<string, string>).Authorization).toBeUndefined();
+      expect((sessionPutInit.headers as Record<string, string>)["Content-Range"]).toBe("bytes 0-4999999/5000000");
+    });
+
+    it("does not retry a failed upload PUT", async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(500, { error: { message: "unavailable" } }));
+      const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+
+      await expect(client.uploadContent(TARGET, "/EMS", "evidence.pdf", Buffer.from("x"), CORRELATION_ID)).rejects.toMatchObject({
+        kind: "SERVER_ERROR",
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("downloadContent", () => {
+    it("streams the exact pinned item/version content, following Graph's redirect to the blob location", async () => {
+      const bytes = new TextEncoder().encode("pinned evidence bytes");
+      const fetchImpl = vi.fn().mockResolvedValueOnce(new Response(bytes, { status: 200 }));
+      const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+
+      const result = await client.downloadContent(TARGET, "item-1", "3.0", CORRELATION_ID);
+
+      expect(result.toString("utf8")).toBe("pinned evidence bytes");
+      const [url] = fetchImpl.mock.calls[0];
+      expect(String(url)).toContain("/versions/3.0/content");
+      const [, init] = fetchImpl.mock.calls[0];
+      expect(init.redirect).toBe("follow");
+    });
+
+    it("throws NOT_FOUND rather than falling back to another version", async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(404, { error: { message: "not found" } }));
+      const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+
+      await expect(client.downloadContent(TARGET, "item-1", "3.0", CORRELATION_ID)).rejects.toMatchObject({ kind: "NOT_FOUND" });
+    });
+  });
+
+  describe("deleteItem", () => {
+    it("sends a DELETE for the exact item id", async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+      const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+
+      await client.deleteItem(TARGET, "item-1", CORRELATION_ID);
+
+      const [url, init] = fetchImpl.mock.calls[0];
+      expect(String(url)).toContain("/items/item-1");
+      expect(init.method).toBe("DELETE");
+    });
+
+    it("does not retry a failed delete", async () => {
+      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(503, { error: { message: "unavailable" } }));
+      const client = new MicrosoftGraphClient({ fetchImpl, tokenProvider: new FakeTokenProvider() });
+
+      await expect(client.deleteItem(TARGET, "item-1", CORRELATION_ID)).rejects.toMatchObject({ kind: "SERVER_ERROR" });
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+  });
 });

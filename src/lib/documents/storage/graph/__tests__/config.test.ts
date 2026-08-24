@@ -23,6 +23,7 @@ interface SiteBindingRow {
   siteId: string;
   driveId: string;
   status: string;
+  rootFolderPath?: string | null;
 }
 
 const { connections, siteBindings, resetTables } = vi.hoisted(() => {
@@ -52,7 +53,7 @@ vi.mock("@/lib/prisma", () => {
   return { prisma: { organisationStorageConnection, storageSiteBinding } };
 });
 
-const { resolveGraphSiteTarget } = await import("../config");
+const { resolveGraphSiteTarget, resolveGraphSiteTargetForEvidenceProvider } = await import("../config");
 
 const manageContext = (organisationId: string) =>
   makeOrganisationContext(organisationId, {
@@ -121,5 +122,40 @@ describe("resolveGraphSiteTarget", () => {
     siteBindings.push({ id: "binding-b", connectionId: "conn-2", organisationId: ORG_B, siteId: "site-b", driveId: "drive-b", status: "CONNECTED" });
 
     await expect(resolveGraphSiteTarget(manageContext(ORG_A), "binding-b")).rejects.toMatchObject({ kind: "CONFIGURATION" });
+  });
+});
+
+describe("resolveGraphSiteTargetForEvidenceProvider", () => {
+  beforeEach(() => resetTables());
+
+  it("resolves without any OrganisationContext/permission, unlike resolveGraphSiteTarget", async () => {
+    connections.push({ id: "conn-1", organisationId: ORG_A, status: "CONNECTED", entraTenantId: "tenant-a" });
+    siteBindings.push({
+      id: "binding-1",
+      connectionId: "conn-1",
+      organisationId: ORG_A,
+      siteId: "site-1",
+      driveId: "drive-1",
+      status: "CONNECTED",
+      rootFolderPath: "EMS/Evidence",
+    });
+
+    const resolved = await resolveGraphSiteTargetForEvidenceProvider(ORG_A);
+
+    expect(resolved.target).toEqual({ organisationId: ORG_A, entraTenantId: "tenant-a", siteId: "site-1", driveId: "drive-1" });
+    expect(resolved.siteBindingId).toBe("binding-1");
+    expect(resolved.rootFolderPath).toBe("EMS/Evidence");
+  });
+
+  it("still rejects an unconfigured organisation", async () => {
+    await expect(resolveGraphSiteTargetForEvidenceProvider(ORG_A)).rejects.toMatchObject({ kind: "CONFIGURATION" });
+  });
+
+  it("never resolves a site binding belonging to another organisation", async () => {
+    connections.push({ id: "conn-1", organisationId: ORG_A, status: "CONNECTED", entraTenantId: "tenant-a" });
+    connections.push({ id: "conn-2", organisationId: ORG_B, status: "CONNECTED", entraTenantId: "tenant-b" });
+    siteBindings.push({ id: "binding-b", connectionId: "conn-2", organisationId: ORG_B, siteId: "site-b", driveId: "drive-b", status: "CONNECTED" });
+
+    await expect(resolveGraphSiteTargetForEvidenceProvider(ORG_A, "binding-b")).rejects.toMatchObject({ kind: "CONFIGURATION" });
   });
 });

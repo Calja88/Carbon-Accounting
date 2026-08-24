@@ -39,4 +39,21 @@ export async function findTenantExternalFileReference(
   return assertChildOwnership(ctx, reference, expectedSiteBindingId, "siteBindingId");
 }
 
+/**
+ * Loads an ExternalFileReference by its unique `evidenceObjectId`, or null
+ * if that evidence object has no SharePoint-backed reference. Unlike
+ * `findTenantExternalFileReference`, this takes no tenant context: the
+ * lookup key is the unique foreign key itself, and it is only ever called
+ * from `SharePointEvidenceStorageProvider` (task SP03) after the caller
+ * (evidence-service.ts) has already resolved and organisation-checked the
+ * `EvidenceObject` whose id this is — the same trust boundary the built-in
+ * database provider's `get(storageKey)`/`remove(storageKey)` already rely
+ * on (no organisation context reaches the storage-provider interface
+ * either). The returned row's own `organisationId` is what the provider
+ * then uses to resolve the Graph site target.
+ */
+export async function findExternalFileReferenceByEvidenceObjectId(evidenceObjectId: string) {
+  return prisma.externalFileReference.findUnique({ where: { evidenceObjectId } });
+}
+
 export { tenantWhere };

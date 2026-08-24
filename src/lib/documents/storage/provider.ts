@@ -18,6 +18,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
+import { createSharePointEvidenceStorageProvider } from "@/lib/documents/storage/sharepoint-provider";
 
 export interface StoredEvidenceBytes {
   storageProvider: string;
@@ -99,3 +100,13 @@ export const documentEvidenceStorage = createEvidenceStorageRegistry(
   "DOCUMENT_EVIDENCE_STORAGE",
   databaseEvidenceObjectProvider,
 );
+
+/**
+ * Registers the SharePoint-backed provider (task SP03) so
+ * `DOCUMENT_EVIDENCE_STORAGE=sharepoint` can select it — the database
+ * provider above remains the default and requires no configuration change.
+ * Registering (rather than only constructing when selected) costs nothing:
+ * `createSharePointEvidenceStorageProvider` does no Graph/database work at
+ * construction time, only when `put`/`get`/`remove` are actually called.
+ */
+documentEvidenceStorage.register(createSharePointEvidenceStorageProvider());

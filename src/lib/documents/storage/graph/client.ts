@@ -12,7 +12,7 @@
  * reaches a log line or thrown error.
  */
 
-import { GraphAccessToken, GraphClient, GraphClientError, GraphDownloadMetadata, GraphDriveMetadata, GraphErrorKind, GraphHealthCheckResult, GraphItemMetadata, GraphSiteTarget, GraphTokenProvider, GraphUploadSession, GraphVersionMetadata } from "./types";
+import { GraphAccessToken, GraphClient, GraphClientError, GraphDownloadMetadata, GraphDriveMetadata, GraphErrorKind, GraphHealthCheckResult, GraphItemMetadata, GraphSiteTarget, GraphTokenProvider, GraphUploadResult, GraphUploadSession, GraphVersionMetadata } from "./types";
 import { scrubGraphSecrets } from "./token-provider";
 
 const GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0";
@@ -23,6 +23,9 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 /** Hard cap so a persistent outage fails fast rather than looping — SP02 "bounded retry/backoff for safe idempotent calls". */
 const MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 250;
+
+/** Graph's simple-upload PUT (`.../content`) is only valid up to 4 MiB; above that a resumable upload session is required (task SP03). */
+const SIMPLE_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
 
 function assertServerSide() {
   if (typeof window !== "undefined") {
@@ -314,6 +317,170 @@ export class MicrosoftGraphClient implements GraphClient {
       uploadUrl: raw.uploadUrl,
       expirationDateTime: typeof raw?.expirationDateTime === "string" ? raw.expirationDateTime : null,
     };
+  }
+
+  private itemContentPath(target: GraphSiteTarget, parentItemPath: string, fileName: string): string {
+    const safePath = parentItemPath.replace(/^\/+|\/+$/g, "");
+    return `/sites/${encodeURIComponent(target.siteId)}/drives/${encodeURIComponent(target.driveId)}/root:/${safePath ? `${safePath}/` : ""}${encodeURIComponent(fileName)}:/content`;
+  }
+
+  private parseUploadResult(raw: unknown, correlationId: string): GraphUploadResult {
+    const item = raw as {
+      id?: unknown;
+      eTag?: unknown;
+      webUrl?: unknown;
+      size?: unknown;
+      file?: { hashes?: { sha256Hash?: unknown } };
+    };
+    if (typeof item?.id !== "string") {
+      throw new GraphClientError("Microsoft Graph did not return an item id for the uploaded file.", "MALFORMED_RESPONSE", null, false, correlationId);
+    }
+    return {
+      itemId: item.id,
+      versionId: "",
+      eTag: typeof item.eTag === "string" ? item.eTag : null,
+      webUrl: typeof item.webUrl === "string" ? item.webUrl : null,
+      sha256: typeof item.file?.hashes?.sha256Hash === "string" ? item.file.hashes.sha256Hash : null,
+      size: typeof item.size === "number" ? item.size : 0,
+    };
+  }
+
+  /**
+   * Resolves the version id Graph assigned to the write this call just
+   * performed. Graph's upload responses (both the simple PUT and the
+   * session PUT) return the resulting driveItem but never its version id
+   * directly, so this reads the item's version history immediately
+   * afterward and takes the newest entry (task SP03 — the exact version
+   * `SharePointEvidenceStorageProvider` pins, never a later "latest").
+   */
+  private async resolveNewestVersionId(target: GraphSiteTarget, itemId: string, correlationId: string): Promise<string> {
+    const versions = await this.listVersions(target, itemId, correlationId);
+    const newest = versions[0]?.versionId;
+    if (!newest) {
+      throw new GraphClientError("Microsoft Graph returned no version history for the uploaded file.", "MALFORMED_RESPONSE", null, false, correlationId);
+    }
+    return newest;
+  }
+
+  /**
+   * Performs one raw (non-JSON-body) Graph HTTP call — used only by
+   * `uploadContent`/`downloadContent`, which move file bytes rather than a
+   * JSON payload. Mirrors `request()`'s server-only guard, timeout,
+   * token-acquisition and error-classification, but never JSON-encodes the
+   * body and never assumes a JSON response. Never retried — a mutating byte
+   * write must not be silently repeated, and a single ambiguous failure is
+   * surfaced to the caller instead (same rule `request()` applies to
+   * `createUploadSession`).
+   */
+  private async rawRequest(
+    url: string,
+    target: GraphSiteTarget,
+    correlationId: string,
+    options: { method: string; body?: Buffer; headers?: Record<string, string>; authenticate?: boolean; followRedirects?: boolean },
+  ): Promise<Response> {
+    assertServerSide();
+    const authenticate = options.authenticate ?? true;
+    const followRedirects = options.followRedirects ?? false;
+
+    let authHeader: Record<string, string> = {};
+    if (authenticate) {
+      let token: GraphAccessToken;
+      try {
+        token = await this.tokenProvider.getToken(target.entraTenantId, correlationId);
+      } catch (err) {
+        if (err instanceof GraphClientError) throw err;
+        throw new GraphClientError("Could not acquire a Microsoft Graph token.", "AUTHENTICATION", null, true, correlationId);
+      }
+      authHeader = { Authorization: `Bearer ${token.accessToken}` };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        method: options.method,
+        headers: { ...authHeader, "client-request-id": correlationId, ...options.headers },
+        body: options.body ? Uint8Array.from(options.body) : undefined,
+        signal: controller.signal,
+        redirect: followRedirects ? "follow" : "manual",
+      });
+    } catch (err) {
+      const aborted = err instanceof Error && err.name === "AbortError";
+      throw new GraphClientError(
+        aborted ? "The request to Microsoft Graph timed out." : "Could not reach Microsoft Graph.",
+        aborted ? "TIMEOUT" : "NETWORK",
+        null,
+        true,
+        correlationId,
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!followRedirects && response.status >= 300 && response.status < 400) {
+      throw new GraphClientError("Microsoft Graph returned an unexpected redirect.", "SERVER_ERROR", response.status, false, correlationId);
+    }
+    if (!response.ok) {
+      const kind = statusToErrorKind(response.status);
+      throw new GraphClientError(scrubGraphSecrets(describeError(kind, response.status)), kind, response.status, false, correlationId);
+    }
+    return response;
+  }
+
+  async uploadContent(
+    target: GraphSiteTarget,
+    parentItemPath: string,
+    fileName: string,
+    bytes: Buffer,
+    correlationId: string,
+  ): Promise<GraphUploadResult> {
+    let raw: unknown;
+    if (bytes.byteLength <= SIMPLE_UPLOAD_MAX_BYTES) {
+      const path = this.itemContentPath(target, parentItemPath, fileName);
+      const response = await this.rawRequest(`${this.baseUrl}${path}?@microsoft.graph.conflictBehavior=fail`, target, correlationId, {
+        method: "PUT",
+        body: bytes,
+        headers: { "Content-Type": "application/octet-stream" },
+      });
+      raw = JSON.parse(await response.text());
+    } else {
+      const session = await this.createUploadSession(target, parentItemPath, fileName, correlationId);
+      // The upload session URL is pre-authenticated by Graph itself (SP00
+      // §11 — this is not the Paragon Graph app credential); it is never
+      // logged and the Authorization header is deliberately omitted here.
+      const response = await this.rawRequest(session.uploadUrl, target, correlationId, {
+        method: "PUT",
+        body: bytes,
+        headers: {
+          "Content-Length": String(bytes.byteLength),
+          "Content-Range": `bytes 0-${bytes.byteLength - 1}/${bytes.byteLength}`,
+        },
+        authenticate: false,
+      });
+      raw = JSON.parse(await response.text());
+    }
+
+    const result = this.parseUploadResult(raw, correlationId);
+    const versionId = await this.resolveNewestVersionId(target, result.itemId, correlationId);
+    return { ...result, versionId };
+  }
+
+  async downloadContent(target: GraphSiteTarget, itemId: string, versionId: string, correlationId: string): Promise<Buffer> {
+    const path = `/sites/${encodeURIComponent(target.siteId)}/drives/${encodeURIComponent(target.driveId)}/items/${encodeURIComponent(itemId)}/versions/${encodeURIComponent(versionId)}/content`;
+    // Graph's version-content endpoint responds with a redirect to a
+    // pre-authenticated download location; followed here (server-side only,
+    // bytes never reach a client as a link) so the exact pinned version's
+    // bytes come back in one call (SP00 §7/§8 — never "latest", never an
+    // unauthenticated link handed to a browser).
+    const response = await this.rawRequest(`${this.baseUrl}${path}`, target, correlationId, { method: "GET", followRedirects: true });
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  }
+
+  async deleteItem(target: GraphSiteTarget, itemId: string, correlationId: string): Promise<void> {
+    const path = `/sites/${encodeURIComponent(target.siteId)}/drives/${encodeURIComponent(target.driveId)}/items/${encodeURIComponent(itemId)}`;
+    await this.request(path, target, correlationId, { method: "DELETE", idempotent: false });
   }
 
   async checkHealth(target: GraphSiteTarget, correlationId: string): Promise<GraphHealthCheckResult> {
