@@ -92,6 +92,22 @@ export interface GraphUploadSession {
   expirationDateTime: string | null;
 }
 
+/**
+ * Result of writing evidence bytes to a driveItem (task SP03). `versionId`
+ * is resolved from the item's version history immediately after the write
+ * completes, since the upload response itself does not carry it — this is
+ * the exact version SP03's `SharePointEvidenceStorageProvider` pins into an
+ * `ExternalFileReference` (SP00 §7).
+ */
+export interface GraphUploadResult {
+  itemId: string;
+  versionId: string;
+  eTag: string | null;
+  webUrl: string | null;
+  sha256: string | null;
+  size: number;
+}
+
 export interface GraphHealthCheckResult {
   ok: boolean;
   checkedAt: string;
@@ -119,6 +135,28 @@ export interface GraphClient {
     fileName: string,
     correlationId: string,
   ): Promise<GraphUploadSession>;
+  /**
+   * Writes evidence bytes to a new driveItem (task SP03). Uses a direct PUT
+   * for small files and an upload session for larger ones, but this
+   * distinction is entirely internal — callers never see a session URL.
+   * Always creates a new item (conflict behaviour `fail`), matching
+   * `createUploadSession`'s existing "never overwrite" default.
+   */
+  uploadContent(
+    target: GraphSiteTarget,
+    parentItemPath: string,
+    fileName: string,
+    bytes: Buffer,
+    correlationId: string,
+  ): Promise<GraphUploadResult>;
+  /**
+   * Streams the exact pinned `itemId`/`versionId` content server-side (task
+   * SP03) — never "latest" (SP00 §7). The only path any download route may
+   * use; a caller must never construct a Graph content URL itself.
+   */
+  downloadContent(target: GraphSiteTarget, itemId: string, versionId: string, correlationId: string): Promise<Buffer>;
+  /** Deletes a driveItem (task SP03, used when Paragon-side retention removes evidence bytes it owns). */
+  deleteItem(target: GraphSiteTarget, itemId: string, correlationId: string): Promise<void>;
   checkHealth(target: GraphSiteTarget, correlationId: string): Promise<GraphHealthCheckResult>;
 }
 

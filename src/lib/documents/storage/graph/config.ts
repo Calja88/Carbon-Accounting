@@ -19,23 +19,24 @@
 import { prisma } from "@/lib/prisma";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import { requirePermission } from "@/lib/rbac/authorize";
-import { findTenantStorageConnection, toTenantRepositoryContext } from "@/lib/repositories/storage-connection-repository";
+import type { TenantRepositoryContext } from "@/lib/repositories/context";
+import {
+  findTenantStorageConnection,
+  systemTenantRepositoryContext,
+  toTenantRepositoryContext,
+} from "@/lib/repositories/storage-connection-repository";
 import { GraphClientError, GraphSiteTarget } from "./types";
 
 const MANAGE_PERMISSION = "ems.storage_connection.manage" as const;
 
-/**
- * Resolves the `GraphSiteTarget` for one organisation's storage connection.
- * When `siteBindingId` is omitted, the organisation must have exactly one
- * `CONNECTED` site binding — an organisation with more than one active
- * binding must disambiguate explicitly, so this never silently guesses
- * which site a caller meant.
- */
-export async function resolveGraphSiteTarget(context: OrganisationContext, siteBindingId?: string): Promise<GraphSiteTarget> {
-  requirePermission(context, MANAGE_PERMISSION);
-  const ctx = toTenantRepositoryContext(context);
-  const correlationId = context.correlationId;
+/** Resolution result carrying the site binding alongside the Graph target — SP03's provider needs `rootFolderPath` to place uploads, which `GraphSiteTarget` itself deliberately omits (it is only the Graph identity, not a UI/topology concern). */
+export interface ResolvedGraphSite {
+  target: GraphSiteTarget;
+  siteBindingId: string;
+  rootFolderPath: string | null;
+}
 
+async function resolveForTenant(ctx: TenantRepositoryContext, correlationId: string, siteBindingId?: string): Promise<ResolvedGraphSite> {
   const connection = await findTenantStorageConnection(ctx);
   if (!connection) {
     throw new GraphClientError(
@@ -84,9 +85,43 @@ export async function resolveGraphSiteTarget(context: OrganisationContext, siteB
   }
 
   return {
-    organisationId: ctx.organisationId,
-    entraTenantId: connection.entraTenantId,
-    siteId: binding.siteId,
-    driveId: binding.driveId,
+    target: {
+      organisationId: ctx.organisationId,
+      entraTenantId: connection.entraTenantId,
+      siteId: binding.siteId,
+      driveId: binding.driveId,
+    },
+    siteBindingId: binding.id,
+    rootFolderPath: binding.rootFolderPath,
   };
+}
+
+/**
+ * Resolves the `GraphSiteTarget` for one organisation's storage connection.
+ * When `siteBindingId` is omitted, the organisation must have exactly one
+ * `CONNECTED` site binding — an organisation with more than one active
+ * binding must disambiguate explicitly, so this never silently guesses
+ * which site a caller meant.
+ */
+export async function resolveGraphSiteTarget(context: OrganisationContext, siteBindingId?: string): Promise<GraphSiteTarget> {
+  requirePermission(context, MANAGE_PERMISSION);
+  const ctx = toTenantRepositoryContext(context);
+  const resolved = await resolveForTenant(ctx, context.correlationId, siteBindingId);
+  return resolved.target;
+}
+
+/**
+ * Same resolution as `resolveGraphSiteTarget`, but for the SP03 evidence
+ * storage provider, which is never called with a full `OrganisationContext`
+ * — the calling evidence/retention service has already enforced the
+ * relevant document/evidence RBAC before ever reaching the storage
+ * provider, so gating this on `ems.storage_connection.manage` (a distinct,
+ * connection-*administration* permission per SP01) would incorrectly block
+ * an ordinary evidence uploader. Organisation scoping is still absolute:
+ * every read here is baked into the query by `organisationId`, exactly as
+ * `resolveGraphSiteTarget` does.
+ */
+export async function resolveGraphSiteTargetForEvidenceProvider(organisationId: string, siteBindingId?: string): Promise<ResolvedGraphSite> {
+  const ctx = systemTenantRepositoryContext(organisationId, "sharepoint-evidence-storage");
+  return resolveForTenant(ctx, ctx.correlationId, siteBindingId);
 }
