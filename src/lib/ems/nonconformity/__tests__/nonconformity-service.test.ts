@@ -271,6 +271,31 @@ describe("linkAdditionalSourceToNonconformity — duplicate linking", () => {
   });
 });
 
+describe("getNonconformity — T64 sections (UI08)", () => {
+  it("returns the root-cause analyses, corrective actions and effectiveness reviews linked to this nonconformity", async () => {
+    const nc = await createNonconformityFromSource(managerContextA, createNcInput({ reference: "NC-T64-SECTIONS" }));
+    tables.rootCauseAnalyses.push({ id: "rca-1", organisationId: ORG_A, nonconformityId: nc.id, method: "FIVE_WHYS", conclusion: "Fictional conclusion.", createdAt: new Date("2026-01-01") });
+    tables.correctiveActions.push({ id: "ca-1", organisationId: ORG_A, nonconformityId: nc.id, description: "Fictional action.", ownerMembershipId: "membership-manager", dueDate: new Date("2026-02-01"), status: "OPEN" });
+    tables.effectivenessReviews.push({ id: "ev-1", organisationId: ORG_A, nonconformityId: nc.id, criteria: "Fictional criteria.", reviewDate: new Date("2026-03-01"), result: "EFFECTIVE", decision: "Fictional decision.", createdAt: new Date("2026-03-01") });
+
+    const reloaded = await getNonconformity(managerContextA, nc.id);
+    expect(reloaded.rootCauseAnalyses).toHaveLength(1);
+    expect(reloaded.rootCauseAnalyses[0].id).toBe("rca-1");
+    expect(reloaded.correctiveActions).toHaveLength(1);
+    expect(reloaded.correctiveActions[0].id).toBe("ca-1");
+    expect(reloaded.effectivenessReviews).toHaveLength(1);
+    expect(reloaded.effectivenessReviews[0].id).toBe("ev-1");
+  });
+
+  it("never leaks another organisation's T64 records", async () => {
+    const nc = await createNonconformityFromSource(managerContextA, createNcInput({ reference: "NC-T64-TENANT" }));
+    tables.rootCauseAnalyses.push({ id: "rca-b", organisationId: ORG_B, nonconformityId: nc.id, method: "FIVE_WHYS", conclusion: "Foreign-tenant row.", createdAt: new Date("2026-01-01") });
+
+    const reloaded = await getNonconformity(managerContextA, nc.id);
+    expect(reloaded.rootCauseAnalyses).toHaveLength(0);
+  });
+});
+
 describe("containment", () => {
   it("moves an OPEN nonconformity to CONTAINED on first containment record", async () => {
     const nc = await createNonconformityFromSource(managerContextA, createNcInput({ reference: "NC-CONTAIN" }));

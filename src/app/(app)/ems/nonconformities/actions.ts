@@ -24,6 +24,7 @@ import {
   completeCorrectiveAction,
   verifyCorrectiveAction,
   reopenCorrectiveAction,
+  uploadEvidenceToCorrectiveAction,
 } from "@/lib/ems/nonconformity/corrective-action-service";
 import { EffectivenessError, requestEffectivenessReview, performEffectivenessReview } from "@/lib/ems/nonconformity/effectiveness-service";
 import {
@@ -395,6 +396,30 @@ export async function reopenCorrectiveActionAction(_previous: NonconformityActio
     await reopenCorrectiveAction(context, parsed.data.correctiveActionId, { reopenReason: parsed.data.reopenReason, actorUserId: context.userId });
     revalidateNonconformities(parsed.data.nonconformityId);
     return { ...emptyState, message: "Corrective action reopened." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function uploadCorrectiveActionEvidenceAction(_previous: NonconformityActionState, formData: FormData): Promise<NonconformityActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const correctiveActionId = String(formData.get("correctiveActionId") ?? "");
+    const nonconformityId = String(formData.get("nonconformityId") ?? "");
+    const file = formData.get("file");
+    if (!correctiveActionId) return { ...emptyState, error: "Choose a corrective action." };
+    if (!(file instanceof File) || file.size === 0) return { ...emptyState, error: "Choose a file to upload." };
+    const bytes = Buffer.from(await file.arrayBuffer());
+    await uploadEvidenceToCorrectiveAction(context, {
+      correctiveActionId,
+      fileName: file.name,
+      mimeType: file.type || "application/octet-stream",
+      bytes,
+      purpose: String(formData.get("purpose") ?? "") || null,
+      actorUserId: context.userId,
+    });
+    revalidateNonconformities(nonconformityId || undefined);
+    return { ...emptyState, message: "Evidence uploaded." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }
