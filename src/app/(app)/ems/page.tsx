@@ -69,7 +69,11 @@ const MODULE_ICONS: Record<string, LucideIcon> = {
   audits: ShieldCheck,
   incidents: AlertTriangle,
   nonconformities: AlertTriangle,
-  competence: UsersRound,
+  "competence-requirements": UsersRound,
+  "competence-people": UsersRound,
+  "competence-assignments": ClipboardCheck,
+  "competence-gaps": AlertTriangle,
+  "competence-training": UsersRound,
   "management-review": Sparkles,
 };
 

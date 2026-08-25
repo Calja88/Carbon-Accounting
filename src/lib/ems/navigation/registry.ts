@@ -278,14 +278,52 @@ export const EMS_MODULES: EmsModuleEntry[] = [
     pageFile: "src/app/(app)/ems/nonconformities/page.tsx",
   },
 
-  // --- Competence (T70-T71 — deferred to UI09/UI10) ---
+  // --- Competence (T70 — UI09) ---
   {
-    id: "competence",
-    label: "Competence & training",
-    description: "Competence requirements, assignments, training evidence and expiry.",
+    id: "competence-requirements",
+    label: "Competence requirements",
+    description: "Requirement version admin and role/process/aspect/control/obligation/emergency scope mapping.",
+    category: "people",
+    status: "available",
+    href: "/ems/competence/requirements",
+    pageFile: "src/app/(app)/ems/competence/requirements/page.tsx",
+  },
+  {
+    id: "competence-people",
+    label: "Competence people",
+    description: "Person profiles, restricted contact detail and their competence assignments.",
+    category: "people",
+    status: "available",
+    href: "/ems/competence/people",
+    pageFile: "src/app/(app)/ems/competence/people/page.tsx",
+  },
+  {
+    id: "competence-assignments",
+    label: "Competence assignments",
+    description: "Which active requirement each person is assigned, and its status.",
+    category: "people",
+    status: "available",
+    href: "/ems/competence/assignments",
+    pageFile: "src/app/(app)/ems/competence/assignments/page.tsx",
+  },
+  {
+    id: "competence-gaps",
+    label: "Competence gaps",
+    description: "Assignments that are a gap, overdue, or expired, scoped to your Entities/Sites.",
+    category: "people",
+    status: "available",
+    href: "/ems/competence/gaps",
+    pageFile: "src/app/(app)/ems/competence/gaps/page.tsx",
+  },
+
+  // --- Training, evidence, assessment and expiry (T71 — deferred to UI10) ---
+  {
+    id: "competence-training",
+    label: "Training & evidence",
+    description: "Training events, competence evidence, assessment and expiry.",
     category: "people",
     status: "planned",
-    plannedTask: "UI09",
+    plannedTask: "UI10",
   },
 
   // --- Management review (T72-T73 — deferred to UI11/UI12) ---

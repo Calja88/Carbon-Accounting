@@ -197,3 +197,45 @@ export async function listCompetenceAssignmentsForRequirementVersion(context: Or
     orderBy: { assignedAt: "desc" },
   });
 }
+
+/** Mirrors `accessiblePersonProfileFilter` (person-service.ts) / `accessiblePersonFilter` (gap-service.ts) exactly. */
+function accessiblePersonFilter(context: OrganisationContext) {
+  if (context.access.mode === "ORGANISATION_WIDE") return {};
+  return {
+    OR: [
+      { siteId: { in: [...context.access.siteIds] } },
+      { entityId: { in: [...context.access.entityIds] } },
+    ],
+  };
+}
+
+export interface ListCompetenceAssignmentsFilter {
+  entityId?: string;
+  siteId?: string;
+  personId?: string;
+}
+
+/**
+ * Tenant/site-scoped assignment list across every person — the UI09
+ * "assignment list" read, built the same way as `listCompetenceGaps`
+ * (gap-service.ts) rather than adding a new persisted model.
+ */
+export async function listCompetenceAssignments(context: OrganisationContext, filter: ListCompetenceAssignmentsFilter = {}) {
+  requirePermission(context, VIEW_PERMISSION);
+  const ctx = toTenantRepositoryContext(context);
+  return prisma.competenceAssignment.findMany({
+    where: tenantWhere(ctx, {
+      person: {
+        ...accessiblePersonFilter(context),
+        ...(filter.entityId ? { entityId: filter.entityId } : {}),
+        ...(filter.siteId ? { siteId: filter.siteId } : {}),
+      },
+      ...(filter.personId ? { personId: filter.personId } : {}),
+    }),
+    include: {
+      person: { select: { id: true, displayName: true, membership: { select: { user: { select: { name: true } } } } } },
+      requirementVersion: { select: { id: true, title: true, version: true, requirementId: true } },
+    },
+    orderBy: { assignedAt: "desc" },
+  });
+}
