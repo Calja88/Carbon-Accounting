@@ -59,41 +59,41 @@ export default async function ActionProgrammesPage() {
           stops receiving stale reminders.
         </p>
         <p className="mt-2 text-sm font-medium text-slate-700">
-          {overdueCount} of {dashboard.length} open action{dashboard.length === 1 ? "" : "s"} currently overdue (tenant-scoped).
+          {overdueCount} of {dashboard.length} open action{dashboard.length === 1 ? "" : "s"} currently overdue (tenant-scoped).{" "}
+          <a href="/ems/notifications" className="font-normal text-slate-500 underline underline-offset-2 hover:text-slate-900">
+            View my reminders
+          </a>
         </p>
       </div>
 
-      {canManage ? (
-        <ActionsWorkspace
-          programmes={programmes.map((programme) => ({
-            id: programme.id,
-            title: programme.title,
-            status: programme.status,
-            ownerName: programme.owner.user.name ?? programme.ownerMembershipId,
-            objectiveId: programme.objectiveId,
-            actions: (actionsByProgramme.get(programme.id) ?? []).map((action) => ({
-              id: action.id,
-              title: action.title,
-              status: action.status,
-              priority: action.priority,
-              ownerName: action.owner.user.name ?? action.ownerMembershipId,
-              dueDate: action.dueDate.toISOString().slice(0, 10),
-              overdue: action.dueDate.getTime() < Date.now() && !["COMPLETED", "VERIFIED", "CANCELLED"].includes(action.status),
-              completionCriteria: action.completionCriteria,
-              completionEvidenceNote: action.completionEvidenceNote,
-              dependsOn: action.dependenciesOn.map((dep) => ({
-                id: dep.dependsOnActionItem.id,
-                title: dep.dependsOnActionItem.title,
-                status: dep.dependsOnActionItem.status,
-              })),
+      <ActionsWorkspace
+        programmes={programmes.map((programme) => ({
+          id: programme.id,
+          title: programme.title,
+          status: programme.status,
+          ownerName: programme.owner.user.name ?? programme.ownerMembershipId,
+          objectiveId: programme.objectiveId,
+          actions: (actionsByProgramme.get(programme.id) ?? []).map((action) => ({
+            id: action.id,
+            title: action.title,
+            status: action.status,
+            priority: action.priority,
+            ownerName: action.owner.user.name ?? action.ownerMembershipId,
+            dueDate: action.dueDate.toISOString().slice(0, 10),
+            overdue: action.dueDate.getTime() < Date.now() && !["COMPLETED", "VERIFIED", "CANCELLED"].includes(action.status),
+            completionCriteria: action.completionCriteria,
+            completionEvidenceNote: action.completionEvidenceNote,
+            dependsOn: action.dependenciesOn.map((dep) => ({
+              id: dep.dependsOnActionItem.id,
+              title: dep.dependsOnActionItem.title,
+              status: dep.dependsOnActionItem.status,
             })),
-          }))}
-          members={memberOptions}
-          objectives={objectiveOptions}
-        />
-      ) : (
-        <p className="text-sm text-slate-500">You have read-only access to action programmes.</p>
-      )}
+          })),
+        }))}
+        members={memberOptions}
+        objectives={objectiveOptions}
+        canManage={canManage}
+      />
     </div>
   );
 }

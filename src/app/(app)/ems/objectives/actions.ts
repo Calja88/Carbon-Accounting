@@ -21,7 +21,13 @@ import {
   ObjectiveMetricError,
   createObjectiveMetricDefinition,
   approveObjectiveMetricVersion,
+  getObjectiveMetricVersion,
 } from "@/lib/ems/objectives/metric-service";
+import {
+  resolveMetricVersionObservations,
+  MetricAdapterUnavailableError,
+} from "@/lib/ems/objectives/metric-adapters/registry";
+import { MetricAdapterConfigError, MetricAdapterResolutionError } from "@/lib/ems/objectives/metric-adapters/types";
 import {
   createEnvironmentalObjectiveFormSchema,
   createSuccessorObjectiveVersionFormSchema,
@@ -31,7 +37,9 @@ import {
   updateEnvironmentalObjectiveVersionDraftFormSchema,
   createObjectiveMetricDefinitionFormSchema,
   approveObjectiveMetricVersionFormSchema,
+  resolveObjectiveMetricObservationFormSchema,
 } from "@/lib/ems/objectives/schemas";
+import type { ObjectiveMetricSourceType, Prisma } from "@prisma/client";
 
 export interface ObjectiveActionState {
   error: string | null;
@@ -263,6 +271,37 @@ export async function cancelEnvironmentalObjectiveVersionAction(
   }
 }
 
+/**
+ * Builds the `aggregationConfig` JSON the T51 adapters expect from the
+ * flat adapter-link fields the form submits. Only CORPORATE_CARBON and
+ * PRODUCT_LCA read this — every other source type gets `null`
+ * (MANUAL/MONITORING/DERIVED_APPROVED_FORMULA have no adapter wired up in
+ * `registry.ts`), so an incomplete config for those never blocks saving a
+ * draft metric definition.
+ */
+function aggregationConfigFromForm(
+  sourceType: ObjectiveMetricSourceType,
+  data: ReturnType<typeof createObjectiveMetricDefinitionFormSchema.parse>,
+): Prisma.InputJsonValue | null {
+  if (sourceType === "CORPORATE_CARBON") {
+    if (!data.reportSnapshotId || !data.periodStart || !data.periodEnd || !data.scope) return null;
+    return {
+      reportSnapshotId: data.reportSnapshotId,
+      periodStart: data.periodStart.toISOString(),
+      periodEnd: data.periodEnd.toISOString(),
+      scope: data.scope,
+      ...(data.basis ? { basis: data.basis } : {}),
+      ...(data.category ? { category: data.category } : {}),
+      ...(data.siteId ? { siteId: data.siteId } : {}),
+    };
+  }
+  if (sourceType === "PRODUCT_LCA") {
+    if (!data.assessmentId || !data.versionId || !data.intensityBasis) return null;
+    return { assessmentId: data.assessmentId, versionId: data.versionId, intensityBasis: data.intensityBasis };
+  }
+  return null;
+}
+
 export async function createObjectiveMetricDefinitionAction(
   _previous: ObjectiveActionState,
   formData: FormData,
@@ -276,6 +315,16 @@ export async function createObjectiveMetricDefinitionAction(
       unit: formData.get("unit"),
       frequency: formData.get("frequency"),
       boundaryDescription: formData.get("boundaryDescription"),
+      reportSnapshotId: formData.get("reportSnapshotId"),
+      periodStart: formData.get("periodStart") || undefined,
+      periodEnd: formData.get("periodEnd") || undefined,
+      scope: formData.get("scope"),
+      basis: formData.get("basis"),
+      category: formData.get("category"),
+      siteId: formData.get("siteId"),
+      assessmentId: formData.get("assessmentId"),
+      versionId: formData.get("versionId"),
+      intensityBasis: formData.get("intensityBasis"),
     });
     if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the metric details." };
     await createObjectiveMetricDefinition(context, {
@@ -285,12 +334,58 @@ export async function createObjectiveMetricDefinitionAction(
       unit: parsed.data.unit,
       frequency: parsed.data.frequency,
       boundaryDescription: parsed.data.boundaryDescription || null,
+      aggregationConfig: aggregationConfigFromForm(parsed.data.sourceType, parsed.data),
       actorUserId: context.userId,
     });
     revalidateObjectives();
     return { ...emptyState, message: "Draft metric definition created." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export interface MetricObservationState {
+  error: string | null;
+  observations: Array<{
+    periodStart: string;
+    periodEnd: string;
+    value: string;
+    unit: string;
+    magnitudeKind: string;
+    provenance: Record<string, unknown>;
+  }> | null;
+}
+
+const emptyObservationState: MetricObservationState = { error: null, observations: null };
+
+/** Read-only surfacing of a metric version's T51 adapter reading — never writes, mutates or recalculates the underlying carbon/LCA record. */
+export async function resolveObjectiveMetricObservationAction(
+  _previous: MetricObservationState,
+  formData: FormData,
+): Promise<MetricObservationState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = resolveObjectiveMetricObservationFormSchema.safeParse({ metricVersionId: formData.get("metricVersionId") });
+    if (!parsed.success) return { ...emptyObservationState, error: "Choose a metric version." };
+    const version = await getObjectiveMetricVersion(context, parsed.data.metricVersionId);
+    if (!version) return { ...emptyObservationState, error: "That metric version could not be found in this organisation." };
+    const observations = await resolveMetricVersionObservations(context, version);
+    return {
+      error: null,
+      observations: observations.map((observation) => ({
+        periodStart: observation.periodStart.toISOString().slice(0, 10),
+        periodEnd: observation.periodEnd.toISOString().slice(0, 10),
+        value: observation.value.toString(),
+        unit: observation.unit,
+        magnitudeKind: observation.magnitudeKind,
+        provenance: observation.provenance,
+      })),
+    };
+  } catch (error) {
+    if (error instanceof MetricAdapterUnavailableError) return { ...emptyObservationState, error: error.message };
+    if (error instanceof MetricAdapterConfigError) return { ...emptyObservationState, error: error.message };
+    if (error instanceof MetricAdapterResolutionError) return { ...emptyObservationState, error: error.message };
+    return { ...emptyObservationState, error: friendlyError(error) };
   }
 }
 

@@ -118,7 +118,7 @@ export async function listEnvironmentalObjectives(context: OrganisationContext) 
     include: {
       activeVersion: true,
       versions: { orderBy: { version: "desc" }, include: versionListInclude },
-      metricDefinitions: true,
+      metricDefinitions: { include: { activeVersion: true, versions: { orderBy: { version: "desc" }, take: 1 } } },
     },
     orderBy: { createdAt: "desc" },
   });

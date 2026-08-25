@@ -51,6 +51,20 @@ export const cancelObjectiveVersionFormSchema = z.object({
   rationale: z.string().trim().min(1, "Enter a rationale.").max(2000),
 });
 
+/** Optional adapter-link fields for CORPORATE_CARBON/PRODUCT_LCA metric definitions (T51). Left blank for MANUAL/MONITORING/DERIVED_APPROVED_FORMULA metrics — the adapter registry never runs for those source types. */
+export const objectiveMetricAdapterLinkFormSchema = z.object({
+  reportSnapshotId: z.string().trim().max(200).optional().or(z.literal("")),
+  periodStart: z.coerce.date().optional(),
+  periodEnd: z.coerce.date().optional(),
+  scope: z.enum(["SCOPE_1", "SCOPE_2", "SCOPE_3"]).optional().or(z.literal("")),
+  basis: z.enum(["LOCATION_BASED", "MARKET_BASED"]).optional().or(z.literal("")),
+  category: z.string().trim().max(200).optional().or(z.literal("")),
+  siteId: z.string().trim().max(200).optional().or(z.literal("")),
+  assessmentId: z.string().trim().max(200).optional().or(z.literal("")),
+  versionId: z.string().trim().max(200).optional().or(z.literal("")),
+  intensityBasis: z.enum(["HEADLINE_PER_FUNCTIONAL_UNIT", "INCLUDING_BIOGENIC_PER_FUNCTIONAL_UNIT"]).optional().or(z.literal("")),
+});
+
 export const createObjectiveMetricDefinitionFormSchema = z.object({
   objectiveId: z.string().trim().min(1, "Choose an objective."),
   name: z.string().trim().min(1, "Enter a metric name.").max(300),
@@ -58,12 +72,16 @@ export const createObjectiveMetricDefinitionFormSchema = z.object({
   unit: z.string().trim().min(1, "Enter a unit.").max(100),
   frequency: z.string().trim().min(1, "Enter a measurement frequency.").max(200),
   boundaryDescription: z.string().trim().max(2000).optional().or(z.literal("")),
-});
+}).merge(objectiveMetricAdapterLinkFormSchema);
 
 export const updateObjectiveMetricVersionDraftFormSchema = createObjectiveMetricDefinitionFormSchema.omit({ objectiveId: true });
 
 export const createSuccessorObjectiveMetricVersionFormSchema = updateObjectiveMetricVersionDraftFormSchema;
 
 export const approveObjectiveMetricVersionFormSchema = z.object({
+  metricVersionId: z.string().trim().min(1),
+});
+
+export const resolveObjectiveMetricObservationFormSchema = z.object({
   metricVersionId: z.string().trim().min(1),
 });
