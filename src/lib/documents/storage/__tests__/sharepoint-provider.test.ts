@@ -366,7 +366,7 @@ describe("SharePointEvidenceStorageProvider", () => {
   });
 
   describe("remove", () => {
-    it("deletes the Graph item and marks the reference UNREACHABLE without deleting the Neon row", async () => {
+    it("marks the reference UNREACHABLE without deleting the Neon row or the SharePoint item (SP00 §10: SharePoint/Purview retention, not Paragon, owns physical deletion)", async () => {
       connectOrganisation(ORG_A, "binding-1");
       references.push({
         id: "ref-1",
@@ -391,7 +391,7 @@ describe("SharePointEvidenceStorageProvider", () => {
 
       await provider.remove("evidence-1");
 
-      expect(graphClient.deleteItem).toHaveBeenCalledWith(expect.objectContaining({ organisationId: ORG_A }), "item-1", expect.any(String));
+      expect(graphClient.deleteItem).not.toHaveBeenCalled();
       expect(references).toHaveLength(1);
       expect(references[0].referenceStatus).toBe("UNREACHABLE");
       expect(recordAuditEvent).toHaveBeenCalledWith(
