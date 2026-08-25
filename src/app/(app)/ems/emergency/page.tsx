@@ -76,6 +76,8 @@ export default async function EmsEmergencyPage() {
           credibleConsequence: scenario.credibleConsequence,
           reviewDueDate: scenario.reviewDueDate.toISOString(),
           reviewOverdue: scenario.reviewOverdue,
+          aspectId: scenario.aspect?.id ?? null,
+          aspectName: scenario.aspect?.name ?? null,
           plans: scenario.plans.map((plan) => ({
             id: plan.id,
             version: plan.version,

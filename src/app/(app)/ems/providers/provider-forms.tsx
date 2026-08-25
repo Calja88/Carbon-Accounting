@@ -113,7 +113,7 @@ function ProviderCard({ provider, canManage }: { provider: ProviderRow; canManag
   const [retireState, retireAction, retiring] = useActionState(retireProviderControlAction, emptyState);
   return (
     <Card>
-      <CardContent className="space-y-4 py-5">
+      <CardContent id={`provider-${provider.id}`} className="scroll-mt-24 space-y-4 py-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -129,7 +129,7 @@ function ProviderCard({ provider, canManage }: { provider: ProviderRow; canManag
           <p><strong>Provided:</strong> {provider.providedDescription}</p>
           <p><strong>Requirements:</strong> {provider.communicatedRequirements}</p>
           <p><strong>Evaluation frequency:</strong> {provider.evaluationFrequency}</p>
-          <p><strong>Aspects:</strong> {provider.aspects.map((aspect) => aspect.name).join(", ") || "None linked"}</p>
+          <p><strong>Aspects:</strong> {provider.aspects.length === 0 ? "None linked" : provider.aspects.map((aspect, index) => <span key={aspect.id}>{index > 0 && ", "}<a href={`/ems/aspects#aspect-${aspect.id}`} className="text-blue-700 underline">{aspect.name}</a></span>)}</p>
         </div>
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Evaluations</p>
