@@ -83,6 +83,7 @@ export default async function ComplianceEvaluationsPage() {
             evaluatorName: item.evaluator?.user.name ?? null,
             evaluatedAt: item.evaluatedAt ? item.evaluatedAt.toISOString() : null,
             followUpDate: item.followUpDate ? item.followUpDate.toISOString() : null,
+            obligationVersionId: item.obligationVersionId,
             obligationTitle: item.obligationVersion.title,
             obligationVersion: item.obligationVersion.version,
             instrumentTitle: item.obligationVersion.instrument?.title ?? item.obligationVersion.otherRequirementSource?.title ?? "Manual other-requirement source",
