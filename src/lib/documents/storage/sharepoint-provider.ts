@@ -126,25 +126,32 @@ export function createSharePointEvidenceStorageProvider(options: SharePointEvide
     },
 
     async remove(storageKey): Promise<void> {
+      // SP00 §10: SharePoint/Purview retention and Paragon's own T81 metadata
+      // retention are independently governed control planes. Paragon must
+      // never treat its own retention execution as authorisation to
+      // physically delete the customer's SharePoint bytes — deletion of the
+      // underlying file is the customer's own SharePoint/Purview action, not
+      // something this provider triggers via Graph. This unpins the Paragon
+      // side only (marks the reference UNREACHABLE so callers stop trying to
+      // read it) and never calls `client().deleteItem`.
       const reference = await findExternalFileReferenceByEvidenceObjectId(storageKey);
       if (!reference) return;
-
-      const cid = correlationId("remove", storageKey);
-      const resolved = await resolveGraphSiteTargetForEvidenceProvider(reference.organisationId, reference.siteBindingId);
-      await client().deleteItem(resolved.target, reference.itemId, cid);
 
       const ctx = systemTenantRepositoryContext(reference.organisationId, "sharepoint-evidence-storage");
       await runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
         const updated = await tx.externalFileReference.update({
           where: { id: reference.id, organisationId: txCtx.organisationId },
-          data: { referenceStatus: "UNREACHABLE", staleReason: "Evidence bytes deleted by Paragon-side retention execution." },
+          data: {
+            referenceStatus: "UNREACHABLE",
+            staleReason: "Evidence tombstoned by Paragon-side retention execution; SharePoint bytes were not deleted (SP00 §10 — deletion of the underlying file is governed by the customer's own SharePoint/Purview retention, not by Paragon's T81 metadata retention).",
+          },
         });
 
         await recordAuditEvent(tx, txCtx, {
           eventType: "external_file_reference.marked_stale",
           resourceType: "external_file_reference",
           resourceId: updated.id,
-          summary: "External file reference marked unreachable: evidence bytes removed by retention execution.",
+          summary: "External file reference marked unreachable: evidence tombstoned by retention execution (SharePoint bytes not physically deleted).",
           actorUserId: null,
           actorType: "SYSTEM",
           correlationId: txCtx.correlationId,
