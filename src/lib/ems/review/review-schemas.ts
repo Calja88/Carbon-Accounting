@@ -68,3 +68,56 @@ export const createSuccessorAgendaTemplateVersionFormSchema = z.object({
   itemsJson: z.string().trim().min(1, "Add at least one agenda item."),
   revisionRationale: z.string().trim().min(1, "Enter a revision rationale.").max(2000),
 });
+
+// ---------------------------------------------------------------------------
+// Pack, minutes, decisions, action links and closure (T73/UI12) form input.
+// ---------------------------------------------------------------------------
+
+export const managementReviewDecisionTypeSchema = z.enum([
+  "RESOURCE_ALLOCATION",
+  "OBJECTIVE_OR_POLICY_CHANGE",
+  "PROCESS_OR_CONTROL_CHANGE",
+  "OTHER",
+]);
+
+export const holdManagementReviewFormSchema = z.object({
+  reviewId: z.string().trim().min(1),
+  heldDate: z.coerce.date(),
+});
+
+export const addManagementReviewAiNarrativeFormSchema = z.object({
+  packId: z.string().trim().min(1),
+  content: z.string().trim().min(1, "Enter the narrative content.").max(10000),
+});
+
+export const reviewManagementReviewAiNarrativeFormSchema = z.object({
+  narrativeId: z.string().trim().min(1),
+  decision: z.enum(["REVIEWED", "REJECTED"]),
+  rejectionReason: z.string().trim().max(2000).optional().or(z.literal("")),
+});
+
+export const recordManagementReviewDecisionFormSchema = z.object({
+  reviewId: z.string().trim().min(1),
+  inputDefinitionKey: z.string().trim().optional().or(z.literal("")),
+  decisionType: managementReviewDecisionTypeSchema,
+  text: z.string().trim().min(1, "Enter the decision text.").max(4000),
+  rationale: z.string().trim().max(4000).optional().or(z.literal("")),
+  ownerMembershipId: z.string().trim().optional().or(z.literal("")),
+  targetDate: z.coerce.date().optional().or(z.literal("")),
+});
+
+export const draftManagementReviewMinutesFormSchema = z.object({
+  reviewId: z.string().trim().min(1),
+  narrativeId: z.string().trim().optional().or(z.literal("")),
+});
+
+export const createManagementReviewMinutesAddendumFormSchema = z.object({
+  reviewId: z.string().trim().min(1),
+  reason: z.string().trim().min(1, "Enter a reason for this addendum.").max(2000),
+  narrativeId: z.string().trim().optional().or(z.literal("")),
+});
+
+export const linkManagementReviewActionFormSchema = z.object({
+  decisionId: z.string().trim().min(1),
+  actionItemId: z.string().trim().min(1, "Choose an action."),
+});

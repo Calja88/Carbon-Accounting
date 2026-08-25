@@ -374,6 +374,12 @@ function ReviewCard({
           <div className="flex items-center gap-2">
             {overdue && <Badge tone="danger">Overdue</Badge>}
             <Badge tone={reviewStatusTone(review.status)}>{review.status.replace(/_/g, " ")}</Badge>
+            <Link
+              href={`/ems/management-reviews/${review.id}`}
+              className="text-sm font-medium text-slate-900 underline underline-offset-2"
+            >
+              Pack, minutes &amp; decisions
+            </Link>
           </div>
         </div>
 

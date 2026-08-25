@@ -124,8 +124,8 @@ export default async function ManagementReviewsPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Management review cycle and agenda</h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-500">
           Schedule and reschedule management reviews, manage attendees and their responsibilities, link exact-version
-          review inputs, and see open prior actions ahead of each review. Packs, minutes, decisions and closure are
-          handled elsewhere once a review is held.
+          review inputs, and see open prior actions ahead of each review. Open a review from the list below for its
+          pack, minutes, decisions, action links and closure.
         </p>
       </div>
 
