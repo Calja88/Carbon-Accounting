@@ -43,7 +43,7 @@ import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-sco
 import { runInTenantTransaction } from "@/lib/repositories/transaction";
 import { recordAuditEvent } from "@/lib/repositories/audit-repository";
 import { notifyMembership, suppressNotificationsForResource } from "@/lib/notifications/notification-service";
-import { linkEvidence, uploadEvidenceObject } from "@/lib/documents/evidence-service";
+import { linkEvidence, uploadEvidenceObject, listEvidenceForResource } from "@/lib/documents/evidence-service";
 import type { TenantRepositoryContext } from "@/lib/repositories/context";
 
 export { TenantOwnershipError };
@@ -374,6 +374,14 @@ export async function uploadEvidenceToCorrectiveAction(
     linkedByUserId: input.actorUserId,
   });
   return evidence;
+}
+
+export async function listCorrectiveActionEvidence(context: OrganisationContext, correctiveActionId: string) {
+  requirePermission(context, "ems.view");
+  const ctx = toTenantRepositoryContext(context);
+  const action = await findTenantCorrectiveAction(ctx, correctiveActionId);
+  if (!action) throw new TenantOwnershipError();
+  return listEvidenceForResource(ctx, "corrective_action", action.id);
 }
 
 // ---------------------------------------------------------------------------

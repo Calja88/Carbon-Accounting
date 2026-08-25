@@ -14,6 +14,11 @@ import { CreateNonconformityForm, NonconformityList, NonconformityPolicyWorkspac
 
 export const dynamic = "force-dynamic";
 
+/** Not a component — a plain helper, so `Date.now()` here isn't a render-purity concern. */
+function isOverdue(dueDate: Date | null, closed: boolean): boolean {
+  return !!dueDate && dueDate.getTime() < Date.now() && !closed;
+}
+
 export default async function NonconformitiesPage() {
   let context;
   try {
@@ -42,6 +47,8 @@ export default async function NonconformitiesPage() {
     status: nc.status,
     requirementReference: nc.requirementReference,
     createdAt: nc.createdAt.toISOString().slice(0, 10),
+    ownerName: nc.ownerMembershipId ? members.find((m) => m.id === nc.ownerMembershipId)?.user.name ?? nc.ownerMembershipId : null,
+    overdue: isOverdue(nc.dueDate, nc.status === "CLOSED"),
   }));
 
   const canManage = hasPermission(context, NONCONFORMITY_MANAGE_PERMISSION);

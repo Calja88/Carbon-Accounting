@@ -433,11 +433,17 @@ export async function getNonconformity(context: OrganisationContext, nonconformi
   const ctx = toTenantRepositoryContext(context);
   const nonconformity = await findTenantNonconformity(ctx, nonconformityId);
   if (!nonconformity) throw new TenantOwnershipError();
-  const [sourceLinks, containmentRecords] = await Promise.all([
+  const [sourceLinks, containmentRecords, rootCauseAnalyses, correctiveActions, effectivenessReviews] = await Promise.all([
     prisma.nonconformitySourceLink.findMany({ where: tenantWhere(ctx, { nonconformityId: nonconformity.id }), orderBy: { linkedAt: "asc" } }),
     prisma.containmentRecord.findMany({ where: tenantWhere(ctx, { nonconformityId: nonconformity.id }), orderBy: { createdAt: "asc" } }),
+    // T64 sections (root cause, corrective action, effectiveness review) —
+    // see root-cause-service.ts, corrective-action-service.ts and
+    // effectiveness-service.ts, which own writes to these tables.
+    prisma.rootCauseAnalysis.findMany({ where: tenantWhere(ctx, { nonconformityId: nonconformity.id }), orderBy: { createdAt: "asc" } }),
+    prisma.correctiveAction.findMany({ where: tenantWhere(ctx, { nonconformityId: nonconformity.id }), orderBy: { dueDate: "asc" } }),
+    prisma.effectivenessReview.findMany({ where: tenantWhere(ctx, { nonconformityId: nonconformity.id }), orderBy: { createdAt: "desc" } }),
   ]);
-  return { ...nonconformity, sourceLinks, containmentRecords };
+  return { ...nonconformity, sourceLinks, containmentRecords, rootCauseAnalyses, correctiveActions, effectivenessReviews };
 }
 
 export async function listNonconformities(context: OrganisationContext) {

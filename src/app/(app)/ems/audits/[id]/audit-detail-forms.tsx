@@ -54,6 +54,9 @@ export type FindingRow = {
   statement: string;
   objectiveEvidence: string | null;
   criterionReference: string | null;
+  ownerName: string | null;
+  dueDate: string | null;
+  overdue: boolean;
 };
 
 export type ReportRow = { status: string; issuedAt: string | null; checksumSha256: string | null };
@@ -258,6 +261,14 @@ function FindingCard({ finding, canRaise }: { finding: FindingRow; canRaise: boo
       <p className="text-slate-800">{finding.statement}</p>
       {finding.objectiveEvidence && <p className="text-xs text-slate-500">Objective evidence: {finding.objectiveEvidence}</p>}
       {finding.criterionReference && <p className="text-xs text-slate-500">Criterion: {finding.criterionReference}</p>}
+      {(finding.ownerName || finding.dueDate) && (
+        <p className="text-xs text-slate-500">
+          {finding.ownerName && `Owner: ${finding.ownerName}`}
+          {finding.ownerName && finding.dueDate && " · "}
+          {finding.dueDate && `Due ${finding.dueDate}`}
+          {finding.overdue && <span className="ml-1 font-semibold text-red-600">(overdue)</span>}
+        </p>
+      )}
       {canRaise && (
         <div className="flex flex-wrap gap-2">
           {finding.status === "DRAFT" && (

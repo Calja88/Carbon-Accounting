@@ -10,6 +10,11 @@ import { AuditExecutionWorkspace } from "./audit-detail-forms";
 
 export const dynamic = "force-dynamic";
 
+/** Not a component — a plain helper, so `Date.now()` here isn't a render-purity concern. */
+function isOverdue(dueDate: Date | null, closed: boolean): boolean {
+  return !!dueDate && dueDate.getTime() < Date.now() && !closed;
+}
+
 export default async function AuditDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
@@ -86,6 +91,9 @@ export default async function AuditDetailPage({ params }: { params: Promise<{ id
           statement: f.statement,
           objectiveEvidence: f.objectiveEvidence,
           criterionReference: f.criterionReference,
+          ownerName: f.ownerMembershipId ? memberOptions.find((m) => m.id === f.ownerMembershipId)?.name ?? f.ownerMembershipId : null,
+          dueDate: f.dueDate ? f.dueDate.toISOString().slice(0, 10) : null,
+          overdue: isOverdue(f.dueDate, f.status === "CLOSED"),
         }))}
         report={report ? { status: report.status, issuedAt: report.issuedAt ? report.issuedAt.toISOString().slice(0, 10) : null, checksumSha256: report.checksumSha256 } : null}
         auditingTeam={auditingTeam.map((m) => ({ id: m.membershipId, name: m.membership.user.name ?? m.membershipId }))}

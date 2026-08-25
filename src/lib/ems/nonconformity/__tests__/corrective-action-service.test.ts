@@ -91,6 +91,7 @@ vi.mock("@/lib/repositories/audit-repository", () => ({ recordAuditEvent: vi.fn(
 vi.mock("@/lib/documents/evidence-service", () => ({
   uploadEvidenceObject: vi.fn(async () => ({ id: "evidence-synthetic" })),
   linkEvidence: vi.fn(async () => ({ id: "evidence-link-synthetic" })),
+  listEvidenceForResource: vi.fn(async () => [{ id: "evidence-synthetic", filename: "synthetic-evidence.txt" }]),
 }));
 
 const {
@@ -103,6 +104,7 @@ const {
   verifyCorrectiveAction,
   reopenCorrectiveAction,
   notifyOverdueCorrectiveActions,
+  listCorrectiveActionEvidence,
 } = await import("@/lib/ems/nonconformity/corrective-action-service");
 const { TenantOwnershipError } = await import("@/lib/repositories/tenant-scope");
 const { PermissionDeniedError } = await import("@/lib/rbac/authorize");
@@ -237,5 +239,18 @@ describe("notifyOverdueCorrectiveActions", () => {
     await completeCorrectiveAction(managerContextA, action.id, { completionEvidenceNote: "Evidence.", actorUserId: managerContextA.userId });
     const result = await notifyOverdueCorrectiveActions(managerContextA, new Date("2026-08-13"));
     expect(result).toHaveLength(0);
+  });
+});
+
+describe("listCorrectiveActionEvidence (UI08)", () => {
+  it("returns evidence linked to the corrective action", async () => {
+    const action = await createCorrectiveAction(managerContextA, "nc-root-cause-approved", actionInput());
+    const evidence = await listCorrectiveActionEvidence(managerContextA, action.id);
+    expect(evidence).toEqual([{ id: "evidence-synthetic", filename: "synthetic-evidence.txt" }]);
+  });
+
+  it("refuses a foreign-tenant corrective action id", async () => {
+    const action = await createCorrectiveAction(managerContextA, "nc-root-cause-approved", actionInput());
+    await expect(listCorrectiveActionEvidence(managerContextB, action.id)).rejects.toThrow(TenantOwnershipError);
   });
 });
