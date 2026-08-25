@@ -67,6 +67,9 @@ export default async function CompetenceGapsPage() {
                   {gap.dueDate ? ` · due ${gap.dueDate.toISOString().slice(0, 10)}` : ""}
                 </p>
                 {gap.gapNote && <p className="text-xs text-slate-500">Note: {gap.gapNote}</p>}
+                <Link href={`/ems/competence/assignments/${gap.assignmentId}`} className="text-sm text-blue-700 hover:underline">
+                  Evidence &amp; assessment
+                </Link>
               </div>
               <Badge tone={severityTone(gap.severity)}>{gap.severity}</Badge>
             </div>

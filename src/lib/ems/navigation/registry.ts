@@ -316,14 +316,15 @@ export const EMS_MODULES: EmsModuleEntry[] = [
     pageFile: "src/app/(app)/ems/competence/gaps/page.tsx",
   },
 
-  // --- Training, evidence, assessment and expiry (T71 — deferred to UI10) ---
+  // --- Training, evidence, assessment and expiry (T71/UI10) ---
   {
     id: "competence-training",
-    label: "Training & evidence",
-    description: "Training events, competence evidence, assessment and expiry.",
+    label: "Competence expiry & evidence",
+    description: "Expiring/expired competence, evidence verification and assessment outcomes. Open an assignment for its full evidence and assessment history.",
     category: "people",
-    status: "planned",
-    plannedTask: "UI10",
+    status: "available",
+    href: "/ems/competence/expiry",
+    pageFile: "src/app/(app)/ems/competence/expiry/page.tsx",
   },
 
   // --- Management review (T72-T73 — deferred to UI11/UI12) ---

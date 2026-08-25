@@ -21,6 +21,7 @@ const RESOURCE_TYPE_ROUTES: Record<string, (resourceId: string) => string> = {
   external_provider_control: () => `/ems/providers`,
   emergency_plan: () => `/ems/emergency`,
   corrective_action: () => `/ems/nonconformities`,
+  competence_record: (id) => `/ems/competence/assignments/${id}`,
 };
 
 export function resourceLink(resourceType: string, resourceId: string): string | null {
