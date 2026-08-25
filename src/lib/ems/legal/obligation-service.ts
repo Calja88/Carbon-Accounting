@@ -120,6 +120,7 @@ const versionListInclude = {
     },
   },
   approvals: { orderBy: { decidedAt: "desc" as const } },
+  controlLinks: { include: { control: { select: { id: true, title: true, controlKey: true, version: true } } } },
 } as const;
 
 export async function listComplianceObligations(context: OrganisationContext) {

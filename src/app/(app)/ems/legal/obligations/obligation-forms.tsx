@@ -43,6 +43,7 @@ export type ObligationVersionRow = {
   supersedesVersionId: string | null;
   scopes: ScopeSummary[];
   approvals: Array<{ id: string; decision: string; comment: string | null; decidedAt: string }>;
+  linkedControls: Array<{ id: string; label: string }>;
 };
 
 export type ObligationRow = {
@@ -343,13 +344,17 @@ function VersionCard({
 }) {
   return (
     <Card>
-      <CardContent className="space-y-3 py-4">
+      <CardContent id={`obligation-version-${version.id}`} className="scroll-mt-24 space-y-3 py-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="font-medium text-slate-900">v{version.version} · {version.title}</p>
             <p className="text-xs text-slate-500">
               {version.instrumentTitle} · owner {version.ownerName}
               {version.approvedByUserId ? ` · approved by ${version.approvedByUserId}` : ""}
+              {" · "}
+              <a href={`/ems/legal/applicability#assessment-${version.applicabilityAssessmentId}`} className="text-blue-700 underline">
+                source assessment
+              </a>
             </p>
           </div>
           <Badge tone={statusTone(version.status)}>{version.status}</Badge>
@@ -367,6 +372,18 @@ function VersionCard({
             </ul>
           )}
         </div>
+        {version.linkedControls.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Linked controls</p>
+            <ul className="mt-1 flex flex-wrap gap-1">
+              {version.linkedControls.map((control) => (
+                <li key={control.id} className="rounded bg-slate-100 px-2 py-0.5 text-xs">
+                  <a href={`/ems/controls#control-${control.id}`} className="text-blue-700 underline">{control.label}</a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {version.approvals.length > 0 && (
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Approval history</p>

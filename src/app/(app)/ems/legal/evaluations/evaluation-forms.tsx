@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -40,6 +41,7 @@ export type EvaluationItemRow = {
   evaluatorName: string | null;
   evaluatedAt: string | null;
   followUpDate: string | null;
+  obligationVersionId: string;
   obligationTitle: string;
   obligationVersion: number;
   instrumentTitle: string;
@@ -255,7 +257,8 @@ function FindingLinkForm({ evaluationItemId }: { evaluationItemId: string }) {
       <input type="hidden" name="evaluationItemId" value={evaluationItemId} />
       <p className="text-xs text-amber-800">
         Requests a link to a nonconformity or corrective action. This is an interface call only — it does not create or
-        close a nonconformity record itself (that workflow lands in a later phase).
+        close a nonconformity record itself; raise or link the actual record on the{" "}
+        <Link href="/ems/nonconformities" className="underline">nonconformities &amp; CAPA</Link> page.
       </p>
       <div>
         <Label>Link type</Label>
@@ -281,7 +284,9 @@ function ItemRow({ item, canRecord }: { item: EvaluationItemRow; canRecord: bool
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-medium text-slate-900">
-            v{item.obligationVersion} · {item.obligationTitle}
+            <a href={`/ems/legal/obligations#obligation-version-${item.obligationVersionId}`} className="text-blue-700 underline">
+              v{item.obligationVersion} · {item.obligationTitle}
+            </a>
           </p>
           <p className="text-xs text-slate-500">{item.instrumentTitle}</p>
         </div>

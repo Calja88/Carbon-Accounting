@@ -100,7 +100,7 @@ export default async function EvidenceHubPage({
               const cleared = hasClassificationClearance(context, item.classification);
               const tombstoned = Boolean(item.retentionTombstonedAt);
               return (
-                <tr key={item.id} className="hover:bg-slate-50">
+                <tr id={`evidence-${item.id}`} key={item.id} className="scroll-mt-24 hover:bg-slate-50">
                   <td className="px-4 py-2">
                     <span className="font-medium text-slate-900">{item.filename}</span>
                     <span className="ml-2 text-xs text-slate-400">{formatBytes(item.byteSize)}</span>

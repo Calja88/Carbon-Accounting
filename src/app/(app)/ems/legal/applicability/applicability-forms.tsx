@@ -330,7 +330,7 @@ function AssessmentCard({
 }) {
   return (
     <Card>
-      <CardContent className="space-y-3 py-4">
+      <CardContent id={`assessment-${assessment.id}`} className="scroll-mt-24 space-y-3 py-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <p className="font-medium text-slate-900">{assessment.sourceLabel}</p>
@@ -361,7 +361,13 @@ function AssessmentCard({
           {assessment.evidence.length === 0 ? (
             <p className="mt-1 text-sm text-slate-500">No evidence attached.</p>
           ) : (
-            <ul className="mt-1 text-sm">{assessment.evidence.map((item) => <li key={item.id}>{item.filename}</li>)}</ul>
+            <ul className="mt-1 text-sm">
+              {assessment.evidence.map((item) => (
+                <li key={item.id}>
+                  <a href={`/ems/evidence#evidence-${item.id}`} className="text-blue-700 underline">{item.filename}</a>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
 

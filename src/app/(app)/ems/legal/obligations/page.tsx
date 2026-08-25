@@ -95,6 +95,10 @@ export default async function ComplianceObligationsPage() {
               comment: approval.comment,
               decidedAt: approval.decidedAt.toISOString(),
             })),
+            linkedControls: version.controlLinks.map((link) => ({
+              id: link.control.id,
+              label: `${link.control.title} (${link.control.controlKey} v${link.control.version})`,
+            })),
           })),
         }))}
         entities={entities.map((entity) => ({ id: entity.id, name: entity.name }))}
