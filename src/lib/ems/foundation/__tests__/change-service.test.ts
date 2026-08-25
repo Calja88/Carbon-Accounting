@@ -52,6 +52,7 @@ vi.mock("@/lib/prisma", () => {
       return row;
     }),
     findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) => assessments.find((a) => matches(a, where)) ?? null),
+    findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => assessments.filter((a) => matches(a, where))),
   };
 
   const prismaClient = {
@@ -76,6 +77,7 @@ const {
   approveChangeAssessment,
   recordChangeImplementation,
   recordChangeEffectivenessReview,
+  listChangeAssessments,
   ChangeAssessmentError,
 } = await import("@/lib/ems/foundation/change-service");
 
@@ -111,6 +113,10 @@ describe("ChangeAssessment lifecycle", () => {
 
     const reviewed = await recordChangeEffectivenessReview(orgContextA, implemented.id, "No adverse impact observed.", "user-lead");
     expect(reviewed.status).toBe("EFFECTIVENESS_REVIEWED");
+
+    const changes = await listChangeAssessments(orgContextA, "programme-1");
+    expect(changes).toHaveLength(1);
+    expect(changes[0].status).toBe("EFFECTIVENESS_REVIEWED");
   });
 
   it("refuses to approve a DRAFT assessment (must be REVIEW first)", async () => {

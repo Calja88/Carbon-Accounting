@@ -106,8 +106,11 @@ export default async function EmsHomePage() {
         </div>
       ) : (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          No EMS programme is configured yet for this organisation. Foundational programme, scope and context setup
-          is planned for a later release (UI02) — the modules below can still be used once relevant records exist.
+          No EMS programme is configured yet for this organisation.{" "}
+          <Link href="/ems/programme" className="font-medium underline underline-offset-2">
+            Set up the EMS programme, scope and context
+          </Link>{" "}
+          — the modules below can still be used once relevant records exist.
         </div>
       )}
 

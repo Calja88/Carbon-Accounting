@@ -60,6 +60,11 @@ vi.mock("@/lib/prisma", () => {
       Object.assign(row, data);
       return row;
     }),
+    findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+      [...tables.maps.filter((row) => matches(row, where))].sort((a, b) =>
+        String(a.standardProfile).localeCompare(String(b.standardProfile)) || String(a.requirementKey).localeCompare(String(b.requirementKey)),
+      ),
+    ),
   };
   const emsProgramme = {
     findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) => tables.programmes.find((row) => matches(row, where)) ?? null),
@@ -93,7 +98,7 @@ vi.mock("@/lib/jobs/outbox-service", () => ({
 }));
 
 import { prisma } from "@/lib/prisma";
-import { upsertStandardRequirementMap, recordCompetentReview } from "@/lib/ems/foundation/programme-service";
+import { upsertStandardRequirementMap, recordCompetentReview, listStandardRequirementMaps } from "@/lib/ems/foundation/programme-service";
 import { linkEvidence } from "@/lib/documents/evidence-service";
 import { PermissionDeniedError } from "@/lib/rbac/authorize";
 
@@ -154,6 +159,25 @@ describe("upsertStandardRequirementMap — gap and owner decision", () => {
     });
 
     expect(row.gapStatus).toBe("NOT_ASSESSED");
+  });
+
+  it("lists requirement mappings for a programme, ordered by standard/requirement key", async () => {
+    const programme = seedProgramme(ORG_A);
+    await upsertStandardRequirementMap(orgAContributorContext, {
+      programmeId: programme.id,
+      standardProfile: "ISO-14001-2026",
+      requirementKey: "8.1",
+      actorUserId: "user-owner",
+    });
+    await upsertStandardRequirementMap(orgAContributorContext, {
+      programmeId: programme.id,
+      standardProfile: "ISO-14001-2026",
+      requirementKey: "6.1.2",
+      actorUserId: "user-owner",
+    });
+
+    const maps = await listStandardRequirementMaps(orgAContributorContext, programme.id);
+    expect(maps.map((m) => m.requirementKey)).toEqual(["6.1.2", "8.1"]);
   });
 
   it("denies cross-tenant programme access identically to a missing programme", async () => {
