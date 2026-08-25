@@ -116,6 +116,16 @@ export async function createChangeAssessment(context: OrganisationContext, input
   });
 }
 
+/** All change assessments for a programme, newest first — read-only, UI02 listing. */
+export async function listChangeAssessments(context: OrganisationContext, programmeId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const programme = await findTenantEmsProgramme(ctx, programmeId);
+  return prisma.changeAssessment.findMany({
+    where: { organisationId: ctx.organisationId, programmeId: programme.id },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 async function transitionChangeAssessmentStatus(
   context: OrganisationContext,
   assessmentId: string,

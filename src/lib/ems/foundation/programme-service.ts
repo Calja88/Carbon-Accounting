@@ -85,6 +85,31 @@ export async function getScopeVersion(context: OrganisationContext, scopeVersion
   return findTenantEmsScopeVersion(ctx, scopeVersionId, expectedProgrammeId);
 }
 
+/** All scope versions for a programme, newest first — read-only, UI02 listing. */
+export async function listScopeVersions(context: OrganisationContext, programmeId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const programme = await findTenantEmsProgramme(ctx, programmeId);
+  return prisma.emsScopeVersion.findMany({
+    where: tenantWhere(ctx, { programmeId: programme.id }),
+    include: {
+      entities: { include: { entity: { select: { id: true, name: true } } } },
+      sites: { include: { site: { select: { id: true, name: true, entityId: true } } } },
+      activities: { include: { site: { select: { id: true, name: true } } } },
+    },
+    orderBy: { versionNumber: "desc" },
+  });
+}
+
+/** All standard-requirement mappings for a programme — identifiers/status only, never clause text (UI02 listing). */
+export async function listStandardRequirementMaps(context: OrganisationContext, programmeId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const programme = await findTenantEmsProgramme(ctx, programmeId);
+  return prisma.standardRequirementMap.findMany({
+    where: tenantWhere(ctx, { programmeId: programme.id }),
+    orderBy: [{ standardProfile: "asc" }, { requirementKey: "asc" }],
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Programme creation and lifecycle
 // ---------------------------------------------------------------------------

@@ -133,6 +133,16 @@ export async function updateContextIssue(context: OrganisationContext, issueId: 
   });
 }
 
+/** All context issues for a programme, newest first — read-only, UI02 listing. */
+export async function listContextIssues(context: OrganisationContext, programmeId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const programme = await findTenantEmsProgramme(ctx, programmeId);
+  return prisma.contextIssue.findMany({
+    where: { organisationId: ctx.organisationId, programmeId: programme.id },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Interested parties and their requirements
 // ---------------------------------------------------------------------------
@@ -258,6 +268,17 @@ export async function getInterestedPartyRequirement(context: OrganisationContext
   return findTenantInterestedPartyRequirement(ctx, requirementId, expectedPartyId);
 }
 
+/** All interested parties for a programme (with their requirements), newest first — read-only, UI02 listing. */
+export async function listInterestedParties(context: OrganisationContext, programmeId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const programme = await findTenantEmsProgramme(ctx, programmeId);
+  return prisma.interestedParty.findMany({
+    where: { organisationId: ctx.organisationId, programmeId: programme.id },
+    include: { requirements: { orderBy: { createdAt: "desc" } } },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Risks and opportunities
 // ---------------------------------------------------------------------------
@@ -345,6 +366,16 @@ export async function recordResidualRating(context: OrganisationContext, riskOpp
     });
 
     return updated;
+  });
+}
+
+/** All risks/opportunities for a programme, newest first — read-only, UI02 listing. */
+export async function listEmsRiskOpportunities(context: OrganisationContext, programmeId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const programme = await findTenantEmsProgramme(ctx, programmeId);
+  return prisma.emsRiskOpportunity.findMany({
+    where: { organisationId: ctx.organisationId, programmeId: programme.id },
+    orderBy: { createdAt: "desc" },
   });
 }
 

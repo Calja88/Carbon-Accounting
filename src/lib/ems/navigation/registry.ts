@@ -76,8 +76,9 @@ export const EMS_MODULES: EmsModuleEntry[] = [
     label: "EMS programme & scope",
     description: "Programme status, scope boundary, context, interested parties and planned changes.",
     category: "foundation",
-    status: "planned",
-    plannedTask: "UI02",
+    status: "available",
+    href: "/ems/programme",
+    pageFile: "src/app/(app)/ems/programme/page.tsx",
   },
 
   // --- Aspects & operations (T30-T35) ---

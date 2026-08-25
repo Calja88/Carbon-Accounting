@@ -54,14 +54,23 @@ function tableApi<T extends { id: string }>(rows: T[], defaults: Partial<T>) {
       return row;
     }),
     findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) => rows.find((r) => matches(r, where)) ?? null),
+    findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => rows.filter((r) => matches(r, where))),
   };
 }
 
 vi.mock("@/lib/prisma", () => {
   const emsProgramme = { findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) => programmes.find((p) => matches(p, where)) ?? null) };
   const contextIssue = tableApi(contextIssues, { description: null, significance: null, ownerMembershipId: null, reviewDate: null, activeFrom: null, activeUntil: null });
-  const interestedParty = tableApi(interestedParties, { influence: null, relationshipOwnerMembershipId: null, isActive: true });
+  const interestedPartyBase = tableApi(interestedParties, { influence: null, relationshipOwnerMembershipId: null, isActive: true });
   const interestedPartyRequirement = tableApi(requirements, { sourceReference: null, isMandatory: false, evaluationDate: null, reviewDate: null });
+  const interestedParty = {
+    ...interestedPartyBase,
+    findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+      interestedParties
+        .filter((p) => matches(p, where))
+        .map((p) => ({ ...p, requirements: requirements.filter((r) => (r as { interestedPartyId?: string }).interestedPartyId === p.id) })),
+    ),
+  };
   const emsRiskOpportunity = tableApi(riskOpportunities, { consequence: null, likelihood: null, residualRating: null, status: "OPEN", ownerMembershipId: null, sourceType: null, sourceId: null });
   const controlledDocumentRevision = { findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) => revisions.find((r) => matches(r, where)) ?? null) };
   const environmentalPolicyRecord = tableApi(policyRecords, { approvedByUserId: null, approvedAt: null, effectiveDate: null, reviewDate: null });
@@ -86,11 +95,14 @@ vi.mock("@/lib/repositories/audit-repository", () => ({
 const {
   createContextIssue,
   updateContextIssue,
+  listContextIssues,
   createInterestedParty,
   deactivateInterestedParty,
   createInterestedPartyRequirement,
+  listInterestedParties,
   createEmsRiskOpportunity,
   recordResidualRating,
+  listEmsRiskOpportunities,
   linkEnvironmentalPolicy,
   approveEnvironmentalPolicy,
 } = await import("@/lib/ems/foundation/context-service");
@@ -125,6 +137,25 @@ describe("ContextIssue", () => {
     const { recordAuditEvent } = await import("@/lib/repositories/audit-repository");
     expect(recordAuditEvent).toHaveBeenCalledTimes(2);
   });
+
+  it("lists context issues for a programme, newest first", async () => {
+    await createContextIssue(orgContextA, {
+      programmeId: "programme-1",
+      type: "INTERNAL",
+      title: "First",
+      direction: "BOTH",
+      actorUserId: "user-lead",
+    });
+    await createContextIssue(orgContextA, {
+      programmeId: "programme-1",
+      type: "INTERNAL",
+      title: "Second",
+      direction: "BOTH",
+      actorUserId: "user-lead",
+    });
+    const issues = await listContextIssues(orgContextA, "programme-1");
+    expect(issues.map((i) => i.title)).toEqual(["First", "Second"]);
+  });
 });
 
 describe("InterestedParty and requirements", () => {
@@ -149,6 +180,25 @@ describe("InterestedParty and requirements", () => {
     const deactivated = await deactivateInterestedParty(orgContextA, party.id, { actorUserId: "user-lead" });
     expect(deactivated.isActive).toBe(false);
   });
+
+  it("lists interested parties with their requirements attached", async () => {
+    const party = await createInterestedParty(orgContextA, {
+      programmeId: "programme-1",
+      name: "Local Environment Agency",
+      type: "regulator",
+      actorUserId: "user-lead",
+    });
+    await createInterestedPartyRequirement(orgContextA, {
+      interestedPartyId: party.id,
+      summary: "Annual discharge consent renewal",
+      actorUserId: "user-lead",
+    });
+
+    const parties = await listInterestedParties(orgContextA, "programme-1");
+    expect(parties).toHaveLength(1);
+    expect(parties[0].requirements).toHaveLength(1);
+    expect(parties[0].requirements[0].summary).toBe("Annual discharge consent renewal");
+  });
 });
 
 describe("EmsRiskOpportunity", () => {
@@ -170,6 +220,10 @@ describe("EmsRiskOpportunity", () => {
       actorUserId: "user-lead",
     });
     expect(updated.status).toBe("MONITORING");
+
+    const risks = await listEmsRiskOpportunities(orgContextA, "programme-1");
+    expect(risks).toHaveLength(1);
+    expect(risks[0].status).toBe("MONITORING");
   });
 });
 
