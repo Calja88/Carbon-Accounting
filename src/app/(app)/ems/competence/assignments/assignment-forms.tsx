@@ -136,6 +136,9 @@ export function AssignmentList({ assignments, showPersonLink = true }: { assignm
                 v{assignment.requirementVersion} · {assignment.requirementTitle}
                 {assignment.dueDate ? ` · due ${assignment.dueDate}` : ""}
               </p>
+              <Link href={`/ems/competence/assignments/${assignment.id}`} className="text-sm text-blue-700 hover:underline">
+                Evidence, assessment &amp; expiry
+              </Link>
             </div>
             <Badge tone={statusTone(assignment.status)}>{assignment.status}</Badge>
           </div>

@@ -14,7 +14,11 @@ describe("resourceLink", () => {
     expect(resourceLink("compliance_obligation", "obl_1")).toBe("/ems/legal/obligations");
   });
 
+  it("links a competence record straight to its assignment detail page", () => {
+    expect(resourceLink("competence_record", "cr_1")).toBe("/ems/competence/assignments/cr_1");
+  });
+
   it("returns null for an unmapped resource type rather than guessing a URL", () => {
-    expect(resourceLink("competence_record", "cr_1")).toBeNull();
+    expect(resourceLink("nonexistent_resource_type", "x_1")).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { PermissionDeniedError, requirePermission, hasPermission } from "@/lib/rbac/authorize";
 import { listCompetenceAssignments } from "@/lib/ems/competence/assignment-service";
@@ -50,7 +51,12 @@ export default async function CompetenceAssignmentsPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Competence assignments</h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-500">
           Which active competence requirement each person has been assigned, and its status. Only an ACTIVE
-          requirement version can be assigned; a requirement revision never changes an existing assignment.
+          requirement version can be assigned; a requirement revision never changes an existing assignment. Open an
+          assignment to submit/verify evidence, record an assessment, or see its expiry. See the{" "}
+          <Link href="/ems/competence/expiry" className="text-blue-700 hover:underline">
+            expiry dashboard
+          </Link>{" "}
+          for what is expiring or already expired.
         </p>
       </div>
 
