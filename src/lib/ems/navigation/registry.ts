@@ -28,7 +28,8 @@ export type EmsModuleCategory =
   | "objectives"
   | "assurance"
   | "people"
-  | "review";
+  | "review"
+  | "notifications";
 
 export interface EmsModule {
   id: string;
@@ -64,6 +65,7 @@ export const EMS_MODULE_CATEGORY_LABELS: Record<EmsModuleCategory, string> = {
   assurance: "Audits, incidents & nonconformities",
   people: "Competence",
   review: "Management review",
+  notifications: "Notifications & work queue",
 };
 
 /**
@@ -72,6 +74,17 @@ export const EMS_MODULE_CATEGORY_LABELS: Record<EmsModuleCategory, string> = {
  * `pageFile` exists — the route-registry test enforces that.
  */
 export const EMS_MODULES: EmsModuleEntry[] = [
+  // --- Notifications & work queue (T21/T24 — UI04) ---
+  {
+    id: "notifications",
+    label: "My work queue",
+    description: "Your due/overdue reminders and notification history, with delivery status.",
+    category: "notifications",
+    status: "available",
+    href: "/ems/notifications",
+    pageFile: "src/app/(app)/ems/notifications/page.tsx",
+  },
+
   // --- Foundation (T23 — deferred to UI02) ---
   {
     id: "programme",

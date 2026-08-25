@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import {
   AlertTriangle,
+  Bell,
   BookMarked,
   ClipboardCheck,
   Gauge,
@@ -35,6 +36,7 @@ import {
 export const dynamic = "force-dynamic";
 
 const CATEGORY_ORDER: EmsModuleCategory[] = [
+  "notifications",
   "foundation",
   "documents",
   "operations",
@@ -46,6 +48,7 @@ const CATEGORY_ORDER: EmsModuleCategory[] = [
 ];
 
 const MODULE_ICONS: Record<string, LucideIcon> = {
+  notifications: Bell,
   programme: ScrollText,
   documents: BookMarked,
   evidence: Paperclip,
