@@ -25,6 +25,24 @@ import {
   createSuccessorManagementReviewAgendaTemplateVersion,
 } from "@/lib/ems/review/agenda-service";
 import {
+  ManagementReviewPackError,
+  generateManagementReviewPack,
+  issueManagementReviewPack,
+  addManagementReviewAiNarrative,
+  reviewManagementReviewAiNarrative,
+} from "@/lib/ems/review/pack-service";
+import {
+  ManagementReviewMinutesError,
+  holdManagementReview,
+  recordManagementReviewDecision,
+  draftManagementReviewMinutes,
+  approveManagementReviewMinutes,
+  createManagementReviewMinutesAddendum,
+  closeManagementReview,
+  linkManagementReviewAction,
+  unlinkManagementReviewAction,
+} from "@/lib/ems/review/minutes-service";
+import {
   scheduleManagementReviewFormSchema,
   rescheduleManagementReviewFormSchema,
   addManagementReviewAttendeeFormSchema,
@@ -34,6 +52,13 @@ import {
   createAgendaTemplateFormSchema,
   updateAgendaTemplateVersionDraftFormSchema,
   createSuccessorAgendaTemplateVersionFormSchema,
+  holdManagementReviewFormSchema,
+  addManagementReviewAiNarrativeFormSchema,
+  reviewManagementReviewAiNarrativeFormSchema,
+  recordManagementReviewDecisionFormSchema,
+  draftManagementReviewMinutesFormSchema,
+  createManagementReviewMinutesAddendumFormSchema,
+  linkManagementReviewActionFormSchema,
 } from "@/lib/ems/review/review-schemas";
 
 export interface ReviewActionState {
@@ -49,11 +74,14 @@ function friendlyError(error: unknown): string {
   if (error instanceof TenantOwnershipError) return "That record could not be found in this organisation or scope.";
   if (error instanceof ManagementReviewError) return error.message;
   if (error instanceof ManagementReviewAgendaError) return error.message;
+  if (error instanceof ManagementReviewPackError) return error.message;
+  if (error instanceof ManagementReviewMinutesError) return error.message;
   throw error;
 }
 
-function revalidateReviews() {
+function revalidateReviews(reviewId?: string) {
   revalidatePath("/ems/management-reviews");
+  if (reviewId) revalidatePath(`/ems/management-reviews/${reviewId}`);
 }
 
 function parseItemsJson(itemsJson: string) {
@@ -342,6 +370,234 @@ export async function createSuccessorAgendaTemplateVersionAction(_previous: Revi
     });
     revalidateReviews();
     return { ...emptyState, message: "Successor agenda template version created." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Review pack (T73/UI12)
+// ---------------------------------------------------------------------------
+
+export async function generateManagementReviewPackAction(_previous: ReviewActionState, formData: FormData): Promise<ReviewActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const reviewId = String(formData.get("reviewId") ?? "");
+    if (!reviewId) return { ...emptyState, error: "Choose a review." };
+    await generateManagementReviewPack(context, reviewId, context.userId);
+    revalidateReviews(reviewId);
+    return { ...emptyState, message: "Review pack generated." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function issueManagementReviewPackAction(_previous: ReviewActionState, formData: FormData): Promise<ReviewActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const reviewId = String(formData.get("reviewId") ?? "");
+    if (!reviewId) return { ...emptyState, error: "Choose a review." };
+    await issueManagementReviewPack(context, reviewId, context.userId);
+    revalidateReviews(reviewId);
+    return { ...emptyState, message: "Review pack issued. It is now frozen and cannot be regenerated." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// AI narrative — labelled draft support only, never a decision/approval source
+// ---------------------------------------------------------------------------
+
+export async function addManagementReviewAiNarrativeAction(_previous: ReviewActionState, formData: FormData): Promise<ReviewActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = addManagementReviewAiNarrativeFormSchema.safeParse({
+      packId: formData.get("packId"),
+      content: formData.get("content"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the narrative content." };
+    const reviewId = String(formData.get("reviewId") ?? "");
+    await addManagementReviewAiNarrative(context, parsed.data.packId, { content: parsed.data.content, actorUserId: context.userId });
+    revalidateReviews(reviewId || undefined);
+    return { ...emptyState, message: "AI narrative attached, pending human review." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function reviewManagementReviewAiNarrativeAction(_previous: ReviewActionState, formData: FormData): Promise<ReviewActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = reviewManagementReviewAiNarrativeFormSchema.safeParse({
+      narrativeId: formData.get("narrativeId"),
+      decision: formData.get("decision"),
+      rejectionReason: formData.get("rejectionReason"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the review decision." };
+    const reviewId = String(formData.get("reviewId") ?? "");
+    await reviewManagementReviewAiNarrative(context, parsed.data.narrativeId, {
+      decision: parsed.data.decision,
+      rejectionReason: parsed.data.rejectionReason || null,
+      actorUserId: context.userId,
+    });
+    revalidateReviews(reviewId || undefined);
+    return { ...emptyState, message: `AI narrative marked ${parsed.data.decision.toLowerCase()}.` };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Hold, decisions, minutes, addenda, closure
+// ---------------------------------------------------------------------------
+
+export async function holdManagementReviewAction(_previous: ReviewActionState, formData: FormData): Promise<ReviewActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = holdManagementReviewFormSchema.safeParse({
+      reviewId: formData.get("reviewId"),
+      heldDate: formData.get("heldDate"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the held date." };
+    await holdManagementReview(context, parsed.data.reviewId, parsed.data.heldDate, context.userId);
+    revalidateReviews(parsed.data.reviewId);
+    return { ...emptyState, message: "Management review marked held." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function recordManagementReviewDecisionAction(_previous: ReviewActionState, formData: FormData): Promise<ReviewActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const targetDateRaw = formData.get("targetDate");
+    const parsed = recordManagementReviewDecisionFormSchema.safeParse({
+      reviewId: formData.get("reviewId"),
+      inputDefinitionKey: formData.get("inputDefinitionKey"),
+      decisionType: formData.get("decisionType"),
+      text: formData.get("text"),
+      rationale: formData.get("rationale"),
+      ownerMembershipId: formData.get("ownerMembershipId"),
+      targetDate: targetDateRaw ? targetDateRaw : "",
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the decision details." };
+    await recordManagementReviewDecision(context, parsed.data.reviewId, {
+      inputDefinitionKey: parsed.data.inputDefinitionKey || null,
+      decisionType: parsed.data.decisionType,
+      text: parsed.data.text,
+      rationale: parsed.data.rationale || null,
+      ownerMembershipId: parsed.data.ownerMembershipId || null,
+      targetDate: parsed.data.targetDate ? (parsed.data.targetDate as Date) : null,
+      actorUserId: context.userId,
+    });
+    revalidateReviews(parsed.data.reviewId);
+    return { ...emptyState, message: "Decision recorded." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function draftManagementReviewMinutesAction(_previous: ReviewActionState, formData: FormData): Promise<ReviewActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = draftManagementReviewMinutesFormSchema.safeParse({
+      reviewId: formData.get("reviewId"),
+      narrativeId: formData.get("narrativeId"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the review." };
+    await draftManagementReviewMinutes(context, parsed.data.reviewId, {
+      narrativeId: parsed.data.narrativeId || null,
+      actorUserId: context.userId,
+    });
+    revalidateReviews(parsed.data.reviewId);
+    return { ...emptyState, message: "Minutes drafted." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function approveManagementReviewMinutesAction(_previous: ReviewActionState, formData: FormData): Promise<ReviewActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const revisionId = String(formData.get("revisionId") ?? "");
+    if (!revisionId) return { ...emptyState, error: "Choose a minute revision." };
+    const reviewId = String(formData.get("reviewId") ?? "");
+    await approveManagementReviewMinutes(context, revisionId, context.userId);
+    revalidateReviews(reviewId || undefined);
+    return { ...emptyState, message: "Minutes approved." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function createManagementReviewMinutesAddendumAction(_previous: ReviewActionState, formData: FormData): Promise<ReviewActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = createManagementReviewMinutesAddendumFormSchema.safeParse({
+      reviewId: formData.get("reviewId"),
+      reason: formData.get("reason"),
+      narrativeId: formData.get("narrativeId"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the addendum details." };
+    await createManagementReviewMinutesAddendum(context, parsed.data.reviewId, {
+      reason: parsed.data.reason,
+      narrativeId: parsed.data.narrativeId || null,
+      actorUserId: context.userId,
+    });
+    revalidateReviews(parsed.data.reviewId);
+    return { ...emptyState, message: "Minutes addendum drafted." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function closeManagementReviewAction(_previous: ReviewActionState, formData: FormData): Promise<ReviewActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const reviewId = String(formData.get("reviewId") ?? "");
+    if (!reviewId) return { ...emptyState, error: "Choose a review." };
+    await closeManagementReview(context, reviewId, context.userId);
+    revalidateReviews(reviewId);
+    return { ...emptyState, message: "Management review closed." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Decision -> shared ActionItem links
+// ---------------------------------------------------------------------------
+
+export async function linkManagementReviewActionAction(_previous: ReviewActionState, formData: FormData): Promise<ReviewActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = linkManagementReviewActionFormSchema.safeParse({
+      decisionId: formData.get("decisionId"),
+      actionItemId: formData.get("actionItemId"),
+    });
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the action link." };
+    const reviewId = String(formData.get("reviewId") ?? "");
+    await linkManagementReviewAction(context, parsed.data.decisionId, {
+      actionItemId: parsed.data.actionItemId,
+      actorUserId: context.userId,
+    });
+    revalidateReviews(reviewId || undefined);
+    return { ...emptyState, message: "Action linked to decision." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function unlinkManagementReviewActionAction(_previous: ReviewActionState, formData: FormData): Promise<ReviewActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const linkId = String(formData.get("linkId") ?? "");
+    if (!linkId) return { ...emptyState, error: "Choose an action link." };
+    const reviewId = String(formData.get("reviewId") ?? "");
+    await unlinkManagementReviewAction(context, linkId, context.userId);
+    revalidateReviews(reviewId || undefined);
+    return { ...emptyState, message: "Action unlinked from decision." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }

@@ -327,12 +327,15 @@ export const EMS_MODULES: EmsModuleEntry[] = [
     pageFile: "src/app/(app)/ems/competence/expiry/page.tsx",
   },
 
-  // --- Management review cycle and agenda (T72/UI11). Pack, minutes,
-  // decisions and closure (T73) remain deferred to UI12. ---
+  // --- Management review cycle and agenda (T72/UI11), plus deterministic
+  // pack, minutes, decisions, action links and closure (T73/UI12). The
+  // pack/minutes/closure workspace is reached per-review from this list,
+  // at /ems/management-reviews/[id] — see UI08/UI10's [id] pages for the
+  // same "no separate nav entry for a detail route" convention. ---
   {
     id: "management-review",
     label: "Management review",
-    description: "Review cycle, scheduling, attendees, inputs and agenda templates. Pack/minutes/decisions come in a later module.",
+    description: "Review cycle, scheduling, attendees and agenda templates, plus deterministic pack, minutes, decisions, action links and closure per review.",
     category: "review",
     status: "available",
     href: "/ems/management-reviews",
