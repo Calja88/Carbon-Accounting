@@ -9,6 +9,7 @@ import {
   Gauge,
   Gavel,
   HeartPulse,
+  LayoutDashboard,
   Leaf,
   MessageSquare,
   Paperclip,
@@ -36,6 +37,7 @@ import {
 export const dynamic = "force-dynamic";
 
 const CATEGORY_ORDER: EmsModuleCategory[] = [
+  "overview",
   "notifications",
   "foundation",
   "documents",
@@ -48,6 +50,7 @@ const CATEGORY_ORDER: EmsModuleCategory[] = [
 ];
 
 const MODULE_ICONS: Record<string, LucideIcon> = {
+  dashboard: LayoutDashboard,
   notifications: Bell,
   programme: ScrollText,
   documents: BookMarked,
