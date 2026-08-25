@@ -44,6 +44,8 @@ function nextId(): string {
   return `evidence-${nextIdRef.n++}`;
 }
 
+const evidenceLinks: { id: string; evidenceId: string; organisationId: string; resourceType: string; resourceId: string }[] = [];
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     evidenceObject: {
@@ -71,6 +73,22 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
         return rows.find((r) => Object.entries(where).every(([k, v]) => (r as unknown as Record<string, unknown>)[k] === v)) ?? null;
       }),
+      findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        return rows.filter((r) =>
+          Object.entries(where).every(([k, v]) => {
+            if (v && typeof v === "object" && "contains" in (v as Record<string, unknown>)) {
+              const needle = String((v as { contains: unknown }).contains).toLowerCase();
+              return String((r as unknown as Record<string, unknown>)[k]).toLowerCase().includes(needle);
+            }
+            return (r as unknown as Record<string, unknown>)[k] === v;
+          }),
+        );
+      }),
+    },
+    evidenceLink: {
+      findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        return evidenceLinks.filter((l) => Object.entries(where).every(([k, v]) => (l as unknown as Record<string, unknown>)[k] === v));
+      }),
     },
     evidenceObjectBlob: {
       upsert: vi.fn(async ({ where, create }: { where: { evidenceObjectId: string }; create: { data: Uint8Array } }) => {
@@ -87,9 +105,15 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-const { uploadEvidenceObject, readEvidenceObjectBytes, EvidenceError, isKnownEvidenceLinkResourceType } = await import(
-  "@/lib/documents/evidence-service"
-);
+const {
+  uploadEvidenceObject,
+  readEvidenceObjectBytes,
+  EvidenceError,
+  isKnownEvidenceLinkResourceType,
+  listEvidenceObjects,
+  listLinksForEvidenceObject,
+  activeEvidenceStorageProviderName,
+} = await import("@/lib/documents/evidence-service");
 const { resetMalwareScanner, registerMalwareScanner } = await import("@/lib/documents/malware-scan");
 
 const orgContextA = makeOrganisationContext(ORG_A, {
@@ -100,6 +124,7 @@ const orgContextANoManage = makeOrganisationContext(ORG_A, { permissions: new Se
 
 beforeEach(() => {
   resetTables();
+  evidenceLinks.length = 0;
   resetMalwareScanner();
   vi.clearAllMocks();
 });
@@ -190,5 +215,52 @@ describe("readEvidenceObjectBytes — tenant and classification scoping", () => 
     });
     expect(evidence.malwareScanStatus).toBe("INFECTED");
     await expect(readEvidenceObjectBytes(orgContextA, evidence.id)).resolves.toBeNull();
+  });
+});
+
+describe("listEvidenceObjects — evidence hub (task UI03)", () => {
+  it("only lists the calling organisation's evidence, optionally filtered by filename", async () => {
+    await uploadEvidenceObject(orgContextA, {
+      fileName: "policy.pdf",
+      mimeType: "application/pdf",
+      bytes: Buffer.from("synthetic policy content"),
+      uploadedByUserId: "user-1",
+    });
+    await uploadEvidenceObject(orgContextA, {
+      fileName: "procedure.pdf",
+      mimeType: "application/pdf",
+      bytes: Buffer.from("synthetic procedure content"),
+      uploadedByUserId: "user-1",
+    });
+    await uploadEvidenceObject(orgContextB, {
+      fileName: "other-org.pdf",
+      mimeType: "application/pdf",
+      bytes: Buffer.from("synthetic other-org content"),
+      uploadedByUserId: "user-2",
+    });
+
+    const all = await listEvidenceObjects(orgContextA);
+    expect(all.map((e) => e.filename).sort()).toEqual(["policy.pdf", "procedure.pdf"]);
+
+    const filtered = await listEvidenceObjects(orgContextA, { search: "policy" });
+    expect(filtered.map((e) => e.filename)).toEqual(["policy.pdf"]);
+  });
+});
+
+describe("listLinksForEvidenceObject — tenant scoping", () => {
+  it("denies a foreign-tenant evidence id identically to a missing one", async () => {
+    const evidence = await uploadEvidenceObject(orgContextA, {
+      fileName: "policy.pdf",
+      mimeType: "application/pdf",
+      bytes: Buffer.from("synthetic policy content"),
+      uploadedByUserId: "user-1",
+    });
+    await expect(listLinksForEvidenceObject(orgContextB, evidence.id)).rejects.toThrow();
+  });
+});
+
+describe("activeEvidenceStorageProviderName", () => {
+  it("reports the built-in database provider until a SharePoint provider is registered (SP01+)", () => {
+    expect(activeEvidenceStorageProviderName()).toBe("database");
   });
 });

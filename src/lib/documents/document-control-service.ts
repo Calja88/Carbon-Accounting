@@ -65,6 +65,27 @@ export async function getControlledDocument(context: OrganisationContext, docume
   });
 }
 
+/**
+ * Same tenant-scoped lookup as `getControlledDocument`, but with each
+ * revision's evidence metadata and distribution records included — the
+ * detail page needs both without a second round trip.
+ */
+export async function getControlledDocumentDetail(context: OrganisationContext, documentId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const document = await findTenantControlledDocument(ctx, documentId);
+  return prisma.controlledDocument.findUnique({
+    where: { id: document.id },
+    include: {
+      owner: { include: { user: { select: { name: true } } } },
+      currentRevision: true,
+      revisions: {
+        orderBy: { revisionNumber: "desc" },
+        include: { evidenceObject: true, distributions: { include: { audienceMembership: { include: { user: { select: { name: true } } } } } } },
+      },
+    },
+  });
+}
+
 export async function listControlledDocuments(context: OrganisationContext) {
   const ctx = toTenantRepositoryContext(context);
   return prisma.controlledDocument.findMany({

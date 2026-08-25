@@ -10,6 +10,7 @@ import {
   HeartPulse,
   Leaf,
   MessageSquare,
+  Paperclip,
   ScrollText,
   Scale,
   ShieldCheck,
@@ -35,6 +36,7 @@ export const dynamic = "force-dynamic";
 
 const CATEGORY_ORDER: EmsModuleCategory[] = [
   "foundation",
+  "documents",
   "operations",
   "legal",
   "objectives",
@@ -45,6 +47,8 @@ const CATEGORY_ORDER: EmsModuleCategory[] = [
 
 const MODULE_ICONS: Record<string, LucideIcon> = {
   programme: ScrollText,
+  documents: BookMarked,
+  evidence: Paperclip,
   processes: Workflow,
   aspects: Leaf,
   controls: ShieldCheck,

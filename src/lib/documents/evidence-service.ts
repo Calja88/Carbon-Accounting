@@ -303,6 +303,44 @@ export async function readEvidenceObjectBytes(
   return { bytes, evidence };
 }
 
+/**
+ * Organisation-scoped evidence hub listing (task UI03). Filename search is
+ * an optional `contains` filter — this never returns another organisation's
+ * rows, matching every other tenant-scoped list in this module.
+ */
+export async function listEvidenceObjects(
+  context: OrganisationContext,
+  options?: { search?: string },
+) {
+  const ctx = toTenantRepositoryContext(context);
+  const search = options?.search?.trim();
+  return prisma.evidenceObject.findMany({
+    where: tenantWhere(ctx, search ? { filename: { contains: search, mode: "insensitive" as const } } : {}),
+    orderBy: { uploadedAt: "desc" },
+  });
+}
+
+/** Every EvidenceLink pointing at one evidence object, tenant-scoped — shows the hub which resource(s) an object is attached to. */
+export async function listLinksForEvidenceObject(context: OrganisationContext, evidenceId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  await findTenantEvidenceObject(ctx, evidenceId);
+  return prisma.evidenceLink.findMany({
+    where: tenantWhere(ctx, { evidenceId }),
+    orderBy: { linkedAt: "desc" },
+  });
+}
+
+/**
+ * The name of the storage provider currently serving new evidence uploads
+ * (e.g. `"database"`). A future SharePoint provider (SP01+) registers under
+ * its own name and this same call surfaces it — the evidence hub's provider
+ * badge reads this rather than hardcoding "database", so no page rewrite is
+ * needed once SharePoint is wired up.
+ */
+export function activeEvidenceStorageProviderName(): string {
+  return documentEvidenceStorage.active().name;
+}
+
 export function formatBytes(bytes: number | null): string {
   if (bytes === null) return "—";
   if (bytes < 1024) return `${bytes} B`;
