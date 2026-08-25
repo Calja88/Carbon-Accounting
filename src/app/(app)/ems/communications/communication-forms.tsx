@@ -116,7 +116,7 @@ function PlanCard({ plan, members, documents, canManage }: { plan: PlanRow; memb
   const [retireState, retireAction, retiring] = useActionState(retireCommunicationPlanAction, emptyState);
   return (
     <Card>
-      <CardContent className="space-y-4 py-5">
+      <CardContent id={`comms-${plan.id}`} className="scroll-mt-24 space-y-4 py-5">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="font-semibold text-slate-900">{plan.subject}</h3>
           <Badge>{plan.audience.toLowerCase()}</Badge>

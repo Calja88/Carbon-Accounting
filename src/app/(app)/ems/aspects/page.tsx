@@ -6,6 +6,7 @@ import { listActivityProcesses } from "@/lib/ems/aspects/process-service";
 import { listEnvironmentalAspects, listEnvironmentalImpacts } from "@/lib/ems/aspects/aspect-service";
 import { listEmsProgrammes } from "@/lib/ems/foundation/programme-service";
 import { listAspectAssessments, listSignificanceMethods } from "@/lib/ems/aspects/significance-service";
+import { listOperationalControls } from "@/lib/ems/controls/control-service";
 import { AspectRegister } from "./aspect-forms";
 import { SignificanceWorkspace } from "./significance-forms";
 
@@ -21,14 +22,24 @@ export default async function EmsAspectsPage() {
     throw error;
   }
 
-  const [processRows, aspectRows, impactRows, programmeRows, methodRows, assessmentRows] = await Promise.all([
+  const [processRows, aspectRows, impactRows, programmeRows, methodRows, assessmentRows, controlRows] = await Promise.all([
     listActivityProcesses(context),
     listEnvironmentalAspects(context),
     listEnvironmentalImpacts(context),
     listEmsProgrammes(context),
     listSignificanceMethods(context),
     listAspectAssessments(context),
+    listOperationalControls(context),
   ]);
+  const controlsByAspect = new Map<string, Array<{ id: string; label: string }>>();
+  for (const control of controlRows) {
+    if (control.status !== "ACTIVE") continue;
+    for (const link of control.aspectLinks) {
+      const current = controlsByAspect.get(link.aspectId) ?? [];
+      current.push({ id: control.id, label: `${control.title} v${control.version}` });
+      controlsByAspect.set(link.aspectId, current);
+    }
+  }
   const aspectIds = aspectRows.map((aspect) => aspect.id);
   const evidenceLinks = aspectIds.length === 0 ? [] : await prisma.evidenceLink.findMany({
     where: {
@@ -130,6 +141,7 @@ export default async function EmsAspectsPage() {
             causalDescription: link.causalDescription,
           })),
           evidence: evidenceByAspect.get(aspect.id) ?? [],
+          controls: controlsByAspect.get(aspect.id) ?? [],
         }))}
         impacts={impactRows}
         canEdit={hasPermission(context, "ems.aspect.edit")}

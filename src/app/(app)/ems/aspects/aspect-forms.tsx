@@ -59,6 +59,7 @@ type AspectRow = {
   effect: string;
   impacts: Array<{ linkId: string; impactId: string; name: string; causalDescription: string | null }>;
   evidence: Array<{ id: string; filename: string }>;
+  controls: Array<{ id: string; label: string }>;
 };
 
 function Feedback({ state }: { state: AspectActionState }) {
@@ -195,7 +196,7 @@ function AspectCard({ aspect, processes, canEdit }: { aspect: AspectRow; process
   const [evidenceState, evidenceAction, uploading] = useActionState(uploadAspectEvidenceAction, emptyState);
   return (
     <Card>
-      <CardContent className="space-y-4 py-5">
+      <CardContent id={`aspect-${aspect.id}`} className="scroll-mt-24 space-y-4 py-5">
         <div>
           <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">{aspect.name}</h3><span className="rounded bg-slate-100 px-2 py-0.5 text-xs">{aspect.effect.toLowerCase()}</span><span className="rounded bg-slate-100 px-2 py-0.5 text-xs">{aspect.controlRelationship === "DIRECT_CONTROL" ? "direct control" : "influence"}</span></div>
           <p className="mt-1 text-sm text-slate-600">{aspect.processName} · {aspect.operatingCondition.replaceAll("_", " ").toLowerCase()}{aspect.lifecycleStage ? ` · ${aspect.lifecycleStage.replaceAll("_", " ").toLowerCase()}` : ""}</p>
@@ -205,6 +206,10 @@ function AspectCard({ aspect, processes, canEdit }: { aspect: AspectRow; process
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Linked impacts</p>
           {aspect.impacts.length === 0 ? <p className="mt-1 text-sm text-amber-700">No impacts linked.</p> : <ul className="mt-1 space-y-1 text-sm">{aspect.impacts.map((impact) => <li key={impact.linkId} className="flex items-center gap-2"><span>{impact.name}{impact.causalDescription ? ` — ${impact.causalDescription}` : ""}</span>{canEdit && <UnlinkButton linkId={impact.linkId} />}</li>)}</ul>}
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Operational controls</p>
+          {aspect.controls.length === 0 ? <p className="mt-1 text-sm text-amber-700">No active operational control linked.</p> : <ul className="mt-1 space-y-1 text-sm">{aspect.controls.map((control) => <li key={control.id}><a href={`/ems/controls#control-${control.id}`} className="text-blue-700 underline">{control.label}</a></li>)}</ul>}
         </div>
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Evidence</p>

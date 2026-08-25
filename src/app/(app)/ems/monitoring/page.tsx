@@ -65,7 +65,8 @@ export default async function EmsMonitoringPage() {
       plans={plans.map((plan) => ({
         id: plan.id, planKey: plan.planKey, parameter: plan.parameter, method: plan.method, location: plan.location,
         frequency: plan.frequency, unit: plan.unit, acceptanceCriteria: plan.acceptanceCriteria, status: plan.status,
-        aspectLabel: plan.aspect?.name ?? null,
+        aspectId: plan.aspect?.id ?? null, aspectLabel: plan.aspect?.name ?? null,
+        controlId: plan.control?.id ?? null,
         controlLabel: plan.control ? `${plan.control.title} v${plan.control.version}` : null,
         responsibleName: plan.responsible.user.name, equipmentLabel: plan.equipment?.reference ?? null,
         results: plan.results.map((result) => ({

@@ -59,6 +59,8 @@ type ScenarioRow = {
   credibleConsequence: string;
   reviewDueDate: string;
   reviewOverdue: boolean;
+  aspectId: string | null;
+  aspectName: string | null;
   plans: PlanRow[];
   exercises: ExerciseRow[];
 };
@@ -229,7 +231,7 @@ function ScenarioCard({ scenario, members, documents, commsPlans, canManagePlans
   const activePlan = scenario.plans.find((plan) => plan.status === "ACTIVE");
   return (
     <Card>
-      <CardContent className="space-y-4 py-5">
+      <CardContent id={`scenario-${scenario.id}`} className="scroll-mt-24 space-y-4 py-5">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="font-semibold text-slate-900">{scenario.name}</h3>
           <Badge tone={scenario.priority === "CRITICAL" || scenario.priority === "HIGH" ? "danger" : "neutral"}>{scenario.priority.toLowerCase()}</Badge>
@@ -241,13 +243,17 @@ function ScenarioCard({ scenario, members, documents, commsPlans, canManagePlans
           <p><strong>Receptors:</strong> {scenario.receptors}</p>
           <p><strong>Consequence:</strong> {scenario.credibleConsequence}</p>
           <p><strong>Review due:</strong> {new Date(scenario.reviewDueDate).toLocaleDateString()}</p>
+          {scenario.aspectName && <p><strong>Linked aspect:</strong> {scenario.aspectId ? <a href={`/ems/aspects#aspect-${scenario.aspectId}`} className="text-blue-700 underline">{scenario.aspectName}</a> : scenario.aspectName}</p>}
         </div>
 
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Plans</p>
           {scenario.plans.length === 0 ? <p className="mt-1 text-sm text-slate-500">No plan yet.</p> : (
             <ul className="mt-1 space-y-1 text-sm text-slate-600">
-              {scenario.plans.map((plan) => <li key={plan.id}>v{plan.version} — <Badge tone={plan.status === "ACTIVE" ? "success" : "neutral"}>{plan.status.toLowerCase()}</Badge> effective {new Date(plan.effectiveDate).toLocaleDateString()}</li>)}
+              {scenario.plans.map((plan) => {
+                const commsPlan = plan.communicationPlanId ? commsPlans.find((item) => item.id === plan.communicationPlanId) : null;
+                return <li key={plan.id}>v{plan.version} — <Badge tone={plan.status === "ACTIVE" ? "success" : "neutral"}>{plan.status.toLowerCase()}</Badge> effective {new Date(plan.effectiveDate).toLocaleDateString()}{commsPlan && <> · <a href={`/ems/communications#comms-${commsPlan.id}`} className="text-blue-700 underline">{commsPlan.subject}</a></>}</li>;
+              })}
             </ul>
           )}
           {canManagePlans && scenario.status === "ACTIVE" && (activePlan ? <RevisePlanForm plan={activePlan} documents={documents} commsPlans={commsPlans} /> : <CreatePlanForm scenarioId={scenario.id} documents={documents} commsPlans={commsPlans} />)}
