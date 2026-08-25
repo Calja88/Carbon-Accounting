@@ -286,6 +286,8 @@ export const AUDIT_EVENT_TYPES = [
   "external_file_reference.reconciliation_renamed",
   "external_file_reference.reconciliation_resolved",
   "storage_site_binding.reconciliation_unreachable",
+  // Dry-run-first evidence migration to SharePoint (task SP07).
+  "evidence_object.migrated_to_sharepoint",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
