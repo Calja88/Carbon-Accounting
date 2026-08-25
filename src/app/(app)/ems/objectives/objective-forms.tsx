@@ -18,14 +18,17 @@ import {
   updateEnvironmentalObjectiveVersionDraftAction,
   createObjectiveMetricDefinitionAction,
   approveObjectiveMetricVersionAction,
+  resolveObjectiveMetricObservationAction,
   type ObjectiveActionState,
+  type MetricObservationState,
 } from "./actions";
 
 const emptyState: ObjectiveActionState = { error: null, message: null };
+const emptyObservationState: MetricObservationState = { error: null, observations: null };
 
 type Option = { id: string; name: string };
 
-export type SourceLinkRow = { id: string; linkType: string; label: string };
+export type SourceLinkRow = { id: string; linkType: string; label: string; href: string | null };
 
 export type ObjectiveVersionRow = {
   id: string;
@@ -49,12 +52,36 @@ export type ObjectiveVersionRow = {
   approvals: Array<{ id: string; decision: string; comment: string | null; decidedAt: string }>;
 };
 
+export type MetricDefinitionRow = {
+  id: string;
+  activeVersionId: string | null;
+  latestVersion: {
+    id: string;
+    name: string;
+    sourceType: string;
+    unit: string;
+    frequency: string;
+    status: string;
+  } | null;
+};
+
 export type ObjectiveRow = {
   id: string;
   activeVersionId: string | null;
   versions: ObjectiveVersionRow[];
-  metricDefinitions: Array<{ id: string; activeVersionId: string | null }>;
+  metricDefinitions: MetricDefinitionRow[];
+  actionProgrammeCount: number;
 };
+
+const ADAPTER_LINKED_SOURCE_TYPES = new Set(["CORPORATE_CARBON", "PRODUCT_LCA"]);
+
+function dueTone(targetDate: string, status: string): { label: string; className: string } | null {
+  if (["ACHIEVED", "NOT_ACHIEVED", "CANCELLED", "SUPERSEDED"].includes(status)) return null;
+  const days = Math.ceil((new Date(targetDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  if (days < 0) return { label: `Overdue by ${Math.abs(days)}d`, className: "bg-red-100 text-red-700" };
+  if (days <= 30) return { label: `Due in ${days}d`, className: "bg-amber-100 text-amber-700" };
+  return { label: `Due in ${days}d`, className: "bg-slate-100 text-slate-600" };
+}
 
 function Feedback({ state }: { state: ObjectiveActionState }) {
   return (
@@ -317,6 +344,7 @@ function CancelForm({ objectiveVersionId }: { objectiveVersionId: string }) {
 
 function MetricDefinitionForm({ objectiveId, canApprove }: { objectiveId: string; canApprove: boolean }) {
   const [createState, createAction, createPending] = useActionState(createObjectiveMetricDefinitionAction, emptyState);
+  const [sourceType, setSourceType] = useState("MANUAL");
   return (
     <form action={createAction} className="space-y-3 rounded-lg border border-dashed border-slate-300 p-4">
       <input type="hidden" name="objectiveId" value={objectiveId} />
@@ -327,7 +355,7 @@ function MetricDefinitionForm({ objectiveId, canApprove }: { objectiveId: string
         </div>
         <div>
           <Label>Source type</Label>
-          <Select name="sourceType" defaultValue="MANUAL" required>
+          <Select name="sourceType" value={sourceType} onChange={(e) => setSourceType(e.target.value)} required>
             <option value="MANUAL">Manual</option>
             <option value="CORPORATE_CARBON">Corporate carbon</option>
             <option value="PRODUCT_LCA">Product LCA</option>
@@ -348,9 +376,110 @@ function MetricDefinitionForm({ objectiveId, canApprove }: { objectiveId: string
         <Label>Boundary description (optional)</Label>
         <Textarea name="boundaryDescription" rows={2} />
       </div>
+
+      {sourceType === "CORPORATE_CARBON" && (
+        <div className="space-y-3 rounded-md bg-slate-50 p-3">
+          <p className="text-xs font-medium text-slate-600">
+            Corporate carbon adapter link (T51) — reads an existing issued report snapshot, never a live recalculation.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label>Report snapshot ID</Label>
+              <Input name="reportSnapshotId" placeholder="Existing issued report snapshot id" />
+            </div>
+            <div>
+              <Label>Scope</Label>
+              <Select name="scope" defaultValue="">
+                <option value="">Choose a scope</option>
+                <option value="SCOPE_1">Scope 1</option>
+                <option value="SCOPE_2">Scope 2</option>
+                <option value="SCOPE_3">Scope 3</option>
+              </Select>
+            </div>
+            <div>
+              <Label>Basis (Scope 2 only)</Label>
+              <Select name="basis" defaultValue="">
+                <option value="">N/A</option>
+                <option value="LOCATION_BASED">Location-based</option>
+                <option value="MARKET_BASED">Market-based</option>
+              </Select>
+            </div>
+            <div>
+              <Label>Category (optional)</Label>
+              <Input name="category" placeholder="Report category boundary" />
+            </div>
+            <div>
+              <Label>Site ID (optional, mutually exclusive with category)</Label>
+              <Input name="siteId" placeholder="Report site boundary" />
+            </div>
+            <div>
+              <Label>Report period start</Label>
+              <Input name="periodStart" type="date" />
+            </div>
+            <div>
+              <Label>Report period end</Label>
+              <Input name="periodEnd" type="date" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sourceType === "PRODUCT_LCA" && (
+        <div className="space-y-3 rounded-md bg-slate-50 p-3">
+          <p className="text-xs font-medium text-slate-600">
+            Product LCA adapter link (T51) — reads one issued, frozen assessment version; never a live/mutable one.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label>Assessment ID</Label>
+              <Input name="assessmentId" placeholder="Existing product LCA assessment id" />
+            </div>
+            <div>
+              <Label>Issued version ID</Label>
+              <Input name="versionId" placeholder="Issued/superseded assessment version id" />
+            </div>
+            <div className="sm:col-span-2">
+              <Label>Intensity basis</Label>
+              <Select name="intensityBasis" defaultValue="">
+                <option value="">Choose a basis</option>
+                <option value="HEADLINE_PER_FUNCTIONAL_UNIT">Headline, per functional unit</option>
+                <option value="INCLUDING_BIOGENIC_PER_FUNCTIONAL_UNIT">Including biogenic, per functional unit</option>
+              </Select>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Feedback state={createState} />
       <Button type="submit" disabled={createPending}>{createPending ? "Saving…" : "Add draft metric definition"}</Button>
       {!canApprove && <p className="text-xs text-slate-500">Approval requires the objective-approval permission.</p>}
+    </form>
+  );
+}
+
+function ViewMetricReadingButton({ metricVersionId }: { metricVersionId: string }) {
+  const [state, action, pending] = useActionState(resolveObjectiveMetricObservationAction, emptyObservationState);
+  return (
+    <form action={action} className="space-y-2">
+      <input type="hidden" name="metricVersionId" value={metricVersionId} />
+      <Button type="submit" variant="secondary" size="sm" disabled={pending}>
+        {pending ? "Reading…" : "View adapter reading"}
+      </Button>
+      {state.error && <p role="alert" className="text-xs text-red-600">{state.error}</p>}
+      {state.observations && state.observations.length === 0 && (
+        <p className="text-xs text-slate-500">The adapter returned no observation for this configuration.</p>
+      )}
+      {state.observations && state.observations.length > 0 && (
+        <ul className="space-y-1 rounded-md bg-slate-50 p-2 text-xs text-slate-700">
+          {state.observations.map((observation, index) => (
+            <li key={index}>
+              <span className="font-medium">{observation.value} {observation.unit}</span>{" "}
+              ({observation.magnitudeKind.toLowerCase()}, {observation.periodStart} to {observation.periodEnd}) — read-only, from{" "}
+              {String(observation.provenance.sourceType ?? "adapter")} record {String(observation.provenance.recordId ?? "")}.
+            </li>
+          ))}
+        </ul>
+      )}
     </form>
   );
 }
@@ -391,7 +520,13 @@ function ObjectiveVersionCard({
             </p>
             <p className="text-xs text-slate-500">Owner: {version.ownerName}</p>
           </div>
-          <Badge tone={statusTone(version.status)}>{version.status}</Badge>
+          <div className="flex items-center gap-2">
+            {isActive && (() => {
+              const due = dueTone(version.targetDate, version.status);
+              return due ? <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${due.className}`}>{due.label}</span> : null;
+            })()}
+            <Badge tone={statusTone(version.status)}>{version.status}</Badge>
+          </div>
         </div>
         <p className="text-sm text-slate-700">{version.intent}</p>
         <p className="text-xs text-slate-500">
@@ -399,7 +534,21 @@ function ObjectiveVersionCard({
           {new Date(version.targetDate).toLocaleDateString()}
         </p>
         {version.sourceLinks.length > 0 && (
-          <p className="text-xs text-slate-500">Links: {version.sourceLinks.map((link) => `${link.linkType}:${link.label}`).join(", ")}</p>
+          <p className="text-xs text-slate-500">
+            Links:{" "}
+            {version.sourceLinks.map((link, index) => (
+              <span key={link.id}>
+                {index > 0 && ", "}
+                {link.href ? (
+                  <a href={link.href} className="underline underline-offset-2 hover:text-slate-900">
+                    {link.linkType}:{link.label}
+                  </a>
+                ) : (
+                  `${link.linkType}:${link.label}`
+                )}
+              </span>
+            ))}
+          </p>
         )}
         {canEdit && version.status === "DRAFT" && (
           <details>
@@ -474,12 +623,32 @@ export function ObjectiveWorkspace({
               )}
 
               {objective.activeVersionId && (
-                <div className="ml-4 space-y-2 border-l border-slate-200 pl-4">
-                  <h3 className="text-sm font-semibold text-slate-800">Metric definitions</h3>
+                <div className="ml-4 space-y-3 border-l border-slate-200 pl-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-slate-800">Metric definitions</h3>
+                    <a href="/ems/actions" className="text-xs text-slate-500 underline underline-offset-2 hover:text-slate-900">
+                      {objective.actionProgrammeCount} supporting action programme{objective.actionProgrammeCount === 1 ? "" : "s"}
+                    </a>
+                  </div>
+                  {objective.metricDefinitions.length === 0 && <p className="text-xs text-slate-500">No metric definitions yet.</p>}
                   {objective.metricDefinitions.map((definition) => (
-                    <p key={definition.id} className="text-xs text-slate-500">
-                      {definition.id} {definition.activeVersionId ? "(active version approved)" : "(no active version yet)"}
-                    </p>
+                    <div key={definition.id} className="space-y-1 rounded-md border border-slate-100 p-2">
+                      {definition.latestVersion ? (
+                        <>
+                          <p className="text-xs text-slate-700">
+                            <span className="font-medium">{definition.latestVersion.name}</span> — {definition.latestVersion.sourceType} —{" "}
+                            {definition.latestVersion.unit} — {definition.latestVersion.frequency}{" "}
+                            <Badge tone={statusTone(definition.latestVersion.status)}>{definition.latestVersion.status}</Badge>
+                          </p>
+                          {ADAPTER_LINKED_SOURCE_TYPES.has(definition.latestVersion.sourceType) &&
+                            (definition.latestVersion.status === "ACTIVE" || definition.latestVersion.status === "SUPERSEDED") && (
+                              <ViewMetricReadingButton metricVersionId={definition.latestVersion.id} />
+                            )}
+                        </>
+                      ) : (
+                        <p className="text-xs text-slate-500">{definition.id} (no version yet)</p>
+                      )}
+                    </div>
                   ))}
                   {canEdit && <MetricDefinitionForm objectiveId={objective.id} canApprove={canApprove} />}
                 </div>

@@ -21,20 +21,37 @@ export default async function EnvironmentalObjectivesPage() {
 
   const ctx = toTenantRepositoryContext(context);
 
-  const [objectives, members, policyRecords, aspectAssessments, obligationVersions, riskOpportunities] = await Promise.all([
-    listEnvironmentalObjectives(context),
-    prisma.organisationMembership.findMany({
-      where: { organisationId: context.organisationId, status: "ACTIVE" },
-      include: { user: { select: { name: true } } },
-      orderBy: { user: { name: "asc" } },
-    }),
-    prisma.environmentalPolicyRecord.findMany({ where: tenantWhere(ctx, {}) }),
-    prisma.aspectAssessment.findMany({ where: tenantWhere(ctx, {}), include: { aspect: { select: { name: true } } } }),
-    prisma.complianceObligationVersion.findMany({ where: tenantWhere(ctx, {}), select: { id: true, title: true } }),
-    prisma.emsRiskOpportunity.findMany({ where: tenantWhere(ctx, {}), select: { id: true, category: true, description: true } }),
-  ]);
+  const [objectives, members, policyRecords, aspectAssessments, obligationVersions, riskOpportunities, programmesByObjective] =
+    await Promise.all([
+      listEnvironmentalObjectives(context),
+      prisma.organisationMembership.findMany({
+        where: { organisationId: context.organisationId, status: "ACTIVE" },
+        include: { user: { select: { name: true } } },
+        orderBy: { user: { name: "asc" } },
+      }),
+      prisma.environmentalPolicyRecord.findMany({ where: tenantWhere(ctx, {}) }),
+      prisma.aspectAssessment.findMany({ where: tenantWhere(ctx, {}), include: { aspect: { select: { name: true } } } }),
+      prisma.complianceObligationVersion.findMany({ where: tenantWhere(ctx, {}), select: { id: true, title: true } }),
+      prisma.emsRiskOpportunity.findMany({ where: tenantWhere(ctx, {}), select: { id: true, category: true, description: true } }),
+      // Cross-link (spec: objective -> action programme). Counted here rather
+      // than in objective-service.ts, which stays action-programme-agnostic —
+      // T52's action model never reads from/writes to the objective module.
+      prisma.actionProgramme.groupBy({
+        by: ["objectiveId"],
+        where: tenantWhere(ctx, { objectiveId: { not: null } }),
+        _count: { _all: true },
+      }),
+    ]);
+
+  const programmeCountByObjectiveId = new Map(
+    programmesByObjective
+      .filter((row): row is typeof row & { objectiveId: string } => row.objectiveId !== null)
+      .map((row) => [row.objectiveId, row._count._all]),
+  );
 
   const memberOptions = members.map((member) => ({ id: member.id, name: member.user.name ?? member.id }));
+  const aspectNameByAssessmentId = new Map(aspectAssessments.map((assessment) => [assessment.id, assessment.aspect.name]));
+  const riskLabelById = new Map(riskOpportunities.map((row) => [row.id, `${row.category}: ${row.description}`]));
 
   return (
     <div className="space-y-8">
@@ -47,6 +64,11 @@ export default async function EnvironmentalObjectivesPage() {
           completing a linked action never marks an objective achieved. Approved versions are immutable; changing an
           objective&apos;s content always creates a new successor draft, and every draft, approval, rejection, return, and
           achievement decision is recorded in the audit trail.
+        </p>
+        <p className="mt-2 text-sm">
+          <a href="/ems/notifications" className="text-slate-500 underline underline-offset-2 hover:text-slate-900">
+            View my reminders
+          </a>
         </p>
       </div>
 
@@ -77,10 +99,18 @@ export default async function EnvironmentalObjectivesPage() {
               linkType: link.linkType,
               label:
                 link.policyRecord?.id ??
-                link.aspectAssessment?.id ??
+                (link.aspectAssessment ? aspectNameByAssessmentId.get(link.aspectAssessment.id) ?? link.aspectAssessment.id : null) ??
                 link.obligationVersion?.title ??
-                link.riskOpportunity?.category ??
+                (link.riskOpportunity ? riskLabelById.get(link.riskOpportunity.id) ?? link.riskOpportunity.category : null) ??
                 "Unknown link",
+              href:
+                link.linkType === "ASPECT_ASSESSMENT"
+                  ? "/ems/aspects"
+                  : link.linkType === "OBLIGATION_VERSION"
+                    ? "/ems/legal/obligations"
+                    : link.linkType === "POLICY" || link.linkType === "RISK_OPPORTUNITY"
+                      ? "/ems/programme"
+                      : null,
             })),
             approvals: version.approvals.map((approval) => ({
               id: approval.id,
@@ -89,7 +119,21 @@ export default async function EnvironmentalObjectivesPage() {
               decidedAt: approval.decidedAt.toISOString(),
             })),
           })),
-          metricDefinitions: objective.metricDefinitions.map((definition) => ({ id: definition.id, activeVersionId: definition.activeVersionId })),
+          metricDefinitions: objective.metricDefinitions.map((definition) => ({
+            id: definition.id,
+            activeVersionId: definition.activeVersionId,
+            latestVersion: definition.versions[0]
+              ? {
+                  id: definition.versions[0].id,
+                  name: definition.versions[0].name,
+                  sourceType: definition.versions[0].sourceType,
+                  unit: definition.versions[0].unit,
+                  frequency: definition.versions[0].frequency,
+                  status: definition.versions[0].status,
+                }
+              : null,
+          })),
+          actionProgrammeCount: programmeCountByObjectiveId.get(objective.id) ?? 0,
         }))}
         members={memberOptions}
         policyRecords={policyRecords.map((record) => ({ id: record.id, name: record.id }))}
