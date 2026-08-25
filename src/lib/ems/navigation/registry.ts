@@ -22,6 +22,7 @@ import { hasPermission } from "@/lib/rbac/authorize";
 
 export type EmsModuleCategory =
   | "foundation"
+  | "documents"
   | "operations"
   | "legal"
   | "objectives"
@@ -56,6 +57,7 @@ export type EmsModuleEntry = AvailableEmsModule | PlannedEmsModule;
 
 export const EMS_MODULE_CATEGORY_LABELS: Record<EmsModuleCategory, string> = {
   foundation: "Programme & foundation",
+  documents: "Controlled documents & evidence",
   operations: "Aspects & operations",
   legal: "Legal & compliance",
   objectives: "Objectives & actions",
@@ -79,6 +81,26 @@ export const EMS_MODULES: EmsModuleEntry[] = [
     status: "available",
     href: "/ems/programme",
     pageFile: "src/app/(app)/ems/programme/page.tsx",
+  },
+
+  // --- Controlled documents & evidence (T22 — UI03) ---
+  {
+    id: "documents",
+    label: "Controlled documents",
+    description: "Document register, revision lifecycle, approval and distribution.",
+    category: "documents",
+    status: "available",
+    href: "/ems/documents",
+    pageFile: "src/app/(app)/ems/documents/page.tsx",
+  },
+  {
+    id: "evidence",
+    label: "Evidence hub",
+    description: "Shared evidence objects across the EMS, with status and authorised download.",
+    category: "documents",
+    status: "available",
+    href: "/ems/evidence",
+    pageFile: "src/app/(app)/ems/evidence/page.tsx",
   },
 
   // --- Aspects & operations (T30-T35) ---
