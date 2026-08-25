@@ -7,7 +7,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ORG_A, ORG_B, makeOrganisationContext } from "@/lib/__tests__/tenant-fixtures";
+import { ORG_A, ORG_B, SITE_A, makeOrganisationContext } from "@/lib/__tests__/tenant-fixtures";
 
 type Row = Record<string, unknown>;
 type FindArgs = { where?: Row };
@@ -30,7 +30,15 @@ function matchValue(actual: unknown, expected: unknown): boolean {
 }
 
 function matches(row: Row, where: Row): boolean {
-  return Object.entries(where).every(([key, value]) => matchValue(row[key], value));
+  return Object.entries(where).every(([key, value]) => {
+    if (key === "OR" && Array.isArray(value)) {
+      return (value as Row[]).some((clause) => matches(row, clause));
+    }
+    if (key === "person" && value && typeof value === "object") {
+      return matches((row.person as Row) ?? {}, value as Row);
+    }
+    return matchValue(row[key], value);
+  });
 }
 
 function find(rows: Row[], where: Row) {
@@ -81,6 +89,7 @@ const {
   assignCompetenceRequirement,
   startCompetenceAssignment,
   markCompetenceAssignmentGap,
+  listCompetenceAssignments,
 } = await import("@/lib/ems/competence/assignment-service");
 
 const orgContextA = makeOrganisationContext(ORG_A, {
@@ -159,5 +168,48 @@ describe("status transitions", () => {
     await startCompetenceAssignment(orgContextA, assignment.id, "user-1");
     const stored = find(tables.assignments, { id: assignment.id });
     expect(stored?.requirementVersionId).toBe("version-active");
+  });
+});
+
+describe("listCompetenceAssignments", () => {
+  const personOrgWide = { id: "person-org-wide", displayName: "Org-wide Person", siteId: null, entityId: null, membership: null };
+  const personSiteA = { id: "person-site-a", displayName: "Site A Person", siteId: SITE_A, entityId: null, membership: null };
+
+  beforeEach(() => {
+    tables.assignments.push({
+      id: "assignment-org-wide",
+      organisationId: ORG_A,
+      status: "REQUIRED",
+      person: personOrgWide,
+      requirementVersion: { id: "version-active", title: "Confined space entry", version: 1, requirementId: "requirement-1" },
+    });
+    tables.assignments.push({
+      id: "assignment-site-a",
+      organisationId: ORG_A,
+      status: "REQUIRED",
+      person: personSiteA,
+      requirementVersion: { id: "version-active", title: "Confined space entry", version: 1, requirementId: "requirement-1" },
+    });
+    tables.assignments.push({
+      id: "assignment-org-b",
+      organisationId: ORG_B,
+      status: "REQUIRED",
+      person: personOrgWide,
+      requirementVersion: { id: "version-active", title: "Confined space entry", version: 1, requirementId: "requirement-1" },
+    });
+  });
+
+  it("is tenant scoped and lists every assignment for an organisation-wide member", async () => {
+    const rows = await listCompetenceAssignments(orgContextA);
+    expect(rows.map((r) => r.id).sort()).toEqual(["assignment-org-wide", "assignment-site-a"]);
+  });
+
+  it("denies a RESTRICTED member from seeing an assignment for an org-wide person (deny by default)", async () => {
+    const restricted = makeOrganisationContext(ORG_A, {
+      permissions: orgContextA.permissions,
+      access: { mode: "RESTRICTED", entityIds: new Set(), siteIds: new Set([SITE_A]) },
+    });
+    const rows = await listCompetenceAssignments(restricted);
+    expect(rows.map((r) => r.id)).toEqual(["assignment-site-a"]);
   });
 });
