@@ -327,14 +327,16 @@ export const EMS_MODULES: EmsModuleEntry[] = [
     pageFile: "src/app/(app)/ems/competence/expiry/page.tsx",
   },
 
-  // --- Management review (T72-T73 — deferred to UI11/UI12) ---
+  // --- Management review cycle and agenda (T72/UI11). Pack, minutes,
+  // decisions and closure (T73) remain deferred to UI12. ---
   {
     id: "management-review",
     label: "Management review",
-    description: "Review cycle, agenda, pack, minutes and decisions.",
+    description: "Review cycle, scheduling, attendees, inputs and agenda templates. Pack/minutes/decisions come in a later module.",
     category: "review",
-    status: "planned",
-    plannedTask: "UI11",
+    status: "available",
+    href: "/ems/management-reviews",
+    pageFile: "src/app/(app)/ems/management-reviews/page.tsx",
   },
 ];
 
