@@ -21,6 +21,7 @@ import type { OrganisationContext } from "@/lib/organisation/context";
 import { hasPermission } from "@/lib/rbac/authorize";
 
 export type EmsModuleCategory =
+  | "overview"
   | "foundation"
   | "documents"
   | "operations"
@@ -57,6 +58,7 @@ export interface PlannedEmsModule extends EmsModule {
 export type EmsModuleEntry = AvailableEmsModule | PlannedEmsModule;
 
 export const EMS_MODULE_CATEGORY_LABELS: Record<EmsModuleCategory, string> = {
+  overview: "Dashboard & reporting",
   foundation: "Programme & foundation",
   documents: "Controlled documents & evidence",
   operations: "Aspects & operations",
@@ -74,6 +76,17 @@ export const EMS_MODULE_CATEGORY_LABELS: Record<EmsModuleCategory, string> = {
  * `pageFile` exists — the route-registry test enforces that.
  */
 export const EMS_MODULES: EmsModuleEntry[] = [
+  // --- Dashboard, reporting and leadership overview (UI13) ---
+  {
+    id: "dashboard",
+    label: "EMS dashboard & reporting",
+    description: "Leadership overview: status and overdue counts across every module you can access, with report/export links.",
+    category: "overview",
+    status: "available",
+    href: "/ems/dashboard",
+    pageFile: "src/app/(app)/ems/dashboard/page.tsx",
+  },
+
   // --- Notifications & work queue (T21/T24 — UI04) ---
   {
     id: "notifications",
