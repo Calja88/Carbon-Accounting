@@ -81,12 +81,14 @@ vi.mock("@/lib/prisma", () => {
     }),
   };
   const evidenceLink = { deleteMany: vi.fn(async () => ({ count: 0 })) };
+  const legalHold = { findFirst: vi.fn(async () => null) };
   const prismaClient = {
     activityProcess,
     environmentalAspect,
     environmentalImpact,
     aspectImpactLink,
     evidenceLink,
+    legalHold,
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prismaClient)),
   };
   return { prisma: prismaClient };
@@ -96,6 +98,7 @@ vi.mock("@/lib/repositories/audit-repository", () => ({ recordAuditEvent: vi.fn(
 vi.mock("@/lib/documents/evidence-service", () => evidenceMocks);
 
 const {
+  AspectRegisterError,
   attachEvidenceToAspect,
   createEnvironmentalAspect,
   createEnvironmentalImpact,
@@ -104,6 +107,7 @@ const {
   updateEnvironmentalAspect,
 } = await import("@/lib/ems/aspects/aspect-service");
 const { TenantOwnershipError } = await import("@/lib/repositories/tenant-scope");
+const { prisma } = await import("@/lib/prisma");
 
 const contextA = makeOrganisationContext(ORG_A, {
   userId: "synthetic-user-a",
@@ -195,6 +199,20 @@ describe("environmental aspects", () => {
     });
     await deleteEnvironmentalAspect(contextA, aspect.id, "synthetic-user-a");
     expect(tables.aspects).toHaveLength(0);
+  });
+
+  it("refuses to delete an aspect under an active legal hold", async () => {
+    const aspect = await createEnvironmentalAspect(contextA, {
+      processId: "process-a",
+      name: "Synthetic held aspect",
+      controlRelationship: "DIRECT_CONTROL",
+      operatingCondition: "NORMAL",
+      effect: "ADVERSE",
+      actorUserId: "synthetic-user-a",
+    });
+    vi.mocked(prisma.legalHold.findFirst).mockResolvedValueOnce({ id: "hold-1" } as never);
+    await expect(deleteEnvironmentalAspect(contextA, aspect.id, "synthetic-user-a")).rejects.toThrow(AspectRegisterError);
+    expect(tables.aspects).toHaveLength(1);
   });
 });
 

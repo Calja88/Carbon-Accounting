@@ -28,6 +28,7 @@ import {
 import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import { runInTenantTransaction } from "@/lib/repositories/transaction";
 import { recordAuditEvent } from "@/lib/repositories/audit-repository";
+import { isUnderLegalHold } from "@/lib/retention/legal-hold-service";
 import { linkEvidence, uploadEvidenceObject } from "@/lib/documents/evidence-service";
 
 export { TenantOwnershipError };
@@ -173,6 +174,9 @@ export async function deleteEnvironmentalAspect(context: OrganisationContext, as
   const ctx = toTenantRepositoryContext(context);
   const aspect = await findTenantEnvironmentalAspect(ctx, aspectId);
   if (!aspect) throw new TenantOwnershipError();
+  if (await isUnderLegalHold(ctx, "environmental_aspect", aspect.id)) {
+    throw new AspectRegisterError("This aspect is under legal hold and cannot be deleted.");
+  }
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     // EvidenceObject is retained as shared evidence; only the polymorphic
     // attachment is removed with the deleted aspect so no orphan link can
@@ -230,6 +234,9 @@ export async function deleteEnvironmentalImpact(context: OrganisationContext, im
   const ctx = toTenantRepositoryContext(context);
   const impact = await findTenantEnvironmentalImpact(ctx, impactId);
   if (!impact) throw new TenantOwnershipError();
+  if (await isUnderLegalHold(ctx, "environmental_impact", impact.id)) {
+    throw new AspectRegisterError("This impact is under legal hold and cannot be deleted.");
+  }
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     await tx.environmentalImpact.delete({
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: impact.id } },

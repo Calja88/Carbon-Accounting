@@ -81,6 +81,7 @@ export const AUDIT_EVENT_TYPES = [
   "significance_method.created",
   "significance_method.approved",
   "significance_method.superseded",
+  "significance_method.discarded",
   "aspect_assessment.created",
   "aspect_assessment.approved",
   "aspect_assessment.superseded",
