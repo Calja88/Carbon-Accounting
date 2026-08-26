@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,8 +12,21 @@ import {
   approveSignificanceMethodAction,
   createAspectAssessmentAction,
   createSignificanceMethodAction,
+  discardSignificanceMethodAction,
   type AspectActionState,
 } from "./actions";
+import {
+  CriteriaBuilder,
+  RuleBuilder,
+  criterionRowsFromMethod,
+  describeScale,
+  emptyCriterionRow,
+  ruleRowsFromFormulaConfig,
+  serializeCriteria,
+  serializeRules,
+  type CriterionRow,
+  type RuleRow,
+} from "./significance-builders";
 
 const emptyState: AspectActionState = { error: null, message: null };
 type Criterion = { key: string; label: string; scaleConfig: unknown; weight: string | null; required: boolean; sortOrder: number };
@@ -33,23 +46,33 @@ function Feedback({ state }: { state: AspectActionState }) {
 }
 
 function MethodFields({ uid, programmes, method }: { uid: string; programmes: Array<{ id: string; name: string }>; method?: Method }) {
-  const criteria = method?.criteria.map((criterion) => ({
-    key: criterion.key, label: criterion.label, scaleConfig: criterion.scaleConfig,
-    ...(criterion.weight ? { weight: criterion.weight } : {}), required: criterion.required, sortOrder: criterion.sortOrder,
-  }));
-  const rules = method?.formula === "RULE_SET" && typeof method.formulaConfig === "object" && method.formulaConfig && !Array.isArray(method.formulaConfig)
-    ? (method.formulaConfig as { rules?: unknown }).rules : undefined;
+  const [formula, setFormula] = useState(method?.formula ?? "WEIGHTED_SUM");
+  const [criteria, setCriteria] = useState<CriterionRow[]>(() => (method ? criterionRowsFromMethod(method.criteria) : [emptyCriterionRow()]));
+  const [rules, setRules] = useState<RuleRow[]>(() => (method ? ruleRowsFromFormulaConfig(method.formulaConfig) : []));
+  const criterionKeys = criteria.map((row) => row.key.trim()).filter(Boolean);
+
   return <div className="space-y-4">
     <div className="grid gap-4 sm:grid-cols-2">
       <div><Label htmlFor={`programmeId-${uid}`}>EMS programme</Label><Select id={`programmeId-${uid}`} name="programmeId" required defaultValue={method?.programmeId ?? ""} disabled={Boolean(method)}><option value="">Select…</option>{programmes.map((programme) => <option key={programme.id} value={programme.id}>{programme.name}</option>)}</Select>{method && <input type="hidden" name="programmeId" value={method.programmeId} />}</div>
       <div><Label htmlFor={`methodKey-${uid}`}>Stable method key</Label><Input id={`methodKey-${uid}`} name="methodKey" required defaultValue={method?.methodKey} readOnly={Boolean(method)} placeholder="site-impact-v1" /></div>
       <div><Label htmlFor={`methodName-${uid}`}>Method name</Label><Input id={`methodName-${uid}`} name="name" required defaultValue={method?.name} /></div>
-      <div><Label htmlFor={`formula-${uid}`}>Formula</Label><Select id={`formula-${uid}`} name="formula" defaultValue={method?.formula ?? "WEIGHTED_SUM"}><option value="WEIGHTED_SUM">Weighted sum</option><option value="MAX_CRITERION">Maximum criterion</option><option value="RULE_SET">Rule set</option></Select></div>
+      <div><Label htmlFor={`formula-${uid}`}>Formula</Label><Select id={`formula-${uid}`} name="formula" value={formula} onChange={(event) => setFormula(event.target.value)}><option value="WEIGHTED_SUM">Weighted sum</option><option value="MAX_CRITERION">Maximum criterion</option><option value="RULE_SET">Rule set</option></Select></div>
       <div><Label htmlFor={`threshold-${uid}`}>Significant at score</Label><Input id={`threshold-${uid}`} name="threshold" required inputMode="decimal" defaultValue={method?.threshold} /></div>
     </div>
-    <div><Label htmlFor={`criteriaJson-${uid}`}>Criteria configuration (JSON)</Label><Textarea id={`criteriaJson-${uid}`} name="criteriaJson" required rows={8} defaultValue={criteria ? JSON.stringify(criteria, null, 2) : undefined} placeholder={'[{"key":"severity","label":"Severity","scaleConfig":{"kind":"NUMERIC","min":"1","max":"5"},"weight":"2","required":true,"sortOrder":0}]'} /><p className="mt-1 text-xs text-slate-500">Each stable key defines its numeric or scored-option scale, weight, requirement, and display order.</p></div>
-    <div><Label htmlFor={`rulesJson-${uid}`}>Rule-set rules (JSON; required only for rule set)</Label><Textarea id={`rulesJson-${uid}`} name="rulesJson" rows={4} defaultValue={rules ? JSON.stringify(rules, null, 2) : undefined} placeholder={'[{"criterionKey":"severity","operator":"GTE","compareTo":"4"}]'} /></div>
+    <CriteriaBuilder criteria={criteria} onChange={setCriteria} />
+    {formula === "RULE_SET" && <RuleBuilder rules={rules} criterionKeys={criterionKeys} onChange={setRules} />}
+    <input type="hidden" name="criteriaJson" value={JSON.stringify(serializeCriteria(criteria))} />
+    {formula === "RULE_SET" && <input type="hidden" name="rulesJson" value={JSON.stringify(serializeRules(rules))} />}
   </div>;
+}
+
+function DiscardDraftButton({ methodId }: { methodId: string }) {
+  const [state, action, pending] = useActionState(discardSignificanceMethodAction, emptyState);
+  return <form action={action} className="flex flex-col items-start gap-1">
+    <input type="hidden" name="methodId" value={methodId} />
+    <Button type="submit" variant="danger" size="sm" disabled={pending} onClick={(event) => { if (!confirm("Discard this draft significance method? This cannot be undone.")) event.preventDefault(); }}>{pending ? "Discarding…" : "Discard draft"}</Button>
+    <Feedback state={state} />
+  </form>;
 }
 
 function MethodForm({ programmes }: { programmes: Array<{ id: string; name: string }> }) {
@@ -62,8 +85,11 @@ function MethodCard({ method, programmes, canEdit, canApprove }: { method: Metho
   const [successorState, successorAction, creating] = useActionState(createSignificanceMethodAction, emptyState);
   return <Card><CardContent className="space-y-3 py-5">
     <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-semibold text-slate-900">{method.name} · v{method.version}</p><p className="text-sm text-slate-500">{method.methodKey} · {method.formula.replaceAll("_", " ").toLowerCase()} · threshold {method.threshold}</p></div><span className="rounded bg-slate-100 px-2 py-1 text-xs">{method.status.toLowerCase()}</span></div>
-    <ul className="space-y-1 text-sm text-slate-700">{method.criteria.map((criterion) => <li key={criterion.key}><strong>{criterion.label}</strong> ({criterion.key}) · weight {criterion.weight ?? "1"} · {criterion.required ? "required" : "optional"} · scale {JSON.stringify(criterion.scaleConfig)}</li>)}</ul>
-    {canApprove && method.status === "DRAFT" && <form action={approveAction}><input type="hidden" name="methodId" value={method.id} /><Button type="submit" disabled={approving}>{approving ? "Approving…" : "Approve method"}</Button><Feedback state={approveState} /></form>}
+    <ul className="space-y-1 text-sm text-slate-700">{method.criteria.map((criterion) => <li key={criterion.key}><strong>{criterion.label}</strong> ({criterion.key}) · weight {criterion.weight ?? "1"} · {criterion.required ? "required" : "optional"} · {describeScale(criterion.scaleConfig)}</li>)}</ul>
+    {canApprove && method.status === "DRAFT" && <div className="flex flex-wrap items-start gap-3">
+      <form action={approveAction}><input type="hidden" name="methodId" value={method.id} /><Button type="submit" disabled={approving}>{approving ? "Approving…" : "Approve method"}</Button><Feedback state={approveState} /></form>
+      <DiscardDraftButton methodId={method.id} />
+    </div>}
     {canEdit && method.status === "APPROVED" && <details className="rounded-lg border border-slate-200 p-3"><summary className="cursor-pointer text-sm font-medium">Create successor version</summary><form action={successorAction} className="mt-4 space-y-4"><input type="hidden" name="supersedesMethodId" value={method.id} /><MethodFields uid={method.id} programmes={programmes} method={method} /><Feedback state={successorState} /><Button type="submit" disabled={creating}>{creating ? "Creating…" : "Create successor draft"}</Button></form></details>}
   </CardContent></Card>;
 }
@@ -71,7 +97,7 @@ function MethodCard({ method, programmes, canEdit, canApprove }: { method: Metho
 function AssessmentForm({ aspect, method, canApprove }: { aspect: { id: string; name: string }; method: Method; canApprove: boolean }) {
   const [state, action, pending] = useActionState(createAspectAssessmentAction, emptyState);
   const uid = `${aspect.id}-${method.id}`;
-  return <details className="rounded-lg border border-slate-200 p-3"><summary className="cursor-pointer text-sm font-medium">Assess with {method.name} v{method.version}</summary><form action={action} className="mt-4 space-y-4"><input type="hidden" name="aspectId" value={aspect.id} /><input type="hidden" name="methodId" value={method.id} /><p className="text-sm text-slate-600">Formula: {method.formula.replaceAll("_", " ").toLowerCase()}; significant at {method.threshold}.</p><div className="grid gap-4 sm:grid-cols-2">{method.criteria.map((criterion) => <div key={criterion.key}><Label htmlFor={`criterion-${uid}-${criterion.key}`}>{criterion.label} {criterion.required ? "*" : ""}</Label><Input id={`criterion-${uid}-${criterion.key}`} name={`criterion:${criterion.key}`} required={criterion.required} /><p className="mt-1 text-xs text-slate-500">Weight {criterion.weight ?? "1"}; scale {JSON.stringify(criterion.scaleConfig)}</p></div>)}</div>{canApprove && <div className="grid gap-4 sm:grid-cols-2"><div><Label htmlFor={`overrideSignificant-${uid}`}>Significance override</Label><Select id={`overrideSignificant-${uid}`} name="overrideSignificant" defaultValue=""><option value="">No override</option><option value="true">Final: significant</option><option value="false">Final: not significant</option></Select></div><div><Label htmlFor={`overrideRationale-${uid}`}>Override rationale</Label><Textarea id={`overrideRationale-${uid}`} name="overrideRationale" rows={2} /></div></div>}<Feedback state={state} /><Button type="submit" disabled={pending}>{pending ? "Calculating…" : "Create assessment snapshot"}</Button></form></details>;
+  return <details className="rounded-lg border border-slate-200 p-3"><summary className="cursor-pointer text-sm font-medium">Assess with {method.name} v{method.version}</summary><form action={action} className="mt-4 space-y-4"><input type="hidden" name="aspectId" value={aspect.id} /><input type="hidden" name="methodId" value={method.id} /><p className="text-sm text-slate-600">Formula: {method.formula.replaceAll("_", " ").toLowerCase()}; significant at {method.threshold}.</p><div className="grid gap-4 sm:grid-cols-2">{method.criteria.map((criterion) => <div key={criterion.key}><Label htmlFor={`criterion-${uid}-${criterion.key}`}>{criterion.label} {criterion.required ? "*" : ""}</Label><Input id={`criterion-${uid}-${criterion.key}`} name={`criterion:${criterion.key}`} required={criterion.required} /><p className="mt-1 text-xs text-slate-500">Weight {criterion.weight ?? "1"}; {describeScale(criterion.scaleConfig)}</p></div>)}</div>{canApprove && <div className="grid gap-4 sm:grid-cols-2"><div><Label htmlFor={`overrideSignificant-${uid}`}>Significance override</Label><Select id={`overrideSignificant-${uid}`} name="overrideSignificant" defaultValue=""><option value="">No override</option><option value="true">Final: significant</option><option value="false">Final: not significant</option></Select></div><div><Label htmlFor={`overrideRationale-${uid}`}>Override rationale</Label><Textarea id={`overrideRationale-${uid}`} name="overrideRationale" rows={2} /></div></div>}<Feedback state={state} /><Button type="submit" disabled={pending}>{pending ? "Calculating…" : "Create assessment snapshot"}</Button></form></details>;
 }
 
 function AssessmentRow({ assessment, canApprove }: { assessment: Assessment; canApprove: boolean }) {

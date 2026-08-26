@@ -17,6 +17,7 @@ import {
   requestComplianceEvaluationFindingLinkAction,
   completeComplianceEvaluationAction,
   issueComplianceEvaluationAction,
+  closeComplianceEvaluationProgrammeAction,
   type EvaluationActionState,
 } from "./actions";
 
@@ -184,6 +185,27 @@ function CreateEvaluationForm({
       </p>
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Creating…" : "Create evaluation cycle"}</Button>
+    </form>
+  );
+}
+
+function CloseProgrammeButton({ programmeId }: { programmeId: string }) {
+  const [state, action, pending] = useActionState(closeComplianceEvaluationProgrammeAction, emptyState);
+  return (
+    <form action={action} className="flex flex-col items-start gap-1">
+      <input type="hidden" name="programmeId" value={programmeId} />
+      <Button
+        type="submit"
+        variant="secondary"
+        size="sm"
+        disabled={pending}
+        onClick={(event) => {
+          if (!confirm("Close this evaluation programme? No further evaluation cycles can be started under it.")) event.preventDefault();
+        }}
+      >
+        {pending ? "Closing…" : "Close programme"}
+      </Button>
+      <Feedback state={state} />
     </form>
   );
 }
@@ -444,12 +466,15 @@ export function ComplianceEvaluationWorkspace({
                   <Badge tone={programme.status === "ACTIVE" ? "success" : "neutral"}>{programme.status}</Badge>
                 </div>
                 {canPerform && programme.status === "ACTIVE" && (
-                  <details>
-                    <summary className="cursor-pointer text-sm font-medium text-blue-700">Start a new evaluation cycle</summary>
-                    <div className="mt-3">
-                      <CreateEvaluationForm programmeId={programme.id} members={members} entities={entities} sites={sites} />
-                    </div>
-                  </details>
+                  <>
+                    <details>
+                      <summary className="cursor-pointer text-sm font-medium text-blue-700">Start a new evaluation cycle</summary>
+                      <div className="mt-3">
+                        <CreateEvaluationForm programmeId={programme.id} members={members} entities={entities} sites={sites} />
+                      </div>
+                    </details>
+                    <CloseProgrammeButton programmeId={programme.id} />
+                  </>
                 )}
               </CardContent>
             </Card>
