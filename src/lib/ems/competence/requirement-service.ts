@@ -204,7 +204,11 @@ export async function createCompetenceRequirement(context: OrganisationContext, 
         version: 1,
         ...draftData(input),
         preparedByUserId: input.actorUserId,
-        scopes: { create: scopes.map((scope) => ({ organisationId: txCtx.organisationId, ...scope })) },
+        // `organisationId` is implied by the compound
+        // [organisationId, requirementVersionId] relation and is rejected by
+        // Prisma's generated nested-create type if set explicitly — the same
+        // defect already fixed in `createMethodVersion`.
+        scopes: { create: scopes.map((scope) => ({ ...scope })) },
       },
     });
 
@@ -247,7 +251,11 @@ export async function updateCompetenceRequirementVersionDraft(
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: version.id } },
       data: {
         ...draftData(input),
-        scopes: { create: scopes.map((scope) => ({ organisationId: txCtx.organisationId, ...scope })) },
+        // `organisationId` is implied by the compound
+        // [organisationId, requirementVersionId] relation and is rejected by
+        // Prisma's generated nested-create type if set explicitly — the same
+        // defect already fixed in `createMethodVersion`.
+        scopes: { create: scopes.map((scope) => ({ ...scope })) },
       },
     });
 
@@ -459,7 +467,11 @@ export async function createSuccessorCompetenceRequirementVersion(
         preparedByUserId: input.actorUserId,
         revisionRationale: input.revisionRationale.trim(),
         supersedesVersionId: latest.id,
-        scopes: { create: scopes.map((scope) => ({ organisationId: txCtx.organisationId, ...scope })) },
+        // `organisationId` is implied by the compound
+        // [organisationId, requirementVersionId] relation and is rejected by
+        // Prisma's generated nested-create type if set explicitly — the same
+        // defect already fixed in `createMethodVersion`.
+        scopes: { create: scopes.map((scope) => ({ ...scope })) },
       },
     });
 
