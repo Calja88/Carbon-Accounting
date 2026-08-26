@@ -71,24 +71,24 @@ function statusTone(status: string): "neutral" | "success" | "warning" | "danger
   return "warning";
 }
 
-function ScopePicker({ entities, sites, aspects }: { entities: Option[]; sites: Option[]; aspects: Option[] }) {
+function ScopePicker({ uid, entities, sites, aspects }: { uid: string; entities: Option[]; sites: Option[]; aspects: Option[] }) {
   return (
     <div className="grid gap-4 sm:grid-cols-3">
       <div>
-        <Label>Entities</Label>
-        <select name="entityIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
+        <Label htmlFor={`entityIds-${uid}`}>Entities</Label>
+        <select id={`entityIds-${uid}`} name="entityIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
           {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.name}</option>)}
         </select>
       </div>
       <div>
-        <Label>Sites</Label>
-        <select name="siteIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
+        <Label htmlFor={`siteIds-${uid}`}>Sites</Label>
+        <select id={`siteIds-${uid}`} name="siteIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
           {sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
         </select>
       </div>
       <div>
-        <Label>Aspects</Label>
-        <select name="aspectIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
+        <Label htmlFor={`aspectIds-${uid}`}>Aspects</Label>
+        <select id={`aspectIds-${uid}`} name="aspectIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
           {aspects.map((aspect) => <option key={aspect.id} value={aspect.id}>{aspect.name}</option>)}
         </select>
       </div>
@@ -98,12 +98,14 @@ function ScopePicker({ entities, sites, aspects }: { entities: Option[]; sites: 
 }
 
 function DraftFields({
+  uid,
   entities,
   sites,
   aspects,
   controls,
   members,
 }: {
+  uid: string;
   entities: Option[];
   sites: Option[];
   aspects: Option[];
@@ -114,42 +116,42 @@ function DraftFields({
     <>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Title</Label>
-          <Input name="title" required placeholder="Synthetic example: Discharge permit condition 4.2" />
+          <Label htmlFor={`title-${uid}`}>Title</Label>
+          <Input id={`title-${uid}`} name="title" required placeholder="Synthetic example: Discharge permit condition 4.2" />
         </div>
         <div>
-          <Label>Owner</Label>
-          <Select name="ownerMembershipId" required defaultValue="">
+          <Label htmlFor={`ownerMembershipId-${uid}`}>Owner</Label>
+          <Select id={`ownerMembershipId-${uid}`} name="ownerMembershipId" required defaultValue="">
             <option value="" disabled>Choose an owner</option>
             {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
           </Select>
         </div>
         <div>
-          <Label>Frequency (optional)</Label>
-          <Input name="frequency" placeholder="e.g. Quarterly" />
+          <Label htmlFor={`frequency-${uid}`}>Frequency (optional)</Label>
+          <Input id={`frequency-${uid}`} name="frequency" placeholder="e.g. Quarterly" />
         </div>
         <div>
-          <Label>Trigger (optional)</Label>
-          <Input name="triggerDescription" placeholder="e.g. Discharge volume change" />
+          <Label htmlFor={`triggerDescription-${uid}`}>Trigger (optional)</Label>
+          <Input id={`triggerDescription-${uid}`} name="triggerDescription" placeholder="e.g. Discharge volume change" />
         </div>
         <div>
-          <Label>Effective from (optional)</Label>
-          <Input name="effectiveFrom" type="date" />
+          <Label htmlFor={`effectiveFrom-${uid}`}>Effective from (optional)</Label>
+          <Input id={`effectiveFrom-${uid}`} name="effectiveFrom" type="date" />
         </div>
         <div>
-          <Label>Review due (optional)</Label>
-          <Input name="reviewDueDate" type="date" />
+          <Label htmlFor={`reviewDueDate-${uid}`}>Review due (optional)</Label>
+          <Input id={`reviewDueDate-${uid}`} name="reviewDueDate" type="date" />
         </div>
       </div>
       <div>
-        <Label>Requirement summary</Label>
-        <Textarea name="requirementSummary" required rows={3} placeholder="Synthetic requirement text only." />
+        <Label htmlFor={`requirementSummary-${uid}`}>Requirement summary</Label>
+        <Textarea id={`requirementSummary-${uid}`} name="requirementSummary" required rows={3} placeholder="Synthetic requirement text only." />
       </div>
-      <ScopePicker entities={entities} sites={sites} aspects={aspects} />
+      <ScopePicker uid={uid} entities={entities} sites={sites} aspects={aspects} />
       {controls.length > 0 && (
         <div>
-          <Label>Operational controls (optional)</Label>
-          <select name="controlIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
+          <Label htmlFor={`controlIds-${uid}`}>Operational controls (optional)</Label>
+          <select id={`controlIds-${uid}`} name="controlIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
             {controls.map((control) => <option key={control.id} value={control.id}>{control.name}</option>)}
           </select>
         </div>
@@ -177,7 +179,7 @@ function CreateObligationForm({
   return (
     <form action={action} className="space-y-4 rounded-lg border border-slate-200 p-4">
       <input type="hidden" name="applicabilityAssessmentId" value={applicabilityAssessmentId} />
-      <DraftFields entities={entities} sites={sites} aspects={aspects} controls={controls} members={members} />
+      <DraftFields uid={`create-${applicabilityAssessmentId}`} entities={entities} sites={sites} aspects={aspects} controls={controls} members={members} />
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Create draft obligation"}</Button>
     </form>
@@ -203,7 +205,7 @@ function EditDraftForm({
   return (
     <form action={action} className="space-y-4 rounded-lg border border-slate-200 p-4">
       <input type="hidden" name="obligationVersionId" value={version.id} />
-      <DraftFields entities={entities} sites={sites} aspects={aspects} controls={controls} members={members} />
+      <DraftFields uid={`edit-${version.id}`} entities={entities} sites={sites} aspects={aspects} controls={controls} members={members} />
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save draft"}</Button>
     </form>
@@ -227,16 +229,16 @@ function DecideForm({ obligationVersionId }: { obligationVersionId: string }) {
     <form action={action} className="space-y-3 rounded-lg border border-slate-200 p-4">
       <input type="hidden" name="obligationVersionId" value={obligationVersionId} />
       <div>
-        <Label>Decision</Label>
-        <Select name="decision" defaultValue="APPROVED" required>
+        <Label htmlFor={`decision-${obligationVersionId}`}>Decision</Label>
+        <Select id={`decision-${obligationVersionId}`} name="decision" defaultValue="APPROVED" required>
           <option value="APPROVED">Approve (makes this version active)</option>
           <option value="REJECTED">Reject</option>
           <option value="RETURNED">Return for revision</option>
         </Select>
       </div>
       <div>
-        <Label>Comment (optional)</Label>
-        <Textarea name="comment" rows={2} />
+        <Label htmlFor={`comment-${obligationVersionId}`}>Comment (optional)</Label>
+        <Textarea id={`comment-${obligationVersionId}`} name="comment" rows={2} />
       </div>
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Recording…" : "Record decision"}</Button>
@@ -262,19 +264,19 @@ function ChangeReviewForm({ obligationVersionId, changeEvents }: { obligationVer
     <form action={action} className="space-y-3 rounded-lg border border-slate-200 p-4">
       <input type="hidden" name="obligationVersionId" value={obligationVersionId} />
       <div>
-        <Label>Legal change event</Label>
-        <Select name="changeEventId" required defaultValue="">
+        <Label htmlFor={`changeEventId-${obligationVersionId}`}>Legal change event</Label>
+        <Select id={`changeEventId-${obligationVersionId}`} name="changeEventId" required defaultValue="">
           <option value="" disabled>Choose a change event</option>
           {changeEvents.map((event) => <option key={event.id} value={event.id}>{event.instrumentTitle}</option>)}
         </Select>
       </div>
       <div>
-        <Label>Impact assessment</Label>
-        <Textarea name="impactAssessment" required rows={2} placeholder="Synthetic example only." />
+        <Label htmlFor={`impactAssessment-${obligationVersionId}`}>Impact assessment</Label>
+        <Textarea id={`impactAssessment-${obligationVersionId}`} name="impactAssessment" required rows={2} placeholder="Synthetic example only." />
       </div>
       <div>
-        <Label>Recommended follow-up (optional)</Label>
-        <Select name="decision" defaultValue="">
+        <Label htmlFor={`changeReviewDecision-${obligationVersionId}`}>Recommended follow-up (optional)</Label>
+        <Select id={`changeReviewDecision-${obligationVersionId}`} name="decision" defaultValue="">
           <option value="">Not yet decided</option>
           <option value="NO_CHANGE">No change needed</option>
           <option value="REVISE">Revise obligation</option>
@@ -290,6 +292,7 @@ function ChangeReviewForm({ obligationVersionId, changeEvents }: { obligationVer
 
 function SuccessorForm({
   obligationId,
+  versionId,
   applicabilityAssessmentId,
   entities,
   sites,
@@ -298,6 +301,7 @@ function SuccessorForm({
   members,
 }: {
   obligationId: string;
+  versionId: string;
   applicabilityAssessmentId: string;
   entities: Option[];
   sites: Option[];
@@ -310,7 +314,7 @@ function SuccessorForm({
     <form action={action} className="space-y-4 rounded-lg border border-slate-200 p-4">
       <input type="hidden" name="obligationId" value={obligationId} />
       <input type="hidden" name="applicabilityAssessmentId" value={applicabilityAssessmentId} />
-      <DraftFields entities={entities} sites={sites} aspects={aspects} controls={controls} members={members} />
+      <DraftFields uid={`successor-${versionId}`} entities={entities} sites={sites} aspects={aspects} controls={controls} members={members} />
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Create successor draft"}</Button>
     </form>
@@ -420,6 +424,7 @@ function VersionCard({
             <div className="mt-3">
               <SuccessorForm
                 obligationId={obligationId}
+                versionId={version.id}
                 applicabilityAssessmentId={defaultAssessmentId}
                 entities={entities}
                 sites={sites}

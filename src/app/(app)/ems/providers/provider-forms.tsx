@@ -50,14 +50,14 @@ function CreateProviderControl({ aspects, members }: { aspects: AspectOption[]; 
       <CardContent>
         <form action={action} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <div><Label>Provider reference</Label><Input name="providerReference" required placeholder="synthetic-provider-01" /></div>
-            <div><Label>Provider name</Label><Input name="providerName" required placeholder="Synthetic Logistics Ltd" /></div>
-            <div><Label>Responsible owner</Label><Select name="ownerMembershipId" required defaultValue=""><option value="">Select…</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></div>
-            <div><Label>Evaluation frequency</Label><Input name="evaluationFrequency" required placeholder="Annually" /></div>
-            <div><Label>Next review due</Label><Input name="nextReviewDueDate" type="date" required /></div>
-            <div className="sm:col-span-2"><Label>Linked aspects (Ctrl/Cmd to select multiple)</Label><Select name="aspectIds" multiple required className="min-h-28">{aspects.map((aspect) => <option key={aspect.id} value={aspect.id}>{aspect.name} — {aspect.processName}</option>)}</Select></div>
-            <div className="sm:col-span-2"><Label>Process/product/service provided</Label><Textarea name="providedDescription" rows={2} required /></div>
-            <div className="sm:col-span-2"><Label>Communicated environmental requirements</Label><Textarea name="communicatedRequirements" rows={3} required /></div>
+            <div><Label htmlFor="providerReference">Provider reference</Label><Input id="providerReference" name="providerReference" required placeholder="synthetic-provider-01" /></div>
+            <div><Label htmlFor="providerName">Provider name</Label><Input id="providerName" name="providerName" required placeholder="Synthetic Logistics Ltd" /></div>
+            <div><Label htmlFor="ownerMembershipId">Responsible owner</Label><Select id="ownerMembershipId" name="ownerMembershipId" required defaultValue=""><option value="">Select…</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></div>
+            <div><Label htmlFor="evaluationFrequency">Evaluation frequency</Label><Input id="evaluationFrequency" name="evaluationFrequency" required placeholder="Annually" /></div>
+            <div><Label htmlFor="nextReviewDueDate">Next review due</Label><Input id="nextReviewDueDate" name="nextReviewDueDate" type="date" required /></div>
+            <div className="sm:col-span-2"><Label htmlFor="aspectIds">Linked aspects (Ctrl/Cmd to select multiple)</Label><Select id="aspectIds" name="aspectIds" multiple required className="min-h-28">{aspects.map((aspect) => <option key={aspect.id} value={aspect.id}>{aspect.name} — {aspect.processName}</option>)}</Select></div>
+            <div className="sm:col-span-2"><Label htmlFor="providedDescription">Process/product/service provided</Label><Textarea id="providedDescription" name="providedDescription" rows={2} required /></div>
+            <div className="sm:col-span-2"><Label htmlFor="communicatedRequirements">Communicated environmental requirements</Label><Textarea id="communicatedRequirements" name="communicatedRequirements" rows={3} required /></div>
           </div>
           <Feedback state={state} />
           <Button type="submit" disabled={pending || aspects.length === 0 || members.length === 0}>{pending ? "Recording…" : "Record provider control"}</Button>
@@ -79,12 +79,12 @@ function EvaluationForm({ providerControlId }: { providerControlId: string }) {
       <input type="hidden" name="providerControlId" value={providerControlId} />
       <p className="text-sm font-medium">Record evaluation</p>
       <div className="grid gap-3 sm:grid-cols-3">
-        <div><Label>Evaluated on</Label><Input name="evaluatedAt" type="date" required /></div>
-        <div><Label>Result</Label><Select name="result" defaultValue="PASS"><option value="PASS">Pass</option><option value="CONDITIONAL">Conditional</option><option value="FAIL">Fail</option></Select></div>
-        <div><Label>Next review due</Label><Input name="nextReviewDueDate" type="date" required /></div>
+        <div><Label htmlFor={`evaluatedAt-${providerControlId}`}>Evaluated on</Label><Input id={`evaluatedAt-${providerControlId}`} name="evaluatedAt" type="date" required /></div>
+        <div><Label htmlFor={`result-${providerControlId}`}>Result</Label><Select id={`result-${providerControlId}`} name="result" defaultValue="PASS"><option value="PASS">Pass</option><option value="CONDITIONAL">Conditional</option><option value="FAIL">Fail</option></Select></div>
+        <div><Label htmlFor={`nextReviewDueDate-${providerControlId}`}>Next review due</Label><Input id={`nextReviewDueDate-${providerControlId}`} name="nextReviewDueDate" type="date" required /></div>
       </div>
-      <div><Label>Notes</Label><Textarea name="notes" rows={2} /></div>
-      <div><Label>Action reference (optional)</Label><Input name="actionReference" placeholder="Explicit reference; no action is auto-created" /></div>
+      <div><Label htmlFor={`notes-${providerControlId}`}>Notes</Label><Textarea id={`notes-${providerControlId}`} name="notes" rows={2} /></div>
+      <div><Label htmlFor={`actionReference-${providerControlId}`}>Action reference (optional)</Label><Input id={`actionReference-${providerControlId}`} name="actionReference" placeholder="Explicit reference; no action is auto-created" /></div>
       <Feedback state={state} /><Button type="submit" variant="secondary" disabled={pending}>{pending ? "Recording…" : "Record evaluation"}</Button>
     </form>
   );
@@ -100,7 +100,7 @@ function EvaluationItem({ evaluation }: { evaluation: EvaluationRow }) {
       {evaluation.actionReference && <p className="mt-1 text-slate-600">Action reference: {evaluation.actionReference}</p>}
       <form action={action} className="mt-2 flex flex-wrap items-end gap-2">
         <input type="hidden" name="evaluationId" value={evaluation.id} />
-        <div><Label>Attach evidence</Label><Input name="file" type="file" required /></div>
+        <div><Label htmlFor={`providerEvidence-${evaluation.id}`}>Attach evidence</Label><Input id={`providerEvidence-${evaluation.id}`} name="file" type="file" required /></div>
         <Input name="purpose" placeholder="Purpose (optional)" />
         <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Uploading…" : "Attach"}</Button>
         <Feedback state={state} />

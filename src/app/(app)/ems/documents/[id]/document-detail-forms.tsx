@@ -115,7 +115,7 @@ export function ApproveRevisionButton({ documentId, revisionId }: { documentId: 
         {pending ? "Approving…" : "Approve"}
       </Button>
       <Feedback state={state} />
-      <p className="text-xs text-slate-400">Four-eyes: the preparer cannot approve their own revision.</p>
+      <p className="text-xs text-slate-500">Four-eyes: the preparer cannot approve their own revision.</p>
     </form>
   );
 }

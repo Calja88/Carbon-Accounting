@@ -153,8 +153,9 @@ function ProgrammeSelector({ programmes, selectedProgrammeId }: { programmes: Pr
   if (programmes.length <= 1) return null;
   return (
     <div className="max-w-sm">
-      <Label>Programme</Label>
+      <Label htmlFor="foundation-programme-selector">Programme</Label>
       <Select
+        id="foundation-programme-selector"
         defaultValue={selectedProgrammeId ?? ""}
         onChange={(event) => router.push(`/ems/programme?programmeId=${event.target.value}`)}
       >
@@ -175,20 +176,20 @@ function CreateProgrammeForm({ members }: { members: MemberOption[] }) {
       <CardHeader><CardTitle>Create EMS programme</CardTitle></CardHeader>
       <CardContent>
         <form action={action} className="grid gap-4 sm:grid-cols-2">
-          <div><Label>Programme name</Label><Input name="name" required placeholder="Synthetic environmental management programme" /></div>
-          <div><Label>Standards profile</Label><Input name="standardsProfile" required placeholder="ISO14001" /></div>
-          <div><Label>Profile version</Label><Input name="standardsProfileVersion" required placeholder="2015" /></div>
+          <div><Label htmlFor="new-programme-name">Programme name</Label><Input id="new-programme-name" name="name" required placeholder="Synthetic environmental management programme" /></div>
+          <div><Label htmlFor="new-programme-standards-profile">Standards profile</Label><Input id="new-programme-standards-profile" name="standardsProfile" required placeholder="ISO14001" /></div>
+          <div><Label htmlFor="new-programme-profile-version">Profile version</Label><Input id="new-programme-profile-version" name="standardsProfileVersion" required placeholder="2015" /></div>
           <div>
-            <Label>Certification intent</Label>
-            <Select name="certificationIntent" defaultValue="NONE">
+            <Label htmlFor="new-programme-certification-intent">Certification intent</Label>
+            <Select id="new-programme-certification-intent" name="certificationIntent" defaultValue="NONE">
               <option value="NONE">None</option>
               <option value="PLANNED">Planned</option>
               <option value="CERTIFIED_EXTERNALLY">Certified externally</option>
             </Select>
           </div>
           <div className="sm:col-span-2">
-            <Label>Owner (optional)</Label>
-            <Select name="ownerMembershipId" defaultValue="">
+            <Label htmlFor="new-programme-owner">Owner (optional)</Label>
+            <Select id="new-programme-owner" name="ownerMembershipId" defaultValue="">
               <option value="">Unassigned</option>
               {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </Select>
@@ -278,10 +279,10 @@ function CreateScopeVersionForm({ programmeId, hasVersion }: { programmeId: stri
         <form action={action} className="space-y-4">
           <input type="hidden" name="programmeId" value={programmeId} />
           <input type="hidden" name="successor" value={hasVersion ? "true" : "false"} />
-          <div><Label>Scope statement</Label><Textarea name="statement" rows={3} required placeholder="Synthetic boundary statement covering included entities, sites and activities." /></div>
+          <div><Label htmlFor="scope-version-statement">Scope statement</Label><Textarea id="scope-version-statement" name="statement" rows={3} required placeholder="Synthetic boundary statement covering included entities, sites and activities." /></div>
           <div className="grid gap-4 sm:grid-cols-2">
-            <div><Label>Exclusions (optional)</Label><Textarea name="exclusions" rows={2} /></div>
-            <div><Label>Exclusions rationale (optional)</Label><Textarea name="exclusionsRationale" rows={2} /></div>
+            <div><Label htmlFor="scope-version-exclusions">Exclusions (optional)</Label><Textarea id="scope-version-exclusions" name="exclusions" rows={2} /></div>
+            <div><Label htmlFor="scope-version-exclusions-rationale">Exclusions rationale (optional)</Label><Textarea id="scope-version-exclusions-rationale" name="exclusionsRationale" rows={2} /></div>
           </div>
           <Feedback state={state} />
           <Button type="submit" disabled={pending}>{pending ? "Creating…" : hasVersion ? "Create successor version" : "Create scope version"}</Button>
@@ -301,24 +302,24 @@ function ScopeBoundaryEditor({ version, entities, sites }: { version: ScopeVersi
     <div className="grid gap-3 sm:grid-cols-3">
       <form action={entityAction} className="space-y-2 rounded border border-slate-200 p-2">
         <input type="hidden" name="scopeVersionId" value={version.id} />
-        <Label>Add entity</Label>
-        <Select name="entityId" defaultValue=""><option value="">Select…</option>{entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</Select>
+        <Label htmlFor={`scope-add-entity-${version.id}`}>Add entity</Label>
+        <Select id={`scope-add-entity-${version.id}`} name="entityId" defaultValue=""><option value="">Select…</option>{entities.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}</Select>
         <Button type="submit" variant="secondary" size="sm" disabled={entityPending}>{entityPending ? "Adding…" : "Add entity"}</Button>
         <Feedback state={entityState} />
       </form>
       <form action={siteAction} className="space-y-2 rounded border border-slate-200 p-2">
         <input type="hidden" name="scopeVersionId" value={version.id} />
-        <Label>Add site</Label>
-        <Select name="siteId" defaultValue=""><option value="">Select…</option>{availableSites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>
+        <Label htmlFor={`scope-add-site-${version.id}`}>Add site</Label>
+        <Select id={`scope-add-site-${version.id}`} name="siteId" defaultValue=""><option value="">Select…</option>{availableSites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>
         <Button type="submit" variant="secondary" size="sm" disabled={sitePending || availableSites.length === 0}>{sitePending ? "Adding…" : "Add site"}</Button>
         <Feedback state={siteState} />
-        {availableSites.length === 0 && <p className="text-xs text-slate-400">Add the site&apos;s entity first.</p>}
+        {availableSites.length === 0 && <p className="text-xs text-slate-500">Add the site&apos;s entity first.</p>}
       </form>
       <form action={activityAction} className="space-y-2 rounded border border-slate-200 p-2">
         <input type="hidden" name="scopeVersionId" value={version.id} />
-        <Label>Add activity/product/service</Label>
-        <Input name="description" placeholder="Synthetic activity description" />
-        <Select name="siteId" defaultValue=""><option value="">No specific site</option>{availableSites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>
+        <Label htmlFor={`scope-activity-description-${version.id}`}>Add activity/product/service</Label>
+        <Input id={`scope-activity-description-${version.id}`} name="description" placeholder="Synthetic activity description" />
+        <Select aria-label="Site (optional)" name="siteId" defaultValue=""><option value="">No specific site</option>{availableSites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>
         <Button type="submit" variant="secondary" size="sm" disabled={activityPending}>{activityPending ? "Adding…" : "Add activity"}</Button>
         <Feedback state={activityState} />
       </form>
@@ -368,27 +369,27 @@ function CreateContextIssueForm({ programmeId, members }: { programmeId: string;
       <CardContent>
         <form action={action} className="grid gap-4 sm:grid-cols-2">
           <input type="hidden" name="programmeId" value={programmeId} />
-          <div><Label>Title</Label><Input name="title" required placeholder="Synthetic internal/external issue" /></div>
+          <div><Label htmlFor="context-issue-title">Title</Label><Input id="context-issue-title" name="title" required placeholder="Synthetic internal/external issue" /></div>
           <div>
-            <Label>Type</Label>
-            <Select name="type" defaultValue="INTERNAL">
+            <Label htmlFor="context-issue-type">Type</Label>
+            <Select id="context-issue-type" name="type" defaultValue="INTERNAL">
               <option value="INTERNAL">Internal</option>
               <option value="EXTERNAL">External</option>
               <option value="ENVIRONMENTAL_CONDITION">Environmental condition</option>
             </Select>
           </div>
           <div>
-            <Label>Direction</Label>
-            <Select name="direction" defaultValue="AFFECTS_ORGANISATION">
+            <Label htmlFor="context-issue-direction">Direction</Label>
+            <Select id="context-issue-direction" name="direction" defaultValue="AFFECTS_ORGANISATION">
               <option value="AFFECTS_ORGANISATION">Affects organisation</option>
               <option value="AFFECTED_BY_ORGANISATION">Affected by organisation</option>
               <option value="BOTH">Both</option>
             </Select>
           </div>
-          <div><Label>Owner (optional)</Label><Select name="ownerMembershipId" defaultValue=""><option value="">Unassigned</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select></div>
-          <div className="sm:col-span-2"><Label>Description (optional)</Label><Textarea name="description" rows={2} /></div>
-          <div><Label>Significance (optional)</Label><Input name="significance" /></div>
-          <div><Label>Review date (optional)</Label><Input name="reviewDate" type="date" /></div>
+          <div><Label htmlFor="context-issue-owner">Owner (optional)</Label><Select id="context-issue-owner" name="ownerMembershipId" defaultValue=""><option value="">Unassigned</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select></div>
+          <div className="sm:col-span-2"><Label htmlFor="context-issue-description">Description (optional)</Label><Textarea id="context-issue-description" name="description" rows={2} /></div>
+          <div><Label htmlFor="context-issue-significance">Significance (optional)</Label><Input id="context-issue-significance" name="significance" /></div>
+          <div><Label htmlFor="context-issue-review-date">Review date (optional)</Label><Input id="context-issue-review-date" name="reviewDate" type="date" /></div>
           <div className="sm:col-span-2"><Feedback state={state} /><Button type="submit" disabled={pending}>{pending ? "Adding…" : "Add context issue"}</Button></div>
         </form>
       </CardContent>
@@ -429,13 +430,13 @@ function CreateInterestedPartyForm({ programmeId, members }: { programmeId: stri
       <CardContent>
         <form action={action} className="grid gap-4 sm:grid-cols-2">
           <input type="hidden" name="programmeId" value={programmeId} />
-          <div><Label>Name</Label><Input name="name" required placeholder="Synthetic regulator / neighbour / customer" /></div>
-          <div><Label>Type</Label><Input name="type" required placeholder="Regulator" /></div>
+          <div><Label htmlFor="interested-party-name">Name</Label><Input id="interested-party-name" name="name" required placeholder="Synthetic regulator / neighbour / customer" /></div>
+          <div><Label htmlFor="interested-party-type">Type</Label><Input id="interested-party-type" name="type" required placeholder="Regulator" /></div>
           <div>
-            <Label>Influence (optional)</Label>
-            <Select name="influence" defaultValue=""><option value="">Not assessed</option><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option></Select>
+            <Label htmlFor="interested-party-influence">Influence (optional)</Label>
+            <Select id="interested-party-influence" name="influence" defaultValue=""><option value="">Not assessed</option><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option></Select>
           </div>
-          <div><Label>Relationship owner (optional)</Label><Select name="relationshipOwnerMembershipId" defaultValue=""><option value="">Unassigned</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select></div>
+          <div><Label htmlFor="interested-party-owner">Relationship owner (optional)</Label><Select id="interested-party-owner" name="relationshipOwnerMembershipId" defaultValue=""><option value="">Unassigned</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select></div>
           <div className="sm:col-span-2"><Feedback state={state} /><Button type="submit" disabled={pending}>{pending ? "Adding…" : "Add interested party"}</Button></div>
         </form>
       </CardContent>
@@ -448,8 +449,8 @@ function InterestedPartyRequirementForm({ partyId }: { partyId: string }) {
   return (
     <form action={action} className="space-y-2 rounded border border-slate-200 p-2">
       <input type="hidden" name="interestedPartyId" value={partyId} />
-      <Label>Add requirement</Label>
-      <Textarea name="summary" rows={2} required placeholder="Synthetic requirement summary" />
+      <Label htmlFor={`party-requirement-summary-${partyId}`}>Add requirement</Label>
+      <Textarea id={`party-requirement-summary-${partyId}`} name="summary" rows={2} required placeholder="Synthetic requirement summary" />
       <div className="grid gap-2 sm:grid-cols-2">
         <Input name="sourceReference" placeholder="Source/evidence reference (optional)" />
         <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" name="isMandatory" value="true" className="h-4 w-4" /> Mandatory</label>
@@ -505,14 +506,14 @@ function CreateRiskOpportunityForm({ programmeId, members }: { programmeId: stri
       <CardContent>
         <form action={action} className="grid gap-4 sm:grid-cols-2">
           <input type="hidden" name="programmeId" value={programmeId} />
-          <div><Label>Kind</Label><Select name="kind" defaultValue="RISK"><option value="RISK">Risk</option><option value="OPPORTUNITY">Opportunity</option></Select></div>
-          <div><Label>Category</Label><Input name="category" required placeholder="Synthetic category" /></div>
-          <div className="sm:col-span-2"><Label>Description</Label><Textarea name="description" rows={2} required /></div>
-          <div><Label>Consequence (optional)</Label><Input name="consequence" /></div>
-          <div><Label>Likelihood (optional)</Label><Input name="likelihood" /></div>
-          <div><Label>Rating scale version</Label><Input name="ratingScaleVersion" required placeholder="v1" /></div>
-          <div><Label>Initial rating value</Label><Input name="initialRatingValue" required placeholder="e.g. 12" /></div>
-          <div className="sm:col-span-2"><Label>Owner (optional)</Label><Select name="ownerMembershipId" defaultValue=""><option value="">Unassigned</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select></div>
+          <div><Label htmlFor="risk-kind">Kind</Label><Select id="risk-kind" name="kind" defaultValue="RISK"><option value="RISK">Risk</option><option value="OPPORTUNITY">Opportunity</option></Select></div>
+          <div><Label htmlFor="risk-category">Category</Label><Input id="risk-category" name="category" required placeholder="Synthetic category" /></div>
+          <div className="sm:col-span-2"><Label htmlFor="risk-description">Description</Label><Textarea id="risk-description" name="description" rows={2} required /></div>
+          <div><Label htmlFor="risk-consequence">Consequence (optional)</Label><Input id="risk-consequence" name="consequence" /></div>
+          <div><Label htmlFor="risk-likelihood">Likelihood (optional)</Label><Input id="risk-likelihood" name="likelihood" /></div>
+          <div><Label htmlFor="risk-rating-scale-version">Rating scale version</Label><Input id="risk-rating-scale-version" name="ratingScaleVersion" required placeholder="v1" /></div>
+          <div><Label htmlFor="risk-initial-rating-value">Initial rating value</Label><Input id="risk-initial-rating-value" name="initialRatingValue" required placeholder="e.g. 12" /></div>
+          <div className="sm:col-span-2"><Label htmlFor="risk-owner">Owner (optional)</Label><Select id="risk-owner" name="ownerMembershipId" defaultValue=""><option value="">Unassigned</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select></div>
           <div className="sm:col-span-2"><Feedback state={state} /><Button type="submit" disabled={pending}>{pending ? "Registering…" : "Register"}</Button></div>
         </form>
       </CardContent>
@@ -525,10 +526,10 @@ function ResidualRatingForm({ riskId }: { riskId: string }) {
   return (
     <form action={action} className="space-y-2 rounded border border-slate-200 p-2">
       <input type="hidden" name="riskOpportunityId" value={riskId} />
-      <Label>Record residual rating</Label>
+      <Label htmlFor={`residual-rating-value-${riskId}`}>Record residual rating</Label>
       <div className="grid gap-2 sm:grid-cols-2">
-        <Input name="residualRatingValue" required placeholder="e.g. 4" />
-        <Select name="status" defaultValue="OPEN"><option value="OPEN">Open</option><option value="MONITORING">Monitoring</option><option value="CLOSED">Closed</option></Select>
+        <Input id={`residual-rating-value-${riskId}`} name="residualRatingValue" required placeholder="e.g. 4" />
+        <Select aria-label="Status" name="status" defaultValue="OPEN"><option value="OPEN">Open</option><option value="MONITORING">Monitoring</option><option value="CLOSED">Closed</option></Select>
       </div>
       <Button type="submit" variant="secondary" size="sm" disabled={pending}>{pending ? "Recording…" : "Record"}</Button>
       <Feedback state={state} />
@@ -569,9 +570,9 @@ function CreateChangeAssessmentForm({ programmeId }: { programmeId: string }) {
       <CardContent>
         <form action={action} className="grid gap-4 sm:grid-cols-2">
           <input type="hidden" name="programmeId" value={programmeId} />
-          <div className="sm:col-span-2"><Label>Proposed change</Label><Textarea name="proposedChange" rows={2} required /></div>
-          <div><Label>Trigger type</Label><Input name="triggerType" required placeholder="Synthetic trigger" /></div>
-          <div><Label>Trigger date (optional)</Label><Input name="triggerDate" type="date" /></div>
+          <div className="sm:col-span-2"><Label htmlFor="change-proposed">Proposed change</Label><Textarea id="change-proposed" name="proposedChange" rows={2} required /></div>
+          <div><Label htmlFor="change-trigger-type">Trigger type</Label><Input id="change-trigger-type" name="triggerType" required placeholder="Synthetic trigger" /></div>
+          <div><Label htmlFor="change-trigger-date">Trigger date (optional)</Label><Input id="change-trigger-date" name="triggerDate" type="date" /></div>
           <div className="sm:col-span-2"><Feedback state={state} /><Button type="submit" disabled={pending}>{pending ? "Creating…" : "Create assessment"}</Button></div>
         </form>
       </CardContent>

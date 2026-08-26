@@ -71,31 +71,31 @@ function CreateProgrammeForm({ members, objectives }: { members: Option[]; objec
     <form action={formAction} className="space-y-3">
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Title</Label>
-          <Input name="title" required placeholder="Synthetic example: Pilot-site waste reduction programme" />
+          <Label htmlFor="programme-title">Title</Label>
+          <Input id="programme-title" name="title" required placeholder="Synthetic example: Pilot-site waste reduction programme" />
         </div>
         <div>
-          <Label>Owner</Label>
-          <Select name="ownerMembershipId" required defaultValue="">
+          <Label htmlFor="programme-owner">Owner</Label>
+          <Select id="programme-owner" name="ownerMembershipId" required defaultValue="">
             <option value="" disabled>Choose an owner</option>
             {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
           </Select>
         </div>
         <div>
-          <Label>Supports objective (optional)</Label>
-          <Select name="objectiveId" defaultValue="">
+          <Label htmlFor="programme-objective">Supports objective (optional)</Label>
+          <Select id="programme-objective" name="objectiveId" defaultValue="">
             <option value="">No linked objective</option>
             {objectives.map((objective) => <option key={objective.id} value={objective.id}>{objective.name}</option>)}
           </Select>
         </div>
         <div>
-          <Label>Target date (optional)</Label>
-          <Input name="targetDate" type="date" />
+          <Label htmlFor="programme-target-date">Target date (optional)</Label>
+          <Input id="programme-target-date" name="targetDate" type="date" />
         </div>
       </div>
       <div>
-        <Label>Resources (optional)</Label>
-        <Textarea name="resourcesDescription" rows={2} placeholder="Fictional resourcing notes only." />
+        <Label htmlFor="programme-resources">Resources (optional)</Label>
+        <Textarea id="programme-resources" name="resourcesDescription" rows={2} placeholder="Fictional resourcing notes only." />
       </div>
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Creating…" : "Create programme"}</Button>
@@ -109,26 +109,26 @@ function CreateActionForm({ programmes, members }: { programmes: Option[]; membe
     <form action={formAction} className="space-y-3">
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Programme</Label>
-          <Select name="programmeId" required defaultValue="">
+          <Label htmlFor="action-programme">Programme</Label>
+          <Select id="action-programme" name="programmeId" required defaultValue="">
             <option value="" disabled>Choose a programme</option>
             {programmes.map((programme) => <option key={programme.id} value={programme.id}>{programme.name}</option>)}
           </Select>
         </div>
         <div>
-          <Label>Owner</Label>
-          <Select name="ownerMembershipId" required defaultValue="">
+          <Label htmlFor="action-owner">Owner</Label>
+          <Select id="action-owner" name="ownerMembershipId" required defaultValue="">
             <option value="" disabled>Choose an owner</option>
             {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
           </Select>
         </div>
         <div>
-          <Label>Title</Label>
-          <Input name="title" required placeholder="Synthetic example: Install fictional pilot-site segregation bins" />
+          <Label htmlFor="action-title">Title</Label>
+          <Input id="action-title" name="title" required placeholder="Synthetic example: Install fictional pilot-site segregation bins" />
         </div>
         <div>
-          <Label>Priority</Label>
-          <Select name="priority" defaultValue="MEDIUM">
+          <Label htmlFor="action-priority">Priority</Label>
+          <Select id="action-priority" name="priority" defaultValue="MEDIUM">
             <option value="LOW">Low</option>
             <option value="MEDIUM">Medium</option>
             <option value="HIGH">High</option>
@@ -136,13 +136,13 @@ function CreateActionForm({ programmes, members }: { programmes: Option[]; membe
           </Select>
         </div>
         <div>
-          <Label>Due date</Label>
-          <Input name="dueDate" type="date" required />
+          <Label htmlFor="action-due-date">Due date</Label>
+          <Input id="action-due-date" name="dueDate" type="date" required />
         </div>
       </div>
       <div>
-        <Label>Completion criteria (optional)</Label>
-        <Textarea name="completionCriteria" rows={2} placeholder="What must be true for this action to be complete." />
+        <Label htmlFor="action-completion-criteria">Completion criteria (optional)</Label>
+        <Textarea id="action-completion-criteria" name="completionCriteria" rows={2} placeholder="What must be true for this action to be complete." />
       </div>
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Creating…" : "Create action"}</Button>
@@ -184,16 +184,16 @@ function ActionCard({ action, members, canManage }: { action: ActionItemRow; mem
         )}
 
         {!canManage && (
-          <p className="text-xs text-slate-400">Read-only — you don&apos;t hold the action-management permission.</p>
+          <p className="text-xs text-slate-500">Read-only — you don&apos;t hold the action-management permission.</p>
         )}
 
         {canManage && !closed && (
           <div className="grid gap-3 sm:grid-cols-2">
             <form action={statusAction} className="space-y-1">
               <input type="hidden" name="actionItemId" value={action.id} />
-              <Label>Change status</Label>
+              <Label htmlFor={`status-${action.id}`}>Change status</Label>
               <div className="flex gap-2">
-                <Select name="status" defaultValue="IN_PROGRESS" className="flex-1">
+                <Select id={`status-${action.id}`} name="status" defaultValue="IN_PROGRESS" className="flex-1">
                   <option value="IN_PROGRESS">In progress</option>
                   <option value="BLOCKED">Blocked</option>
                   <option value="CANCELLED">Cancel</option>
@@ -205,9 +205,9 @@ function ActionCard({ action, members, canManage }: { action: ActionItemRow; mem
 
             <form action={reassignAction} className="space-y-1">
               <input type="hidden" name="actionItemId" value={action.id} />
-              <Label>Reassign owner</Label>
+              <Label htmlFor={`reassign-owner-${action.id}`}>Reassign owner</Label>
               <div className="flex gap-2">
-                <Select name="newOwnerMembershipId" defaultValue="" className="flex-1">
+                <Select id={`reassign-owner-${action.id}`} name="newOwnerMembershipId" defaultValue="" className="flex-1">
                   <option value="" disabled>Choose owner</option>
                   {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
                 </Select>
@@ -218,10 +218,10 @@ function ActionCard({ action, members, canManage }: { action: ActionItemRow; mem
 
             <form action={progressAction} className="space-y-1 sm:col-span-2">
               <input type="hidden" name="actionItemId" value={action.id} />
-              <Label>Record progress</Label>
+              <Label htmlFor={`progress-note-${action.id}`}>Record progress</Label>
               <div className="flex gap-2">
-                <Input name="progressPercent" type="number" min={0} max={100} placeholder="%" className="w-20" />
-                <Input name="note" placeholder="Progress note" required className="flex-1" />
+                <Input aria-label="Progress percent" name="progressPercent" type="number" min={0} max={100} placeholder="%" className="w-20" />
+                <Input id={`progress-note-${action.id}`} name="note" placeholder="Progress note" required className="flex-1" />
                 <Button type="submit" variant="secondary" disabled={progressPending}>Record</Button>
               </div>
               <Feedback state={progressState} />
@@ -229,9 +229,9 @@ function ActionCard({ action, members, canManage }: { action: ActionItemRow; mem
 
             <form action={completeAction} className="space-y-1 sm:col-span-2">
               <input type="hidden" name="actionItemId" value={action.id} />
-              <Label>Complete action</Label>
+              <Label htmlFor={`completion-evidence-${action.id}`}>Complete action</Label>
               <div className="flex gap-2">
-                <Input name="completionEvidenceNote" placeholder="Completion evidence note" required className="flex-1" />
+                <Input id={`completion-evidence-${action.id}`} name="completionEvidenceNote" placeholder="Completion evidence note" required className="flex-1" />
                 <Button type="submit" disabled={completePending}>Complete</Button>
               </div>
               <p className="text-xs text-slate-500">Completing an action never marks a linked objective achieved.</p>
@@ -251,9 +251,9 @@ function ActionCard({ action, members, canManage }: { action: ActionItemRow; mem
         {canManage && closed && (
           <form action={reopenAction} className="space-y-1">
             <input type="hidden" name="actionItemId" value={action.id} />
-            <Label>Reopen (only path to change a closed action)</Label>
+            <Label htmlFor={`reopen-reason-${action.id}`}>Reopen (only path to change a closed action)</Label>
             <div className="flex gap-2">
-              <Input name="reopenReason" placeholder="Reason for reopening" required className="flex-1" />
+              <Input id={`reopen-reason-${action.id}`} name="reopenReason" placeholder="Reason for reopening" required className="flex-1" />
               <Button type="submit" variant="secondary" disabled={reopenPending}>Reopen</Button>
             </div>
             <Feedback state={reopenState} />
@@ -314,7 +314,7 @@ function ProgrammeCard({
             {canManage && (
               <form action={statusAction} className="flex items-center gap-1">
                 <input type="hidden" name="programmeId" value={programme.id} />
-                <Select name="status" defaultValue={programme.status} className="text-xs">
+                <Select aria-label="Programme status" name="status" defaultValue={programme.status} className="text-xs">
                   <option value="DRAFT">Draft</option>
                   <option value="ACTIVE">Active</option>
                   <option value="ON_HOLD">On hold</option>

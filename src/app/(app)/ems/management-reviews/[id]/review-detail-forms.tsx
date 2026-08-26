@@ -522,7 +522,7 @@ function MinutesSection({
                 {revision.approvedAt ? ` · Approved ${new Date(revision.approvedAt).toLocaleString()}` : ""}
               </p>
               {revision.checksumSha256 && (
-                <p className="mt-1 break-all font-mono text-xs text-slate-400">{revision.checksumSha256}</p>
+                <p className="mt-1 break-all font-mono text-xs text-slate-500">{revision.checksumSha256}</p>
               )}
               {revision.status === "DRAFT" && canApprove && (
                 <form action={approveAction} className="mt-2">

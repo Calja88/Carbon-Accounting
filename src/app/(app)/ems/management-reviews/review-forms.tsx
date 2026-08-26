@@ -120,42 +120,42 @@ function ScheduleReviewForm({ templateOptions, members }: { templateOptions: Age
       <h3 className="font-medium text-slate-900">Schedule a management review</h3>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Reference</Label>
-          <Input name="reference" required placeholder="Synthetic example: MR-2026-Q3" />
+          <Label htmlFor="schedule-reference">Reference</Label>
+          <Input id="schedule-reference" name="reference" required placeholder="Synthetic example: MR-2026-Q3" />
         </div>
         <div>
-          <Label>Agenda template version</Label>
-          <Select name="agendaTemplateVersionId" required defaultValue="">
+          <Label htmlFor="schedule-agendaTemplateVersionId">Agenda template version</Label>
+          <Select id="schedule-agendaTemplateVersionId" name="agendaTemplateVersionId" required defaultValue="">
             <option value="" disabled>Choose an approved or active version</option>
             {templateOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
           </Select>
         </div>
         <div>
-          <Label>Period start</Label>
-          <Input type="date" name="periodStart" required />
+          <Label htmlFor="schedule-periodStart">Period start</Label>
+          <Input id="schedule-periodStart" type="date" name="periodStart" required />
         </div>
         <div>
-          <Label>Period end</Label>
-          <Input type="date" name="periodEnd" required />
+          <Label htmlFor="schedule-periodEnd">Period end</Label>
+          <Input id="schedule-periodEnd" type="date" name="periodEnd" required />
         </div>
         <div>
-          <Label>Cutoff date</Label>
-          <Input type="date" name="cutoffDate" required />
+          <Label htmlFor="schedule-cutoffDate">Cutoff date</Label>
+          <Input id="schedule-cutoffDate" type="date" name="cutoffDate" required />
         </div>
         <div>
-          <Label>Scheduled date</Label>
-          <Input type="date" name="scheduledDate" required />
+          <Label htmlFor="schedule-scheduledDate">Scheduled date</Label>
+          <Input id="schedule-scheduledDate" type="date" name="scheduledDate" required />
         </div>
         <div>
-          <Label>Chair</Label>
-          <Select name="chairMembershipId" required defaultValue="">
+          <Label htmlFor="schedule-chairMembershipId">Chair</Label>
+          <Select id="schedule-chairMembershipId" name="chairMembershipId" required defaultValue="">
             <option value="" disabled>Choose a chair</option>
             {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
           </Select>
         </div>
         <div>
-          <Label>Coordinator</Label>
-          <Select name="coordinatorMembershipId" required defaultValue="">
+          <Label htmlFor="schedule-coordinatorMembershipId">Coordinator</Label>
+          <Select id="schedule-coordinatorMembershipId" name="coordinatorMembershipId" required defaultValue="">
             <option value="" disabled>Choose a coordinator</option>
             {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
           </Select>
@@ -173,8 +173,8 @@ function RescheduleForm({ reviewId }: { reviewId: string }) {
     <form action={action} className="flex flex-wrap items-end gap-2">
       <input type="hidden" name="reviewId" value={reviewId} />
       <div>
-        <Label>New date</Label>
-        <Input type="date" name="scheduledDate" required />
+        <Label htmlFor={`scheduledDate-${reviewId}`}>New date</Label>
+        <Input id={`scheduledDate-${reviewId}`} type="date" name="scheduledDate" required />
       </div>
       <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Saving..." : "Reschedule"}</Button>
       {state.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
@@ -221,15 +221,15 @@ function AttendeesPanel({ reviewId, attendees, persons }: { reviewId: string; at
       <form action={addAction} className="flex flex-wrap items-end gap-2">
         <input type="hidden" name="reviewId" value={reviewId} />
         <div>
-          <Label>Person</Label>
-          <Select name="personId" required defaultValue="">
+          <Label htmlFor={`personId-${reviewId}`}>Person</Label>
+          <Select id={`personId-${reviewId}`} name="personId" required defaultValue="">
             <option value="" disabled>Choose a person</option>
             {persons.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
           </Select>
         </div>
         <div>
-          <Label>Role</Label>
-          <Select name="role" defaultValue="MEMBER">
+          <Label htmlFor={`role-${reviewId}`}>Role</Label>
+          <Select id={`role-${reviewId}`} name="role" defaultValue="MEMBER">
             <option value="CHAIR">Chair</option>
             <option value="COORDINATOR">Coordinator</option>
             <option value="MEMBER">Member</option>
@@ -237,8 +237,8 @@ function AttendeesPanel({ reviewId, attendees, persons }: { reviewId: string; at
           </Select>
         </div>
         <div className="grow">
-          <Label>Notes</Label>
-          <Input name="notes" placeholder="Optional" />
+          <Label htmlFor={`attendeeNotes-${reviewId}`}>Notes</Label>
+          <Input id={`attendeeNotes-${reviewId}`} name="notes" placeholder="Optional" />
         </div>
         <Button type="submit" disabled={addPending}>{addPending ? "Adding..." : "Add attendee"}</Button>
       </form>
@@ -294,8 +294,8 @@ function InputLinksPanel({
       <form action={linkAction} className="flex flex-wrap items-end gap-2">
         <input type="hidden" name="reviewId" value={reviewId} />
         <div>
-          <Label>Input definition</Label>
-          <Select name="inputDefinitionKey" required defaultValue="">
+          <Label htmlFor={`inputDefinitionKey-${reviewId}`}>Input definition</Label>
+          <Select id={`inputDefinitionKey-${reviewId}`} name="inputDefinitionKey" required defaultValue="">
             <option value="" disabled>Choose an input</option>
             {inputDefinitionOptions.filter((def) => def.isActive).map((def) => (
               <option key={def.id} value={def.key}>{def.label}{def.required ? " (required)" : ""}</option>
@@ -303,8 +303,8 @@ function InputLinksPanel({
           </Select>
         </div>
         <div>
-          <Label>Exact source record ID</Label>
-          <Input name="sourceRecordId" placeholder="Optional — newest is used if blank" />
+          <Label htmlFor={`sourceRecordId-${reviewId}`}>Exact source record ID</Label>
+          <Input id={`sourceRecordId-${reviewId}`} name="sourceRecordId" placeholder="Optional — newest is used if blank" />
         </div>
         <Button type="submit" disabled={linkPending}>{linkPending ? "Linking..." : "Link input"}</Button>
       </form>
@@ -323,7 +323,7 @@ function AgendaItemsView({ items }: { items: AgendaItemView[] }) {
           <li key={item.id}>
             <span className="font-medium text-slate-900">{item.title}</span>
             {item.description && <span className="text-slate-500"> — {item.description}</span>}
-            {item.inputDefinitionKey && <span className="ml-2 text-xs uppercase tracking-wide text-slate-400">{item.inputDefinitionKey}</span>}
+            {item.inputDefinitionKey && <span className="ml-2 text-xs uppercase tracking-wide text-slate-500">{item.inputDefinitionKey}</span>}
           </li>
         ))}
       </ol>
@@ -384,10 +384,10 @@ function ReviewCard({
         </div>
 
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-600 sm:grid-cols-4">
-          <div><dt className="text-slate-400">Period</dt><dd>{review.periodStart} – {review.periodEnd}</dd></div>
-          <div><dt className="text-slate-400">Cutoff</dt><dd>{review.cutoffDate}</dd></div>
-          <div><dt className="text-slate-400">Scheduled</dt><dd>{review.scheduledDate}</dd></div>
-          <div><dt className="text-slate-400">Held</dt><dd>{review.heldDate ?? "—"}</dd></div>
+          <div><dt className="text-slate-500">Period</dt><dd>{review.periodStart} – {review.periodEnd}</dd></div>
+          <div><dt className="text-slate-500">Cutoff</dt><dd>{review.cutoffDate}</dd></div>
+          <div><dt className="text-slate-500">Scheduled</dt><dd>{review.scheduledDate}</dd></div>
+          <div><dt className="text-slate-500">Held</dt><dd>{review.heldDate ?? "—"}</dd></div>
         </dl>
 
         {(review.status === "PLANNED" || review.status === "INPUT_COLLECTION") && (
@@ -443,16 +443,16 @@ function InputDefinitionsPanel({ options }: { options: InputDefinitionOption[] }
       )}
       <form action={upsertAction} className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Key</Label>
-          <Input name="key" required placeholder="e.g. compliance_status" />
+          <Label htmlFor="inputDef-key">Key</Label>
+          <Input id="inputDef-key" name="key" required placeholder="e.g. compliance_status" />
         </div>
         <div>
-          <Label>Label</Label>
-          <Input name="label" required placeholder="e.g. Compliance status" />
+          <Label htmlFor="inputDef-label">Label</Label>
+          <Input id="inputDef-label" name="label" required placeholder="e.g. Compliance status" />
         </div>
         <div>
-          <Label>Source type</Label>
-          <Select name="sourceType" required defaultValue="">
+          <Label htmlFor="inputDef-sourceType">Source type</Label>
+          <Select id="inputDef-sourceType" name="sourceType" required defaultValue="">
             <option value="" disabled>Choose a source type</option>
             <option value="COMPLIANCE_EVALUATION">Compliance evaluation</option>
             <option value="ACTION_PROGRAMME">Action programme</option>
@@ -463,8 +463,8 @@ function InputDefinitionsPanel({ options }: { options: InputDefinitionOption[] }
           </Select>
         </div>
         <div>
-          <Label>Period rule</Label>
-          <Input name="periodRule" placeholder="Optional" />
+          <Label htmlFor="inputDef-periodRule">Period rule</Label>
+          <Input id="inputDef-periodRule" name="periodRule" placeholder="Optional" />
         </div>
         <label className="flex items-center gap-2 text-sm text-slate-700 sm:col-span-2">
           <input type="checkbox" name="required" defaultChecked /> Required for a complete review

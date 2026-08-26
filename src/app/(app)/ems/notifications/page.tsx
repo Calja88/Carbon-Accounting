@@ -145,7 +145,7 @@ export default async function NotificationsWorkQueuePage({ searchParams }: PageP
           <tbody className="divide-y divide-slate-100">
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
                   {statusFilter || typeFilter
                     ? "Nothing in your queue matches this filter."
                     : "Your work queue is empty — nothing needs your attention right now."}
@@ -175,7 +175,7 @@ export default async function NotificationsWorkQueuePage({ searchParams }: PageP
                         Open
                       </Link>
                     ) : (
-                      <span className="text-slate-400">—</span>
+                      <span className="text-slate-500">—</span>
                     )}
                   </td>
                   <td className="px-4 py-2">

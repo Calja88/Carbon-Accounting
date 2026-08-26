@@ -11,6 +11,7 @@
     "postinstall": "prisma generate",
     "db:seed": "tsx prisma/seed/index.ts",
     "db:seed:lca-methodology": "tsx prisma/seed/lca-methodology-only.ts",
+    "db:seed:ems-demo": "tsx prisma/seed/ems-demo.ts",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "node scripts/resolve-failed-migration.mjs && prisma migrate deploy",
     "backfill:organisation": "tsx scripts/backfill-organisation.ts",
@@ -37,6 +38,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

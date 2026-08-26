@@ -130,16 +130,16 @@ function SourceLinkPicker({
     RISK_OPPORTUNITY: "riskOpportunityId",
   };
   return (
-    <div className="space-y-2">
-      <Label>Source links (policy, aspect, obligation, risk/opportunity)</Label>
+    <fieldset className="space-y-2">
+      <legend className="text-sm font-medium text-slate-700">Source links (policy, aspect, obligation, risk/opportunity)</legend>
       <div className="flex flex-wrap gap-2">
-        <Select value={linkType} onChange={(e) => { setLinkType(e.target.value); setTargetId(""); }} className="w-48">
+        <Select aria-label="Source link type" value={linkType} onChange={(e) => { setLinkType(e.target.value); setTargetId(""); }} className="w-48">
           <option value="POLICY">Policy</option>
           <option value="ASPECT_ASSESSMENT">Aspect assessment</option>
           <option value="OBLIGATION_VERSION">Obligation version</option>
           <option value="RISK_OPPORTUNITY">Risk/opportunity</option>
         </Select>
-        <Select value={targetId} onChange={(e) => setTargetId(e.target.value)} className="w-64">
+        <Select aria-label="Source link record" value={targetId} onChange={(e) => setTargetId(e.target.value)} className="w-64">
           <option value="">Choose a record</option>
           {(optionsByType[linkType] ?? []).map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
         </Select>
@@ -168,17 +168,19 @@ function SourceLinkPicker({
         </ul>
       )}
       <input type="hidden" name="sourceLinks" value={JSON.stringify(links)} />
-    </div>
+    </fieldset>
   );
 }
 
 function DraftFields({
+  idPrefix,
   members,
   policyRecords,
   aspectAssessments,
   obligationVersions,
   riskOpportunities,
 }: {
+  idPrefix: string;
   members: Option[];
   policyRecords: Option[];
   aspectAssessments: Option[];
@@ -190,48 +192,48 @@ function DraftFields({
     <>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Title</Label>
-          <Input name="title" required placeholder="Synthetic example: Reduce fictional pilot-site scope 2 intensity" />
+          <Label htmlFor={`${idPrefix}-title`}>Title</Label>
+          <Input id={`${idPrefix}-title`} name="title" required placeholder="Synthetic example: Reduce fictional pilot-site scope 2 intensity" />
         </div>
         <div>
-          <Label>Owner</Label>
-          <Select name="ownerMembershipId" required defaultValue="">
+          <Label htmlFor={`${idPrefix}-owner`}>Owner</Label>
+          <Select id={`${idPrefix}-owner`} name="ownerMembershipId" required defaultValue="">
             <option value="" disabled>Choose an owner</option>
             {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
           </Select>
         </div>
         <div>
-          <Label>Target value (numeric, optional)</Label>
-          <Input name="targetValue" type="number" step="any" placeholder="e.g. 10" />
+          <Label htmlFor={`${idPrefix}-target-value`}>Target value (numeric, optional)</Label>
+          <Input id={`${idPrefix}-target-value`} name="targetValue" type="number" step="any" placeholder="e.g. 10" />
         </div>
         <div>
-          <Label>Unit (required with a numeric target)</Label>
-          <Input name="unit" placeholder="e.g. tCO2e/unit" />
+          <Label htmlFor={`${idPrefix}-unit`}>Unit (required with a numeric target)</Label>
+          <Input id={`${idPrefix}-unit`} name="unit" placeholder="e.g. tCO2e/unit" />
         </div>
         <div>
-          <Label>Qualitative target (used instead of a numeric target)</Label>
-          <Input name="targetQualitative" placeholder="e.g. Achieve certification" />
+          <Label htmlFor={`${idPrefix}-target-qualitative`}>Qualitative target (used instead of a numeric target)</Label>
+          <Input id={`${idPrefix}-target-qualitative`} name="targetQualitative" placeholder="e.g. Achieve certification" />
         </div>
         <div>
-          <Label>Target date</Label>
-          <Input name="targetDate" type="date" required />
+          <Label htmlFor={`${idPrefix}-target-date`}>Target date</Label>
+          <Input id={`${idPrefix}-target-date`} name="targetDate" type="date" required />
         </div>
         <div>
-          <Label>Baseline date (optional)</Label>
-          <Input name="baselineDate" type="date" />
+          <Label htmlFor={`${idPrefix}-baseline-date`}>Baseline date (optional)</Label>
+          <Input id={`${idPrefix}-baseline-date`} name="baselineDate" type="date" />
         </div>
       </div>
       <div>
-        <Label>Intent</Label>
-        <Textarea name="intent" required rows={2} placeholder="Synthetic intent text only." />
+        <Label htmlFor={`${idPrefix}-intent`}>Intent</Label>
+        <Textarea id={`${idPrefix}-intent`} name="intent" required rows={2} placeholder="Synthetic intent text only." />
       </div>
       <div>
-        <Label>Baseline description</Label>
-        <Textarea name="baselineDescription" required rows={2} placeholder="Synthetic baseline text only." />
+        <Label htmlFor={`${idPrefix}-baseline-description`}>Baseline description</Label>
+        <Textarea id={`${idPrefix}-baseline-description`} name="baselineDescription" required rows={2} placeholder="Synthetic baseline text only." />
       </div>
       <div>
-        <Label>Evaluation method</Label>
-        <Textarea name="evaluationMethod" required rows={2} placeholder="How progress/achievement will be evaluated." />
+        <Label htmlFor={`${idPrefix}-evaluation-method`}>Evaluation method</Label>
+        <Textarea id={`${idPrefix}-evaluation-method`} name="evaluationMethod" required rows={2} placeholder="How progress/achievement will be evaluated." />
       </div>
       <SourceLinkPicker
         policyRecords={policyRecords}
@@ -255,7 +257,7 @@ function CreateObjectiveForm(props: {
   const [state, action, pending] = useActionState(createEnvironmentalObjectiveAction, emptyState);
   return (
     <form action={action} className="space-y-4 rounded-lg border border-slate-200 p-4">
-      <DraftFields {...props} />
+      <DraftFields idPrefix="new-objective" {...props} />
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Create draft objective"}</Button>
     </form>
@@ -267,7 +269,7 @@ function EditDraftForm({ version, ...props }: { version: ObjectiveVersionRow } &
   return (
     <form action={action} className="space-y-4 rounded-lg border border-slate-200 p-4">
       <input type="hidden" name="objectiveVersionId" value={version.id} />
-      <DraftFields {...props} />
+      <DraftFields idPrefix={`edit-${version.id}`} {...props} />
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save draft"}</Button>
     </form>
@@ -291,16 +293,16 @@ function DecideForm({ objectiveVersionId }: { objectiveVersionId: string }) {
     <form action={action} className="space-y-3 rounded-lg border border-slate-200 p-4">
       <input type="hidden" name="objectiveVersionId" value={objectiveVersionId} />
       <div>
-        <Label>Decision</Label>
-        <Select name="decision" defaultValue="APPROVED" required>
+        <Label htmlFor={`decision-${objectiveVersionId}`}>Decision</Label>
+        <Select id={`decision-${objectiveVersionId}`} name="decision" defaultValue="APPROVED" required>
           <option value="APPROVED">Approve (makes this version active)</option>
           <option value="REJECTED">Reject</option>
           <option value="RETURNED">Return for revision</option>
         </Select>
       </div>
       <div>
-        <Label>Comment (optional)</Label>
-        <Textarea name="comment" rows={2} />
+        <Label htmlFor={`decision-comment-${objectiveVersionId}`}>Comment (optional)</Label>
+        <Textarea id={`decision-comment-${objectiveVersionId}`} name="comment" rows={2} />
       </div>
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Recording…" : "Record decision"}</Button>
@@ -314,15 +316,15 @@ function AchievementForm({ objectiveVersionId }: { objectiveVersionId: string })
     <form action={action} className="space-y-3 rounded-lg border border-slate-200 p-4">
       <input type="hidden" name="objectiveVersionId" value={objectiveVersionId} />
       <div>
-        <Label>Achievement decision</Label>
-        <Select name="achieved" defaultValue="true" required>
+        <Label htmlFor={`achieved-${objectiveVersionId}`}>Achievement decision</Label>
+        <Select id={`achieved-${objectiveVersionId}`} name="achieved" defaultValue="true" required>
           <option value="true">Achieved</option>
           <option value="false">Not achieved</option>
         </Select>
       </div>
       <div>
-        <Label>Rationale</Label>
-        <Textarea name="rationale" rows={2} required placeholder="Explicit review rationale — never inferred from linked action completion." />
+        <Label htmlFor={`achievement-rationale-${objectiveVersionId}`}>Rationale</Label>
+        <Textarea id={`achievement-rationale-${objectiveVersionId}`} name="rationale" rows={2} required placeholder="Explicit review rationale — never inferred from linked action completion." />
       </div>
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Recording…" : "Record achievement decision"}</Button>
@@ -350,12 +352,12 @@ function MetricDefinitionForm({ objectiveId, canApprove }: { objectiveId: string
       <input type="hidden" name="objectiveId" value={objectiveId} />
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <Label>Metric name</Label>
-          <Input name="name" required placeholder="Synthetic example: Scope 2 intensity" />
+          <Label htmlFor={`metric-name-${objectiveId}`}>Metric name</Label>
+          <Input id={`metric-name-${objectiveId}`} name="name" required placeholder="Synthetic example: Scope 2 intensity" />
         </div>
         <div>
-          <Label>Source type</Label>
-          <Select name="sourceType" value={sourceType} onChange={(e) => setSourceType(e.target.value)} required>
+          <Label htmlFor={`metric-source-type-${objectiveId}`}>Source type</Label>
+          <Select id={`metric-source-type-${objectiveId}`} name="sourceType" value={sourceType} onChange={(e) => setSourceType(e.target.value)} required>
             <option value="MANUAL">Manual</option>
             <option value="CORPORATE_CARBON">Corporate carbon</option>
             <option value="PRODUCT_LCA">Product LCA</option>
@@ -364,17 +366,17 @@ function MetricDefinitionForm({ objectiveId, canApprove }: { objectiveId: string
           </Select>
         </div>
         <div>
-          <Label>Unit</Label>
-          <Input name="unit" required placeholder="e.g. tCO2e/unit" />
+          <Label htmlFor={`metric-unit-${objectiveId}`}>Unit</Label>
+          <Input id={`metric-unit-${objectiveId}`} name="unit" required placeholder="e.g. tCO2e/unit" />
         </div>
         <div>
-          <Label>Frequency</Label>
-          <Input name="frequency" required placeholder="e.g. Monthly" />
+          <Label htmlFor={`metric-frequency-${objectiveId}`}>Frequency</Label>
+          <Input id={`metric-frequency-${objectiveId}`} name="frequency" required placeholder="e.g. Monthly" />
         </div>
       </div>
       <div>
-        <Label>Boundary description (optional)</Label>
-        <Textarea name="boundaryDescription" rows={2} />
+        <Label htmlFor={`metric-boundary-${objectiveId}`}>Boundary description (optional)</Label>
+        <Textarea id={`metric-boundary-${objectiveId}`} name="boundaryDescription" rows={2} />
       </div>
 
       {sourceType === "CORPORATE_CARBON" && (
@@ -384,12 +386,12 @@ function MetricDefinitionForm({ objectiveId, canApprove }: { objectiveId: string
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Label>Report snapshot ID</Label>
-              <Input name="reportSnapshotId" placeholder="Existing issued report snapshot id" />
+              <Label htmlFor={`report-snapshot-${objectiveId}`}>Report snapshot ID</Label>
+              <Input id={`report-snapshot-${objectiveId}`} name="reportSnapshotId" placeholder="Existing issued report snapshot id" />
             </div>
             <div>
-              <Label>Scope</Label>
-              <Select name="scope" defaultValue="">
+              <Label htmlFor={`report-scope-${objectiveId}`}>Scope</Label>
+              <Select id={`report-scope-${objectiveId}`} name="scope" defaultValue="">
                 <option value="">Choose a scope</option>
                 <option value="SCOPE_1">Scope 1</option>
                 <option value="SCOPE_2">Scope 2</option>
@@ -397,28 +399,28 @@ function MetricDefinitionForm({ objectiveId, canApprove }: { objectiveId: string
               </Select>
             </div>
             <div>
-              <Label>Basis (Scope 2 only)</Label>
-              <Select name="basis" defaultValue="">
+              <Label htmlFor={`report-basis-${objectiveId}`}>Basis (Scope 2 only)</Label>
+              <Select id={`report-basis-${objectiveId}`} name="basis" defaultValue="">
                 <option value="">N/A</option>
                 <option value="LOCATION_BASED">Location-based</option>
                 <option value="MARKET_BASED">Market-based</option>
               </Select>
             </div>
             <div>
-              <Label>Category (optional)</Label>
-              <Input name="category" placeholder="Report category boundary" />
+              <Label htmlFor={`report-category-${objectiveId}`}>Category (optional)</Label>
+              <Input id={`report-category-${objectiveId}`} name="category" placeholder="Report category boundary" />
             </div>
             <div>
-              <Label>Site ID (optional, mutually exclusive with category)</Label>
-              <Input name="siteId" placeholder="Report site boundary" />
+              <Label htmlFor={`report-site-${objectiveId}`}>Site ID (optional, mutually exclusive with category)</Label>
+              <Input id={`report-site-${objectiveId}`} name="siteId" placeholder="Report site boundary" />
             </div>
             <div>
-              <Label>Report period start</Label>
-              <Input name="periodStart" type="date" />
+              <Label htmlFor={`report-period-start-${objectiveId}`}>Report period start</Label>
+              <Input id={`report-period-start-${objectiveId}`} name="periodStart" type="date" />
             </div>
             <div>
-              <Label>Report period end</Label>
-              <Input name="periodEnd" type="date" />
+              <Label htmlFor={`report-period-end-${objectiveId}`}>Report period end</Label>
+              <Input id={`report-period-end-${objectiveId}`} name="periodEnd" type="date" />
             </div>
           </div>
         </div>
@@ -431,16 +433,16 @@ function MetricDefinitionForm({ objectiveId, canApprove }: { objectiveId: string
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Label>Assessment ID</Label>
-              <Input name="assessmentId" placeholder="Existing product LCA assessment id" />
+              <Label htmlFor={`assessment-id-${objectiveId}`}>Assessment ID</Label>
+              <Input id={`assessment-id-${objectiveId}`} name="assessmentId" placeholder="Existing product LCA assessment id" />
             </div>
             <div>
-              <Label>Issued version ID</Label>
-              <Input name="versionId" placeholder="Issued/superseded assessment version id" />
+              <Label htmlFor={`assessment-version-id-${objectiveId}`}>Issued version ID</Label>
+              <Input id={`assessment-version-id-${objectiveId}`} name="versionId" placeholder="Issued/superseded assessment version id" />
             </div>
             <div className="sm:col-span-2">
-              <Label>Intensity basis</Label>
-              <Select name="intensityBasis" defaultValue="">
+              <Label htmlFor={`intensity-basis-${objectiveId}`}>Intensity basis</Label>
+              <Select id={`intensity-basis-${objectiveId}`} name="intensityBasis" defaultValue="">
                 <option value="">Choose a basis</option>
                 <option value="HEADLINE_PER_FUNCTIONAL_UNIT">Headline, per functional unit</option>
                 <option value="INCLUDING_BIOGENIC_PER_FUNCTIONAL_UNIT">Including biogenic, per functional unit</option>
@@ -516,7 +518,7 @@ function ObjectiveVersionCard({
         <div className="flex items-center justify-between">
           <div>
             <p className="font-medium text-slate-900">
-              v{version.version} — {version.title} {isActive && <span className="text-xs text-emerald-600">(active)</span>}
+              v{version.version} — {version.title} {isActive && <span className="text-xs text-emerald-700">(active)</span>}
             </p>
             <p className="text-xs text-slate-500">Owner: {version.ownerName}</p>
           </div>
@@ -666,10 +668,10 @@ function SuccessorForm({ objectiveId, ...props }: { objectiveId: string } & Para
   return (
     <form action={action} className="space-y-4 rounded-lg border border-slate-200 p-4">
       <input type="hidden" name="objectiveId" value={objectiveId} />
-      <DraftFields {...props} />
+      <DraftFields idPrefix={`successor-${objectiveId}`} {...props} />
       <div>
-        <Label>Revision rationale</Label>
-        <Textarea name="revisionRationale" rows={2} required />
+        <Label htmlFor={`successor-${objectiveId}-revision-rationale`}>Revision rationale</Label>
+        <Textarea id={`successor-${objectiveId}-revision-rationale`} name="revisionRationale" rows={2} required />
       </div>
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Create successor draft"}</Button>

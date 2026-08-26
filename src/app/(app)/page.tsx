@@ -29,7 +29,15 @@ export default async function DashboardPage({
   try {
     context = await requireOrganisationContext();
   } catch (err) {
-    if (err instanceof OrganisationAccessError) redirect("/login");
+    if (err instanceof OrganisationAccessError) {
+      // UI14: only an unauthenticated visitor belongs at /login. A signed-in
+      // user with no ACTIVE membership (suspended, removed, or never
+      // invited) redirected here too before this fix — and /login itself
+      // redirects a signed-in visitor straight back to /, an infinite loop
+      // that left the account unable to reach any page, including sign-out.
+      if (err.reason === "NOT_AUTHENTICATED") redirect("/login");
+      return <NoOrganisationAccess reason={err.reason} />;
+    }
     throw err;
   }
 
@@ -346,6 +354,27 @@ export default async function DashboardPage({
           })}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function NoOrganisationAccess({ reason }: { reason: "NO_ACTIVE_MEMBERSHIP" | "ORGANISATION_NOT_ACCESSIBLE" }) {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center px-4">
+      <div className="w-full max-w-md">
+        <Card>
+          <CardHeader>
+            <CardTitle>No organisation access</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-slate-600">
+              {reason === "NO_ACTIVE_MEMBERSHIP"
+                ? "Your account isn't an active member of any organisation right now. If this is unexpected — for example your access was recently suspended — contact your organisation administrator."
+                : "The organisation you were last using is no longer accessible. Contact your organisation administrator, or sign out and sign back in to pick another organisation."}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

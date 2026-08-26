@@ -75,7 +75,7 @@ export default async function ControlledDocumentsPage() {
           <tbody className="divide-y divide-slate-100">
             {documents.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
                   No controlled documents yet.{canManage ? " Create the first one above." : ""}
                 </td>
               </tr>
