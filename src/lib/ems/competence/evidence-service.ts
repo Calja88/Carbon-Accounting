@@ -250,6 +250,73 @@ export async function rejectCompetenceEvidence(
   });
 }
 
+/**
+ * Withdraws submitted competence evidence before a verifier has acted on it.
+ *
+ * Competence evidence is PERSONAL_RESTRICTED and its file lives in T22's
+ * shared `EvidenceObject` store under that store's own classification and
+ * retention rules, so the row is never hard-deleted from here: `WITHDRAWN`
+ * is a terminal status, and the `EvidenceLink` to the underlying object is
+ * left in place so the submission history stays traceable.
+ *
+ * Only SUBMITTED evidence can be withdrawn — once VERIFIED it has been acted
+ * on and may already have moved the assignment to COMPETENT, and once
+ * REJECTED the verifier's decision is the record.
+ */
+export async function withdrawCompetenceEvidence(
+  context: OrganisationContext,
+  evidenceId: string,
+  reason: string,
+  actorUserId: string,
+) {
+  requirePermission(context, MANAGE_PERMISSION);
+  if (!reason?.trim()) throw new CompetenceEvidenceError("Record why the evidence is being withdrawn.");
+  const ctx = toTenantRepositoryContext(context);
+  const evidence = await findTenantCompetenceEvidence(ctx, evidenceId);
+  if (!evidence) throw new TenantOwnershipError();
+  if (evidence.status !== "SUBMITTED") {
+    throw new CompetenceEvidenceError("Only evidence that has not yet been verified or rejected can be withdrawn.");
+  }
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    const updated = await tx.competenceEvidence.update({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: evidence.id } },
+      data: { status: "WITHDRAWN", rejectionReason: reason.trim() },
+    });
+
+    // Same rule the rejection path uses: if nothing outstanding is left, the
+    // assignment must not stay parked on EVIDENCE_SUBMITTED.
+    const assignment = await tx.competenceAssignment.findFirst({
+      where: tenantWhere(txCtx, { id: evidence.assignmentId }),
+    });
+    if (assignment && assignment.status === "EVIDENCE_SUBMITTED") {
+      const remaining = await tx.competenceEvidence.count({
+        where: tenantWhere(txCtx, { assignmentId: assignment.id, status: { in: ["SUBMITTED" as const, "VERIFIED" as const] } }),
+      });
+      if (remaining === 0) {
+        await tx.competenceAssignment.update({
+          where: { organisationId_id: { organisationId: txCtx.organisationId, id: assignment.id } },
+          data: { status: "IN_PROGRESS" },
+        });
+      }
+    }
+
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "competence_evidence.withdrawn",
+      resourceType: "competence_evidence",
+      resourceId: evidence.id,
+      summary: `Competence evidence withdrawn before verification: ${reason.trim()}`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { status: "SUBMITTED" },
+      after: { status: "WITHDRAWN" },
+    });
+
+    return updated;
+  });
+}
+
 /** Restricted read — requires `ems.competence.sensitive.view` in addition to the base view permission. */
 export async function listCompetenceEvidenceForAssignment(context: OrganisationContext, assignmentId: string) {
   requirePermission(context, SENSITIVE_VIEW_PERMISSION);

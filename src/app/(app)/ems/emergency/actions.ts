@@ -11,6 +11,7 @@ import {
   createEmergencyPlan,
   createEmergencyScenario,
   recordEmergencyExercise,
+  retireEmergencyPlan,
   reviseEmergencyPlan,
   setEmergencyScenarioStatus,
   uploadEvidenceToExercise,
@@ -20,6 +21,7 @@ import {
   emergencyExerciseFormSchema,
   emergencyPlanFormSchema,
   emergencyScenarioFormSchema,
+  retireEmergencyPlanFormSchema,
 } from "@/lib/ems/emergency/schemas";
 
 export interface EmergencyActionState {
@@ -159,6 +161,19 @@ export async function uploadExerciseEvidenceAction(_previous: EmergencyActionSta
     });
     revalidateEmergency();
     return { ...emptyState, message: "Exercise evidence attached." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function retirePlanAction(_previous: EmergencyActionState, formData: FormData): Promise<EmergencyActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = retireEmergencyPlanFormSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Record why the plan is being retired." };
+    await retireEmergencyPlan(context, parsed.data.planId, parsed.data.reason, context.userId);
+    revalidateEmergency();
+    return { ...emptyState, message: "Emergency plan retired." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }

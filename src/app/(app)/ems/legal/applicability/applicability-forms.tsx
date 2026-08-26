@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   createApplicabilityAssessmentAction,
   decideApplicabilityAssessmentAction,
+  discardApplicabilityAssessmentDraftAction,
   submitApplicabilityAssessmentForReviewAction,
   uploadApplicabilityEvidenceAction,
   type ApplicabilityActionState,
@@ -262,6 +263,24 @@ function SubmitForReviewButton({ assessmentId }: { assessmentId: string }) {
   );
 }
 
+function DiscardDraftButton({ assessmentId }: { assessmentId: string }) {
+  const [state, action, pending] = useActionState(discardApplicabilityAssessmentDraftAction, emptyState);
+  return (
+    <form action={action} className="flex flex-col items-start gap-1">
+      <input type="hidden" name="assessmentId" value={assessmentId} />
+      <Button
+        type="submit"
+        variant="danger"
+        disabled={pending}
+        onClick={(event) => { if (!confirm("Discard this draft applicability assessment? This cannot be undone.")) event.preventDefault(); }}
+      >
+        {pending ? "Discarding…" : "Discard draft"}
+      </Button>
+      <Feedback state={state} />
+    </form>
+  );
+}
+
 function UploadEvidenceForm({ assessmentId }: { assessmentId: string }) {
   const [state, action, pending] = useActionState(uploadApplicabilityEvidenceAction, emptyState);
   return (
@@ -375,6 +394,7 @@ function AssessmentCard({
 
         {(assessment.status === "DRAFT" || assessment.status === "IN_REVIEW") && canAssess && <UploadEvidenceForm assessmentId={assessment.id} />}
         {assessment.status === "DRAFT" && canAssess && <SubmitForReviewButton assessmentId={assessment.id} />}
+        {assessment.status === "DRAFT" && canAssess && <DiscardDraftButton assessmentId={assessment.id} />}
         {assessment.status === "IN_REVIEW" && canReview && (
           <details open>
             <summary className="cursor-pointer text-sm font-medium text-blue-700">Decide</summary>

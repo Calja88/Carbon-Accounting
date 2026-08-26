@@ -85,6 +85,51 @@ export async function createMonitoringEquipment(context: OrganisationContext, in
   });
 }
 
+/**
+ * Retires a piece of monitoring equipment, or takes it out of service.
+ *
+ * Equipment is OPERATIONAL_CONTROLLED: its calibration history is the
+ * assurance record behind every result measured with it, and both
+ * `EquipmentCalibration` and `MonitoringPlan` reference it with
+ * `onDelete: Restrict`. `RETIRED`/`OUT_OF_SERVICE` are the terminal states
+ * the enum already carries, so no delete path is added. Retiring equipment
+ * that active plans still depend on is refused rather than silently
+ * orphaning those plans — deactivate or re-equip the plan first.
+ */
+export async function retireMonitoringEquipment(
+  context: OrganisationContext,
+  input: { equipmentId: string; status: "RETIRED" | "OUT_OF_SERVICE"; reason: string; actorUserId: string },
+) {
+  requirePermission(context, "ems.monitoring.record");
+  const ctx = toTenantRepositoryContext(context);
+  const equipment = await findVisibleEquipment(context, input.equipmentId);
+  if (!equipment) throw new TenantOwnershipError();
+  if (equipment.status === input.status) throw new CalibrationError("This equipment is already in that state.");
+  if (equipment.status === "RETIRED") throw new CalibrationError("Retired equipment cannot be returned to service.");
+  if (!input.reason.trim()) throw new CalibrationError("Record why the equipment is being taken out of use.");
+  const activePlans = await prisma.monitoringPlan.count({
+    where: tenantWhere(ctx, { equipmentId: equipment.id, status: { in: ["DRAFT" as const, "ACTIVE" as const] } }),
+  });
+  if (activePlans > 0) {
+    throw new CalibrationError(
+      `${activePlans} active monitoring plan(s) still use this equipment. Deactivate or re-equip them first.`,
+    );
+  }
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    const updated = await tx.monitoringEquipment.update({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: equipment.id } },
+      data: { status: input.status },
+    });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "monitoring_equipment.retired", resourceType: "monitoring_equipment", resourceId: equipment.id,
+      summary: `Monitoring equipment "${equipment.reference}" moved to ${input.status}: ${input.reason.trim()}`,
+      actorUserId: input.actorUserId, correlationId: txCtx.correlationId, source: "web-app",
+      before: { status: equipment.status }, after: { status: updated.status },
+    });
+    return updated;
+  });
+}
+
 export interface EquipmentCalibrationInput {
   equipmentId: string;
   dueDate: Date;

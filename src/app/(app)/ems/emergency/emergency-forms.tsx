@@ -14,6 +14,7 @@ import {
   createScenarioAction,
   recordExerciseAction,
   retireScenarioAction,
+  retirePlanAction,
   revisePlanAction,
   uploadExerciseEvidenceAction,
   type EmergencyActionState,
@@ -130,6 +131,28 @@ function RevisePlanForm({ plan, documents, commsPlans }: { plan: PlanRow; docume
         <Feedback state={state} /><Button type="submit" disabled={pending}>{pending ? "Recording revision…" : "Create successor version"}</Button>
       </form>
     </details>
+  );
+}
+
+function RetirePlanForm({ plan }: { plan: PlanRow }) {
+  const [state, action, pending] = useActionState(retirePlanAction, emptyState);
+  return (
+    <form action={action} className="mt-3 flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 p-3">
+      <input type="hidden" name="planId" value={plan.id} />
+      <div className="min-w-64 flex-1">
+        <Label htmlFor={`plan-retire-reason-${plan.id}`}>Retirement reason</Label>
+        <Input id={`plan-retire-reason-${plan.id}`} name="reason" required />
+      </div>
+      <Button
+        type="submit"
+        variant="danger"
+        disabled={pending}
+        onClick={(event) => { if (!confirm("Retire this emergency plan without a successor? The scenario will have no active plan.")) event.preventDefault(); }}
+      >
+        {pending ? "Retiring…" : "Retire plan"}
+      </Button>
+      <Feedback state={state} />
+    </form>
   );
 }
 
@@ -257,6 +280,7 @@ function ScenarioCard({ scenario, members, documents, commsPlans, canManagePlans
             </ul>
           )}
           {canManagePlans && scenario.status === "ACTIVE" && (activePlan ? <RevisePlanForm plan={activePlan} documents={documents} commsPlans={commsPlans} /> : <CreatePlanForm scenarioId={scenario.id} documents={documents} commsPlans={commsPlans} />)}
+          {canManagePlans && activePlan && <RetirePlanForm plan={activePlan} />}
         </div>
 
         <div>

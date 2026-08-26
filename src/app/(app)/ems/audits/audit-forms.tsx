@@ -13,6 +13,7 @@ import {
   createAuditProgrammeAction,
   approveAuditProgrammeAction,
   activateAuditProgrammeAction,
+  cancelAuditProgrammeAction,
   completeAuditProgrammeAction,
   createAuditProgrammeItemAction,
   createEmsAuditAction,
@@ -151,6 +152,8 @@ function ProgrammeLifecycleButtons({ programme }: { programme: ProgrammeRow }) {
   const [approveState, approveAction, approvePending] = useActionState(approveAuditProgrammeAction, emptyState);
   const [activateState, activateAction, activatePending] = useActionState(activateAuditProgrammeAction, emptyState);
   const [completeState, completeAction, completePending] = useActionState(completeAuditProgrammeAction, emptyState);
+  const [cancelState, cancelAction, cancelPending] = useActionState(cancelAuditProgrammeAction, emptyState);
+  const cancellable = programme.status === "DRAFT" || programme.status === "APPROVED" || programme.status === "ACTIVE";
   return (
     <div className="flex flex-wrap items-center gap-2">
       {programme.status === "DRAFT" && (
@@ -171,9 +174,28 @@ function ProgrammeLifecycleButtons({ programme }: { programme: ProgrammeRow }) {
           <Button type="submit" size="sm" variant="secondary" disabled={completePending}>{completePending ? "Completing…" : "Mark complete"}</Button>
         </form>
       )}
+      {cancellable && (
+        <form action={cancelAction} className="flex flex-wrap items-end gap-2">
+          <input type="hidden" name="programmeId" value={programme.id} />
+          <div>
+            <Label htmlFor={`programme-cancel-reason-${programme.id}`}>Cancellation reason</Label>
+            <Input id={`programme-cancel-reason-${programme.id}`} name="reason" required />
+          </div>
+          <Button
+            type="submit"
+            size="sm"
+            variant="danger"
+            disabled={cancelPending}
+            onClick={(event) => { if (!confirm("Cancel this audit programme? It can only be cancelled before any audit has been created under it.")) event.preventDefault(); }}
+          >
+            {cancelPending ? "Cancelling…" : "Cancel programme"}
+          </Button>
+        </form>
+      )}
       <Feedback state={approveState} />
       <Feedback state={activateState} />
       <Feedback state={completeState} />
+      <Feedback state={cancelState} />
     </div>
   );
 }

@@ -252,6 +252,57 @@ export async function completeAuditProgramme(context: OrganisationContext, progr
   });
 }
 
+/**
+ * Cancels an audit programme that will not be executed.
+ *
+ * The programme is OPERATIONAL_CONTROLLED and, once ACTIVE, may already have
+ * `EmsAudit` rows and issued audit reports hanging off it — audit history is
+ * immutable, so there is no delete path. `CANCELLED` is a terminal state
+ * added for exactly this exit. A programme that has already produced audits
+ * must be COMPLETED rather than cancelled, so cancellation can never make an
+ * issued audit report point at a programme that claims never to have run.
+ */
+export async function cancelAuditProgramme(
+  context: OrganisationContext,
+  programmeId: string,
+  reason: string,
+  actorUserId: string,
+) {
+  requirePermission(context, PROGRAMME_MANAGE_PERMISSION);
+  const ctx = toTenantRepositoryContext(context);
+  const programme = await findTenantAuditProgramme(ctx, programmeId);
+  if (!programme) throw new TenantOwnershipError();
+  if (programme.status === "COMPLETED" || programme.status === "SUPERSEDED" || programme.status === "CANCELLED") {
+    throw new AuditProgrammeError("Only a draft, approved or active programme can be cancelled.");
+  }
+  if (!reason.trim()) throw new AuditProgrammeError("Record why the audit programme is being cancelled.");
+  const auditCount = await prisma.emsAudit.count({ where: tenantWhere(ctx, { programmeId: programme.id }) });
+  if (auditCount > 0) {
+    throw new AuditProgrammeError(
+      `${auditCount} audit(s) have already been created under this programme. Complete it instead of cancelling it.`,
+    );
+  }
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    const updated = await tx.auditProgramme.update({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: programme.id } },
+      data: { status: "CANCELLED" },
+    });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "audit_programme.cancelled",
+      resourceType: "audit_programme",
+      resourceId: programme.id,
+      summary: `Audit programme "${programme.name}" cancelled: ${reason.trim()}`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { status: programme.status },
+      after: { status: updated.status },
+    });
+    return updated;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Programme items and coverage scope
 // ---------------------------------------------------------------------------

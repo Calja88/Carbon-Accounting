@@ -279,3 +279,80 @@ export async function deleteManufacturingLocationAction(formData: FormData): Pro
 
   revalidatePath(`/products/${productId}`);
 }
+
+const retireVersionSchema = z.object({
+  productId: z.string().min(1),
+  productVersionId: z.string().min(1),
+  reason: z.string().trim().min(1, "Record why the version is being retired.").max(2000),
+});
+
+/**
+ * Retires a product version.
+ *
+ * A `ProductVersion` is never deleted: assessments reference it, and an
+ * issued `LcaAssessmentVersion` is a frozen snapshot of an assessment made
+ * against exactly this version. `isActive` is the flag the product page
+ * already filters on, so clearing it withdraws the version from selection
+ * for new assessments while every existing assessment keeps resolving.
+ *
+ * Refused while assessments still reference the version, so retiring can
+ * never leave a live assessment pointing at a withdrawn product version.
+ */
+export async function retireProductVersionAction(
+  _prev: ProductFormState,
+  formData: FormData,
+): Promise<ProductFormState> {
+  const context = await getLcaContext();
+  if (!canEditLcaData(context)) {
+    return { error: "Your permissions do not allow retiring product versions.", success: false };
+  }
+
+  const parsed = retireVersionSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Check the form and try again.", success: false };
+  }
+  const data = parsed.data;
+
+  try {
+    await requireProductInScope(context!, data.productId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return { error: "That product no longer exists.", success: false };
+    throw err;
+  }
+
+  // Nested-parent substitution guard: the version must belong to the product
+  // the caller was just proven to own, not merely exist.
+  const version = await prisma.productVersion.findFirst({
+    where: { id: data.productVersionId, productId: data.productId },
+  });
+  if (!version) return { error: "That product version no longer exists.", success: false };
+  if (!version.isActive) return { error: "That product version is already retired.", success: false };
+
+  const assessmentCount = await prisma.lcaAssessment.count({
+    where: { productVersionId: version.id, organisationId: context!.organisationId },
+  });
+  if (assessmentCount > 0) {
+    return {
+      error: `${assessmentCount} assessment(s) are built on "${version.versionLabel}". Retire it only once they are moved or superseded.`,
+      success: false,
+    };
+  }
+
+  const retired = await prisma.productVersion.update({
+    where: { id: version.id },
+    data: { isActive: false, effectiveTo: version.effectiveTo ?? new Date() },
+  });
+
+  await recordAuditEvent({
+    entityType: "product_version",
+    entityId: retired.id,
+    action: "retired",
+    actorUserId: context!.userId,
+    summary: `Product version "${retired.versionLabel}" retired: ${data.reason.trim()}.`,
+    before: { isActive: true, effectiveTo: version.effectiveTo },
+    after: { isActive: false, effectiveTo: retired.effectiveTo },
+  });
+
+  revalidatePath(`/products/${data.productId}`);
+  return { error: null, success: true, message: "Product version retired." };
+}

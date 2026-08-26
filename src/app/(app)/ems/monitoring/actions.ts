@@ -6,16 +6,17 @@ import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import { EvidenceError } from "@/lib/documents/evidence-service";
 import {
-  MonitoringError, createMonitoringPlan, documentResultExceptionReview, recordMonitoringResult,
+  MonitoringError, createMonitoringPlan, deactivateMonitoringPlan, documentResultExceptionReview, recordMonitoringResult,
   reviewMonitoringResult, uploadEvidenceToMonitoringResult,
 } from "@/lib/ems/monitoring/monitoring-service";
 import {
   CalibrationError, createMonitoringEquipment, documentCalibrationExceptionReview,
-  notifyOverdueCalibrations, recordEquipmentCalibration, uploadCalibrationCertificate,
+  notifyOverdueCalibrations, recordEquipmentCalibration, retireMonitoringEquipment, uploadCalibrationCertificate,
 } from "@/lib/ems/monitoring/calibration-service";
 import {
-  equipmentCalibrationFormSchema, monitoringEquipmentFormSchema, monitoringExceptionReviewFormSchema,
-  monitoringPlanFormSchema, monitoringResultFormSchema, monitoringResultReviewFormSchema,
+  deactivateMonitoringPlanFormSchema, equipmentCalibrationFormSchema, monitoringEquipmentFormSchema,
+  monitoringExceptionReviewFormSchema, monitoringPlanFormSchema, monitoringResultFormSchema,
+  monitoringResultReviewFormSchema, retireMonitoringEquipmentFormSchema,
 } from "@/lib/ems/monitoring/schemas";
 
 export interface MonitoringActionState { error: string | null; message: string | null }
@@ -148,5 +149,27 @@ export async function uploadCalibrationCertificateAction(_previous: MonitoringAc
     await uploadCalibrationCertificate(context, { calibrationId: id, fileName: file.name, mimeType: file.type || "application/octet-stream", bytes, actorUserId: context.userId });
     refresh();
     return { ...emptyState, message: "Calibration certificate attached." };
+  } catch (error) { return { ...emptyState, error: friendlyError(error) }; }
+}
+
+export async function deactivateMonitoringPlanAction(_previous: MonitoringActionState, formData: FormData): Promise<MonitoringActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = deactivateMonitoringPlanFormSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the deactivation reason." };
+    await deactivateMonitoringPlan(context, { ...parsed.data, actorUserId: context.userId });
+    refresh();
+    return { ...emptyState, message: "Monitoring plan deactivated." };
+  } catch (error) { return { ...emptyState, error: friendlyError(error) }; }
+}
+
+export async function retireMonitoringEquipmentAction(_previous: MonitoringActionState, formData: FormData): Promise<MonitoringActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = retireMonitoringEquipmentFormSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the equipment status change." };
+    await retireMonitoringEquipment(context, { ...parsed.data, actorUserId: context.userId });
+    refresh();
+    return { ...emptyState, message: parsed.data.status === "RETIRED" ? "Equipment retired." : "Equipment taken out of service." };
   } catch (error) { return { ...emptyState, error: friendlyError(error) }; }
 }
