@@ -177,6 +177,41 @@ export async function createMonitoringPlan(context: OrganisationContext, input: 
   });
 }
 
+/**
+ * Retires a monitoring plan from the active programme.
+ *
+ * A monitoring plan is OPERATIONAL_CONTROLLED and its recorded results
+ * reference it with `onDelete: Restrict`, so it is never hard-deleted: the
+ * measurement history has to stay attached to the plan that produced it.
+ * `MonitoringPlanStatus.INACTIVE` is the terminal state the enum already
+ * carries — deactivation stops the plan driving new results and review
+ * reminders while leaving every historic result readable.
+ */
+export async function deactivateMonitoringPlan(
+  context: OrganisationContext,
+  input: { planId: string; reason: string; actorUserId: string },
+) {
+  requirePermission(context, "ems.monitoring.record");
+  const ctx = toTenantRepositoryContext(context);
+  const plan = await findVisiblePlan(context, input.planId);
+  if (!plan) throw new TenantOwnershipError();
+  if (plan.status === "INACTIVE") throw new MonitoringError("This monitoring plan is already inactive.");
+  if (!input.reason.trim()) throw new MonitoringError("Record why the monitoring plan is being deactivated.");
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    const deactivated = await tx.monitoringPlan.update({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: plan.id } },
+      data: { status: "INACTIVE", reviewDueDate: null },
+    });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "monitoring_plan.deactivated", resourceType: "monitoring_plan", resourceId: plan.id,
+      summary: `Monitoring plan "${plan.planKey}" deactivated: ${input.reason.trim()}`,
+      actorUserId: input.actorUserId, correlationId: txCtx.correlationId, source: "web-app",
+      before: { status: plan.status }, after: { status: deactivated.status },
+    });
+    return deactivated;
+  });
+}
+
 export interface MonitoringResultInput {
   planId: string;
   measuredAt: Date;

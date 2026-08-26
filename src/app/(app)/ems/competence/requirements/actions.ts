@@ -11,6 +11,7 @@ import {
   approveCompetenceRequirementVersion,
   activateCompetenceRequirementVersion,
   createSuccessorCompetenceRequirementVersion,
+  discardCompetenceRequirementVersionDraft,
   type CompetenceRequirementScopeInput,
 } from "@/lib/ems/competence/requirement-service";
 import {
@@ -181,6 +182,22 @@ export async function createSuccessorCompetenceRequirementVersionAction(
     });
     revalidateRequirements();
     return { ...emptyState, message: "Successor draft version created." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function discardCompetenceRequirementVersionDraftAction(
+  _previous: CompetenceRequirementActionState,
+  formData: FormData,
+): Promise<CompetenceRequirementActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const versionId = String(formData.get("versionId") ?? "");
+    if (!versionId) return { ...emptyState, error: "Choose a draft version." };
+    await discardCompetenceRequirementVersionDraft(context, versionId, context.userId);
+    revalidateRequirements();
+    return { ...emptyState, message: "Draft requirement version discarded." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }

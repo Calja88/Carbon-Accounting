@@ -10,6 +10,7 @@ import {
   approveAuditProgramme,
   activateAuditProgramme,
   completeAuditProgramme,
+  cancelAuditProgramme,
   createAuditProgrammeItem,
   type AuditScopeEntryInput,
 } from "@/lib/ems/audits/programme-service";
@@ -51,6 +52,7 @@ import {
   addChecklistItemFormSchema,
   recordQuestionResponseFormSchema,
   createAuditFindingFormSchema,
+  cancelAuditProgrammeFormSchema,
 } from "@/lib/ems/audits/audit-schemas";
 
 export interface AuditActionState {
@@ -494,6 +496,19 @@ export async function issueAuditReportAction(_previous: AuditActionState, formDa
     await issueAuditReport(context, auditId, context.userId);
     revalidateAudits();
     return { ...emptyState, message: "Audit report issued and frozen." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function cancelAuditProgrammeAction(_previous: AuditActionState, formData: FormData): Promise<AuditActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const parsed = cancelAuditProgrammeFormSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Record why the programme is being cancelled." };
+    await cancelAuditProgramme(context, parsed.data.programmeId, parsed.data.reason, context.userId);
+    revalidateAudits();
+    return { ...emptyState, message: "Programme cancelled." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }

@@ -411,3 +411,93 @@ export async function importPactDocument(context: OrganisationContext, input: Im
 }
 
 export type SupplierPcfWithSupplier = Prisma.LcaSupplierPcfGetPayload<{ include: { supplier: true } }>;
+
+export class SupplierLifecycleError extends Error {}
+
+/**
+ * Archives a supplier.
+ *
+ * A supplier is never deleted: its PCF register is resolved into inventory
+ * items and frozen into issued assessment versions, so removing the row
+ * would orphan factor provenance behind a reported figure.
+ * `Supplier.archivedAt` takes it out of selection for new records while
+ * every existing reference keeps resolving. Archiving a supplier archives
+ * its PCFs with it — a PCF that can no longer be sourced must not stay
+ * selectable on its own.
+ */
+export async function archiveSupplier(
+  context: OrganisationContext,
+  input: { supplierId: string; reason: string; actorUserId: string },
+) {
+  const supplier = await requireSupplierInScope(context, input.supplierId);
+  if (supplier.archivedAt) throw new SupplierLifecycleError("This supplier is already archived.");
+  if (!input.reason.trim()) throw new SupplierLifecycleError("Record why the supplier is being archived.");
+
+  const archivedAt = new Date();
+  const [updated, archivedPcfs] = await prisma.$transaction([
+    prisma.supplier.update({ where: { id: supplier.id }, data: { archivedAt } }),
+    prisma.lcaSupplierPcf.updateMany({
+      where: { supplierId: supplier.id, organisationId: context.organisationId, archivedAt: null },
+      data: { archivedAt },
+    }),
+  ]);
+
+  await recordAuditEvent({
+    entityType: "supplier",
+    entityId: updated.id,
+    action: "archived",
+    actorUserId: input.actorUserId,
+    summary: `Supplier "${updated.name}" archived: ${input.reason.trim()}. `
+      + `${archivedPcfs.count} supplier PCF(s) archived with it; existing inventory items and issued versions are unchanged.`,
+    before: { archivedAt: null },
+    after: { archivedAt: updated.archivedAt, archivedPcfCount: archivedPcfs.count },
+  });
+
+  return updated;
+}
+
+/**
+ * Archives one supplier PCF, withdrawing it from further factor selection.
+ *
+ * Never deleted for the same reason: `LcaInventoryItem` rows already
+ * resolved against it, and issued assessment versions carry its value in a
+ * frozen factor snapshot. Refused while inventory items still reference it,
+ * so archiving cannot silently invalidate a draft assessment's factor.
+ */
+export async function archiveSupplierPcf(
+  context: OrganisationContext,
+  input: { supplierPcfId: string; reason: string; actorUserId: string },
+) {
+  const ctx = toTenantRepositoryContext(context);
+  const pcf = await findTenantSupplierPcf(ctx, input.supplierPcfId);
+  if (!pcf) throw new TenantOwnershipError();
+  await requireSupplierInScope(context, pcf.supplierId);
+  if (pcf.archivedAt) throw new SupplierLifecycleError("This supplier PCF is already archived.");
+  if (!input.reason.trim()) throw new SupplierLifecycleError("Record why the supplier PCF is being archived.");
+
+  // LcaInventoryItem has no organisationId column of its own; the PCF is
+  // already proven in-tenant above, so anything referencing it is in-tenant.
+  const inUse = await prisma.lcaInventoryItem.count({ where: { supplierPcfId: pcf.id } });
+  if (inUse > 0) {
+    throw new SupplierLifecycleError(
+      `${inUse} inventory item(s) still resolve their factor from this PCF. Reassign them before archiving it.`,
+    );
+  }
+
+  const updated = await prisma.lcaSupplierPcf.update({
+    where: { id: pcf.id },
+    data: { archivedAt: new Date() },
+  });
+
+  await recordAuditEvent({
+    entityType: "supplier_pcf",
+    entityId: updated.id,
+    action: "archived",
+    actorUserId: input.actorUserId,
+    summary: `Supplier PCF "${updated.productName}" archived: ${input.reason.trim()}.`,
+    before: { archivedAt: null },
+    after: { archivedAt: updated.archivedAt },
+  });
+
+  return updated;
+}

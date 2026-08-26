@@ -1398,6 +1398,10 @@ model Supplier {
   country        String?
   contact        String?
   notes          String?
+  /// Set when the supplier is archived (deactivated) rather than deleted:
+  /// supplier PCFs and inventory items already resolved against this row stay
+  /// referenceable, so archival is the only safe lifecycle exit.
+  archivedAt     DateTime?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -1508,6 +1512,10 @@ model LcaMethodologyProfile {
   standardsReferenced       String[]
   notes                     String?
   isDefault                 Boolean                @default(false)
+  /// Set when the profile is retired from selection for new assessments.
+  /// Existing assessments keep it, and issued versions keep their frozen
+  /// methodology snapshot, so retirement never rewrites a reported figure.
+  archivedAt                DateTime?
   createdAt                 DateTime               @default(now())
   updatedAt                 DateTime               @updatedAt
 
@@ -1929,6 +1937,9 @@ model LcaSupplierPcf {
   sourcePayload Json?
 
   notes     String?
+  /// Set when this supplier PCF is withdrawn from further use. Never deleted:
+  /// issued assessment versions may already have resolved a factor from it.
+  archivedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -6539,6 +6550,7 @@ enum AuditProgrammeStatus {
   ACTIVE
   COMPLETED
   SUPERSEDED
+  CANCELLED
 }
 
 enum EmsAuditType {
@@ -7773,6 +7785,7 @@ enum CompetenceAssignmentStatus {
   COMPETENT
   GAP
   EXPIRED
+  WITHDRAWN
 }
 
 /// Evidence type captured against a `CompetenceAssignment` (task T71, spec
@@ -7791,6 +7804,7 @@ enum CompetenceEvidenceStatus {
   SUBMITTED
   VERIFIED
   REJECTED
+  WITHDRAWN
 }
 
 enum CompetenceAssessmentStatus {

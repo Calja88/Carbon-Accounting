@@ -9,6 +9,7 @@ import {
   submitCompetenceEvidence,
   verifyCompetenceEvidence,
   rejectCompetenceEvidence,
+  withdrawCompetenceEvidence,
 } from "@/lib/ems/competence/evidence-service";
 import {
   CompetenceAssessmentError,
@@ -21,6 +22,7 @@ import {
   rejectCompetenceEvidenceFormSchema,
   createCompetenceAssessmentFormSchema,
   completeCompetenceAssessmentFormSchema,
+  withdrawCompetenceEvidenceFormSchema,
 } from "@/lib/ems/competence/evidence-schemas";
 
 export interface CompetenceEvidenceActionState {
@@ -168,6 +170,29 @@ export async function completeCompetenceAssessmentAction(
     });
     revalidateAssignment(assignmentId);
     return { ...emptyState, message: "Assessment completed." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function withdrawCompetenceEvidenceAction(
+  _previous: CompetenceEvidenceActionState,
+  formData: FormData,
+): Promise<CompetenceEvidenceActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const evidenceId = String(formData.get("evidenceId") ?? "");
+    const assignmentId = String(formData.get("assignmentId") ?? "");
+    const parsed = withdrawCompetenceEvidenceFormSchema.safeParse({ reason: formData.get("reason") });
+    if (!evidenceId || !parsed.success) {
+      return {
+        ...emptyState,
+        error: parsed.success ? "Choose evidence to withdraw." : parsed.error.issues[0]?.message ?? "Enter a reason.",
+      };
+    }
+    await withdrawCompetenceEvidence(context, evidenceId, parsed.data.reason, context.userId);
+    revalidateAssignment(assignmentId);
+    return { ...emptyState, message: "Evidence withdrawn." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }

@@ -13,6 +13,7 @@ import {
   assignCompetenceRequirementAction,
   startCompetenceAssignmentAction,
   markCompetenceAssignmentGapAction,
+  withdrawCompetenceAssignmentAction,
   type AssignmentActionState,
 } from "./actions";
 
@@ -115,6 +116,29 @@ export function MarkGapForm({ assignmentId, personId }: { assignmentId: string; 
   );
 }
 
+export function WithdrawAssignmentForm({ assignmentId, personId }: { assignmentId: string; personId?: string }) {
+  const [state, formAction, pending] = useActionState(withdrawCompetenceAssignmentAction, emptyState);
+  return (
+    <form action={formAction} className="flex flex-col items-start gap-2">
+      <input type="hidden" name="assignmentId" value={assignmentId} />
+      {personId && <input type="hidden" name="personId" value={personId} />}
+      <div className="w-full max-w-sm">
+        <Label htmlFor={`withdraw-reason-${assignmentId}`}>Withdrawal reason</Label>
+        <Textarea id={`withdraw-reason-${assignmentId}`} name="reason" rows={2} required />
+      </div>
+      <Button
+        type="submit"
+        variant="danger"
+        disabled={pending}
+        onClick={(event) => { if (!confirm("Withdraw this competence assignment? The record and its evidence history are kept.")) event.preventDefault(); }}
+      >
+        {pending ? "Withdrawing…" : "Withdraw assignment"}
+      </Button>
+      <Feedback state={state} />
+    </form>
+  );
+}
+
 export function AssignmentList({ assignments, showPersonLink = true }: { assignments: AssignmentRow[]; showPersonLink?: boolean }) {
   if (assignments.length === 0) {
     return <p className="text-sm text-slate-500">No assignments visible to you yet.</p>;
@@ -142,10 +166,13 @@ export function AssignmentList({ assignments, showPersonLink = true }: { assignm
             </div>
             <Badge tone={statusTone(assignment.status)}>{assignment.status}</Badge>
           </div>
-          {(assignment.status === "REQUIRED" || assignment.status === "IN_PROGRESS") && (
+          {assignment.status !== "WITHDRAWN" && (
             <div className="mt-3 flex flex-wrap items-start gap-3">
               {assignment.status === "REQUIRED" && <StartAssignmentButton assignmentId={assignment.id} personId={assignment.personId} />}
-              <MarkGapForm assignmentId={assignment.id} personId={assignment.personId} />
+              {(assignment.status === "REQUIRED" || assignment.status === "IN_PROGRESS") && (
+                <MarkGapForm assignmentId={assignment.id} personId={assignment.personId} />
+              )}
+              <WithdrawAssignmentForm assignmentId={assignment.id} personId={assignment.personId} />
             </div>
           )}
         </div>

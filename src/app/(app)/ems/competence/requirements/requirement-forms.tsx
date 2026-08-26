@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   activateCompetenceRequirementVersionAction,
   approveCompetenceRequirementVersionAction,
+  discardCompetenceRequirementVersionDraftAction,
   createCompetenceRequirementAction,
   createSuccessorCompetenceRequirementVersionAction,
   updateCompetenceRequirementVersionDraftAction,
@@ -242,6 +243,24 @@ function ApproveButton({ versionId }: { versionId: string }) {
   );
 }
 
+function DiscardDraftButton({ versionId }: { versionId: string }) {
+  const [state, action, pending] = useActionState(discardCompetenceRequirementVersionDraftAction, emptyState);
+  return (
+    <form action={action} className="flex flex-col items-start gap-1">
+      <input type="hidden" name="versionId" value={versionId} />
+      <Button
+        type="submit"
+        variant="danger"
+        disabled={pending}
+        onClick={(event) => { if (!confirm("Discard this draft requirement version? This cannot be undone.")) event.preventDefault(); }}
+      >
+        {pending ? "Discarding…" : "Discard draft"}
+      </Button>
+      <Feedback state={state} />
+    </form>
+  );
+}
+
 function ActivateButton({ versionId }: { versionId: string }) {
   const [state, action, pending] = useActionState(activateCompetenceRequirementVersionAction, emptyState);
   return (
@@ -363,6 +382,7 @@ function VersionCard({
           </details>
         )}
         {version.status === "DRAFT" && canEdit && <ApproveButton versionId={version.id} />}
+        {version.status === "DRAFT" && canEdit && <DiscardDraftButton versionId={version.id} />}
         {version.status === "APPROVED" && canEdit && <ActivateButton versionId={version.id} />}
         {version.status === "ACTIVE" && canEdit && (
           <details>

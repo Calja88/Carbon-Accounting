@@ -22,7 +22,9 @@ export default async function AssessmentsPage() {
       orderBy: [{ product: { name: "asc" } }, { versionLabel: "asc" }],
     }),
     prisma.lcaMethodologyProfile.findMany({
-      where: { OR: [{ organisationId: context.organisationId }, { organisationId: null }] },
+      // Archived profiles stay resolvable for assessments that already use
+      // them, but must not be offered for a new selection.
+      where: { archivedAt: null, OR: [{ organisationId: context.organisationId }, { organisationId: null }] },
       orderBy: [{ isDefault: "desc" }, { name: "asc" }],
     }),
   ]);

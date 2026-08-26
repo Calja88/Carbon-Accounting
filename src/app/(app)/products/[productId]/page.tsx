@@ -8,7 +8,7 @@ import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { Button } from "@/components/ui/button";
 import { BackLink, DataTable, EmptyState, PageHeading, SectionCard, StatusBadge, Td } from "@/components/lca/ui";
-import { AddLocationForm, AddVersionForm, EditProductForm } from "../product-forms";
+import { AddLocationForm, AddVersionForm, EditProductForm, RetireVersionForm } from "../product-forms";
 import { deleteManufacturingLocationAction } from "../actions";
 import { NewAssessmentForm } from "../../assessments/new-assessment-form";
 
@@ -36,7 +36,9 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
       orderBy: [{ entity: { name: "asc" } }, { name: "asc" }],
     }),
     prisma.lcaMethodologyProfile.findMany({
-      where: { OR: [{ organisationId: context.organisationId }, { organisationId: null }] },
+      // Archived profiles stay resolvable for assessments that already use
+      // them, but must not be offered for a new selection.
+      where: { archivedAt: null, OR: [{ organisationId: context.organisationId }, { organisationId: null }] },
       orderBy: [{ isDefault: "desc" }, { name: "asc" }],
     }),
   ]);
@@ -104,13 +106,24 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         description="A new version is the right home for a design change. Assessments already issued against an earlier version keep saying what they said."
         actions={canEdit ? <AddVersionForm productId={product.id} /> : null}
       >
-        <DataTable headers={["Version", "What changed", "Effective from", { label: "Assessments", align: "right" }]}>
+        <DataTable headers={["Version", "What changed", "Effective from", { label: "Assessments", align: "right" }, "Lifecycle"]}>
           {product.versions.map((version) => (
             <tr key={version.id}>
               <Td className="font-medium text-slate-900">{version.versionLabel}</Td>
               <Td>{version.description ?? <span className="text-slate-400">—</span>}</Td>
               <Td>{version.effectiveFrom ? version.effectiveFrom.toISOString().slice(0, 10) : <span className="text-slate-400">—</span>}</Td>
               <Td align="right">{version.assessments.length}</Td>
+              <Td>
+                {version.isActive
+                  ? canEdit && (
+                      <RetireVersionForm
+                        productId={product.id}
+                        productVersionId={version.id}
+                        versionLabel={version.versionLabel}
+                      />
+                    )
+                  : <span className="text-xs text-slate-500">Retired</span>}
+              </Td>
             </tr>
           ))}
         </DataTable>

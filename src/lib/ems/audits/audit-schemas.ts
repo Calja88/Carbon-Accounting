@@ -90,3 +90,8 @@ export const createAuditFindingFormSchema = z.object({
   ownerMembershipId: z.string().trim().optional().or(z.literal("")),
   dueDate: z.coerce.date().optional(),
 });
+
+export const cancelAuditProgrammeFormSchema = z.object({
+  programmeId: z.string().trim().min(1, "Choose a programme."),
+  reason: z.string().trim().min(1, "Record why the audit programme is being cancelled.").max(2000),
+});

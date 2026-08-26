@@ -252,6 +252,52 @@ export async function reviseEmergencyPlan(
   return createPlanVersion(context, { ...input, scenarioId: current.scenarioId }, current.version + 1, current.id);
 }
 
+/**
+ * Retires the current active emergency plan for a scenario without creating
+ * a successor — the exit for a scenario whose plan is being withdrawn
+ * (usually alongside retiring the scenario itself) rather than revised.
+ *
+ * An emergency plan is IMMUTABLE_ISSUED in substance: every version is
+ * pinned to a `ControlledDocumentRevision`, and recorded exercises reference
+ * an exact plan version with `onDelete: Restrict`. So there is no delete
+ * path at all — `EmergencyPlanStatus.RETIRED` is the terminal state the enum
+ * already carries, and the controlled-document revision behind the plan is
+ * left untouched.
+ */
+export async function retireEmergencyPlan(
+  context: OrganisationContext,
+  planId: string,
+  reason: string,
+  actorUserId: string,
+) {
+  requirePermission(context, "ems.emergency_plan.manage");
+  const ctx = toTenantRepositoryContext(context);
+  const plan = await findTenantEmergencyPlan(ctx, planId);
+  if (!plan) throw new TenantOwnershipError();
+  if (plan.status !== "ACTIVE" && plan.status !== "DRAFT") {
+    throw new EmergencyPreparednessError("Only a draft or active emergency plan can be retired.");
+  }
+  if (!reason.trim()) throw new EmergencyPreparednessError("Record why the emergency plan is being retired.");
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    const retired = await tx.emergencyPlan.update({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: plan.id } },
+      data: { status: "RETIRED" },
+    });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "emergency_plan.retired",
+      resourceType: "emergency_plan",
+      resourceId: plan.id,
+      summary: `Emergency plan version ${plan.version} retired: ${reason.trim()}`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { status: plan.status },
+      after: { status: retired.status },
+    });
+    return retired;
+  });
+}
+
 // --- Exercises ------------------------------------------------------------
 
 export interface EmergencyExerciseInput {

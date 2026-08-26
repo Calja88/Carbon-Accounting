@@ -11,7 +11,7 @@ import { COMPETENCE_SENSITIVE_VIEW_PERMISSION } from "@/lib/ems/competence/perso
 import { listCompetenceEvidenceForAssignment } from "@/lib/ems/competence/evidence-service";
 import { listCompetenceAssessmentsForAssignment } from "@/lib/ems/competence/assessment-service";
 import { listEvidenceForResource } from "@/lib/documents/evidence-service";
-import { SubmitEvidenceForm, VerifyEvidenceButton, RejectEvidenceForm } from "./evidence-forms";
+import { SubmitEvidenceForm, VerifyEvidenceButton, RejectEvidenceForm, WithdrawEvidenceForm } from "./evidence-forms";
 import { CreateAssessmentForm, CompleteAssessmentForm } from "./assessment-forms";
 
 export const dynamic = "force-dynamic";
@@ -141,7 +141,7 @@ export default async function CompetenceAssignmentDetailPage({ params }: { param
                             <p className="mt-1 text-sm text-red-600">Rejected: {item.rejectionReason}</p>
                           )}
                         </div>
-                        <Badge tone={item.status === "VERIFIED" ? "success" : item.status === "REJECTED" ? "danger" : "warning"}>
+                        <Badge tone={item.status === "VERIFIED" ? "success" : item.status === "REJECTED" ? "danger" : item.status === "WITHDRAWN" ? "neutral" : "warning"}>
                           {item.status}
                         </Badge>
                       </div>
@@ -149,6 +149,7 @@ export default async function CompetenceAssignmentDetailPage({ params }: { param
                         <div className="mt-3 flex flex-wrap items-start gap-3">
                           <VerifyEvidenceButton evidenceId={item.id} assignmentId={id} />
                           <RejectEvidenceForm evidenceId={item.id} assignmentId={id} />
+                          <WithdrawEvidenceForm evidenceId={item.id} assignmentId={id} />
                         </div>
                       )}
                     </div>

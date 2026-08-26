@@ -117,6 +117,109 @@ export function assertMethodologyProfileMutable<T extends { organisationId: stri
 }
 
 /**
+ * The methodology-profile fields that are *normative*: they decide how a
+ * figure is calculated, or how the methodology is cited in a report. Once an
+ * assessment version built on this profile has been ISSUED, these are frozen
+ * — `assertMethodologyProfileEditable` below refuses to change them, exactly
+ * as `LcaAssessmentVersion` itself is frozen once issued.
+ *
+ * `summary`, `notes` and `isDefault` are deliberately absent: they are
+ * descriptive/administrative, are not part of any calculation, and are not
+ * cited by an issued report, so correcting them stays possible.
+ */
+export const METHODOLOGY_NORMATIVE_FIELDS = [
+  "name",
+  "version",
+  "entityId",
+  "defaultBoundary",
+  "gwpBasis",
+  "defaultAllocationMethod",
+  "allocationRules",
+  "recyclingMethod",
+  "recyclingRules",
+  "electricityApproach",
+  "electricityRules",
+  "biogenicTreatment",
+  "biogenicRules",
+  "removalsRules",
+  "offsetTreatment",
+  "offsetRules",
+  "cutOffRules",
+  "cutOffThresholdPercent",
+  "factorHierarchy",
+  "dataQualityRequirements",
+  "minimumDataQualityScore",
+  "requireEvidenceForPrimary",
+  "standardsReferenced",
+] as const;
+
+export type MethodologyNormativeField = (typeof METHODOLOGY_NORMATIVE_FIELDS)[number];
+
+/** How many ISSUED assessment versions were built on this methodology profile. */
+export async function countIssuedVersionsForMethodologyProfile(profileId: string): Promise<number> {
+  return prisma.lcaAssessmentVersion.count({
+    where: { status: "ISSUED", assessment: { methodologyProfileId: profileId } },
+  });
+}
+
+function sameValue(before: unknown, after: unknown): boolean {
+  if (Array.isArray(before) || Array.isArray(after)) {
+    const a = Array.isArray(before) ? before : [];
+    const b = Array.isArray(after) ? after : [];
+    return a.length === b.length && a.every((item, index) => String(item) === String(b[index]));
+  }
+  if (before === null || before === undefined || after === null || after === undefined) {
+    return (before ?? null) === (after ?? null);
+  }
+  // Decimal columns arrive as Prisma.Decimal on the way out and as strings on
+  // the way in, so compare by string rather than by identity.
+  return String(before) === String(after);
+}
+
+/**
+ * Names the normative fields an edit would change on a methodology profile.
+ * Empty means the edit only touches descriptive/administrative fields.
+ */
+export function methodologyNormativeChanges(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): MethodologyNormativeField[] {
+  return METHODOLOGY_NORMATIVE_FIELDS.filter((field) => !sameValue(before[field], after[field]));
+}
+
+/** Raised when an edit would rewrite the methodology behind an already-issued assessment version. */
+export class MethodologyProfileFrozenError extends Error {}
+
+/**
+ * The immutability half of the methodology-profile guard.
+ * `assertMethodologyProfileMutable` above answers "does this tenant own the
+ * profile"; this answers "may this profile still be changed at all".
+ *
+ * An issued `LcaAssessmentVersion` freezes its own methodology snapshot into
+ * its payload, so an edit here can never rewrite a reported figure — but it
+ * can make the live register disagree with the methodology an issued report
+ * cites by name and version. So once any version built on the profile has
+ * been issued, the normative fields are closed: the correct move is a new
+ * profile (a new `version` string) that future assessments select.
+ */
+export async function assertMethodologyProfileEditable(
+  profile: Record<string, unknown> & { id: string; name: string; version: string },
+  nextValues: Record<string, unknown>,
+): Promise<{ issuedVersionCount: number; changedNormativeFields: MethodologyNormativeField[] }> {
+  const changedNormativeFields = methodologyNormativeChanges(profile, nextValues);
+  const issuedVersionCount = await countIssuedVersionsForMethodologyProfile(profile.id);
+  if (issuedVersionCount > 0 && changedNormativeFields.length > 0) {
+    throw new MethodologyProfileFrozenError(
+      `"${profile.name} ${profile.version}" is cited by ${issuedVersionCount} issued assessment version(s), `
+        + `so its methodology rules are frozen (${changedNormativeFields.join(", ")}). `
+        + "Create a new methodology profile version for future assessments instead. "
+        + "The summary, notes and default flag can still be corrected.",
+    );
+  }
+  return { issuedVersionCount, changedNormativeFields };
+}
+
+/**
  * Loads an LcaEvidence row only if it belongs to the given tenant context,
  * and (when `expectedAssessmentId` is supplied) is attached to that exact
  * assessment — the nested-parent-substitution guard for the evidence

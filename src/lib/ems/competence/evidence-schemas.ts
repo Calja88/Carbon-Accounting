@@ -29,3 +29,7 @@ export const completeCompetenceAssessmentFormSchema = z.object({
   rationale: z.string().trim().max(2000).optional().or(z.literal("")),
   reassessmentDueDate: z.string().trim().max(40).optional().or(z.literal("")),
 });
+
+export const withdrawCompetenceEvidenceFormSchema = z.object({
+  reason: z.string().trim().min(1, "Record why the evidence is being withdrawn.").max(2000),
+});

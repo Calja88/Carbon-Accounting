@@ -10,6 +10,7 @@ import {
   submitCompetenceEvidenceAction,
   verifyCompetenceEvidenceAction,
   rejectCompetenceEvidenceAction,
+  withdrawCompetenceEvidenceAction,
   type CompetenceEvidenceActionState,
 } from "./actions";
 import { COMPETENCE_EVIDENCE_TYPES } from "@/lib/ems/competence/evidence-schemas";
@@ -81,6 +82,29 @@ export function RejectEvidenceForm({ evidenceId, assignmentId }: { evidenceId: s
         <Textarea id={`reject-reason-${evidenceId}`} name="reason" rows={2} required />
       </div>
       <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Rejecting…" : "Reject"}</Button>
+      <Feedback state={state} />
+    </form>
+  );
+}
+
+export function WithdrawEvidenceForm({ evidenceId, assignmentId }: { evidenceId: string; assignmentId: string }) {
+  const [state, formAction, pending] = useActionState(withdrawCompetenceEvidenceAction, emptyState);
+  return (
+    <form action={formAction} className="flex flex-col items-start gap-2">
+      <input type="hidden" name="evidenceId" value={evidenceId} />
+      <input type="hidden" name="assignmentId" value={assignmentId} />
+      <div className="w-full max-w-sm">
+        <Label htmlFor={`withdraw-evidence-reason-${evidenceId}`}>Withdrawal reason</Label>
+        <Textarea id={`withdraw-evidence-reason-${evidenceId}`} name="reason" rows={2} required />
+      </div>
+      <Button
+        type="submit"
+        variant="danger"
+        disabled={pending}
+        onClick={(event) => { if (!confirm("Withdraw this evidence submission? The record is kept and marked withdrawn.")) event.preventDefault(); }}
+      >
+        {pending ? "Withdrawing…" : "Withdraw"}
+      </Button>
       <Feedback state={state} />
     </form>
   );

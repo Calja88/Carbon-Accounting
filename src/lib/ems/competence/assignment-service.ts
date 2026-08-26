@@ -170,6 +170,58 @@ export async function markCompetenceAssignmentGap(
   });
 }
 
+/**
+ * Withdraws a competence assignment — the exit for a person who no longer
+ * holds the role, process or control the requirement was raised against.
+ *
+ * A competence assignment is PERSONAL_RESTRICTED, and its evidence and
+ * assessments hang off it (`CompetenceEvidence` cascades, but
+ * `CompetenceAssessment` records are completed competence judgements about a
+ * named person). Deleting the row would erase that person's competence
+ * history, so `WITHDRAWN` is a terminal status instead: the obligation ends,
+ * the record and everything under it stays readable, and the assignment
+ * drops out of gap and expiry sweeps.
+ */
+export async function withdrawCompetenceAssignment(
+  context: OrganisationContext,
+  assignmentId: string,
+  reason: string,
+  actorUserId: string,
+) {
+  requirePermission(context, MANAGE_PERMISSION);
+  if (!reason?.trim()) throw new CompetenceAssignmentError("Record why the assignment is being withdrawn.");
+  const ctx = toTenantRepositoryContext(context);
+  const assignment = await findTenantCompetenceAssignment(ctx, assignmentId);
+  if (!assignment) throw new TenantOwnershipError();
+  if (assignment.status === "WITHDRAWN") throw new CompetenceAssignmentError("This assignment is already withdrawn.");
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    const updated = await tx.competenceAssignment.update({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: assignment.id } },
+      data: {
+        status: "WITHDRAWN",
+        gapNote: reason.trim(),
+        gapSince: null,
+        // The requirement no longer applies, so a future expiry sweep must
+        // not resurrect this row as EXPIRED.
+        competentUntil: null,
+      },
+    });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "competence_assignment.withdrawn",
+      resourceType: "competence_assignment",
+      resourceId: assignment.id,
+      summary: `Competence assignment withdrawn: ${reason.trim()}`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { status: assignment.status },
+      after: { status: "WITHDRAWN" },
+    });
+    return updated;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------

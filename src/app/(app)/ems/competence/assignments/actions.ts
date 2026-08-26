@@ -9,8 +9,13 @@ import {
   assignCompetenceRequirement,
   startCompetenceAssignment,
   markCompetenceAssignmentGap,
+  withdrawCompetenceAssignment,
 } from "@/lib/ems/competence/assignment-service";
-import { assignCompetenceRequirementFormSchema, markCompetenceAssignmentGapFormSchema } from "@/lib/ems/competence/person-schemas";
+import {
+  assignCompetenceRequirementFormSchema,
+  markCompetenceAssignmentGapFormSchema,
+  withdrawCompetenceAssignmentFormSchema,
+} from "@/lib/ems/competence/person-schemas";
 
 export interface AssignmentActionState {
   error: string | null;
@@ -81,6 +86,26 @@ export async function markCompetenceAssignmentGapAction(_previous: AssignmentAct
     await markCompetenceAssignmentGap(context, assignmentId, { note: parsed.data.note || null, actorUserId: context.userId });
     revalidateAssignments(personId || undefined);
     return { ...emptyState, message: "Assignment marked as a gap." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function withdrawCompetenceAssignmentAction(_previous: AssignmentActionState, formData: FormData): Promise<AssignmentActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const assignmentId = String(formData.get("assignmentId") ?? "");
+    const personId = String(formData.get("personId") ?? "");
+    const parsed = withdrawCompetenceAssignmentFormSchema.safeParse({ reason: formData.get("reason") });
+    if (!assignmentId || !parsed.success) {
+      return {
+        ...emptyState,
+        error: parsed.success ? "Choose an assignment." : parsed.error.issues[0]?.message ?? "Enter a reason.",
+      };
+    }
+    await withdrawCompetenceAssignment(context, assignmentId, parsed.data.reason, context.userId);
+    revalidateAssignments(personId || undefined);
+    return { ...emptyState, message: "Assignment withdrawn." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }

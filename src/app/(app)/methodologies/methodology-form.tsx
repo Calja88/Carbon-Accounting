@@ -25,7 +25,7 @@ import {
   RECYCLING_METHOD_LABELS,
 } from "@/lib/lca/labels";
 import { emptyMethodologyState } from "@/lib/lca/form-state";
-import { saveMethodologyAction } from "./actions";
+import { archiveMethodologyAction, saveMethodologyAction } from "./actions";
 
 export interface MethodologyValues {
   id: string;
@@ -314,6 +314,44 @@ export function MethodologyForm({
         <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(false)}>
           Close
         </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Archives a methodology profile. Archival, never deletion: assessments
+ * reference the profile live and issued assessment versions cite it inside a
+ * frozen snapshot, so the row has to stay resolvable.
+ */
+export function ArchiveMethodologyForm({ profileId, label }: { profileId: string; label: string }) {
+  const [state, formAction, pending] = useActionState(archiveMethodologyAction, emptyMethodologyState);
+  const [open, setOpen] = useState(false);
+
+  if (!open) {
+    return <Button size="sm" variant="danger" onClick={() => setOpen(true)}>Archive</Button>;
+  }
+
+  return (
+    <form action={formAction} className="space-y-2 text-left">
+      {state.error && <Notice tone="danger">{state.error}</Notice>}
+      {state.success && <Notice tone="success">{state.message}</Notice>}
+      <input type="hidden" name="profileId" value={profileId} />
+      <div>
+        <Label htmlFor={`archive-methodology-reason-${profileId}`}>Reason</Label>
+        <Input id={`archive-methodology-reason-${profileId}`} name="reason" required className="mt-1" />
+      </div>
+      <div className="flex gap-2">
+        <Button
+          type="submit"
+          size="sm"
+          variant="danger"
+          disabled={pending}
+          onClick={(event) => { if (!confirm(`Archive "${label}"? It stops being selectable for new assessments; issued versions keep their frozen methodology.`)) event.preventDefault(); }}
+        >
+          {pending ? "Archiving…" : "Archive profile"}
+        </Button>
+        <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
       </div>
     </form>
   );

@@ -92,10 +92,12 @@ export const AUDIT_EVENT_TYPES = [
   "control_check.recorded",
   // Environmental monitoring and calibration (task T34).
   "monitoring_plan.created",
+  "monitoring_plan.deactivated",
   "monitoring_result.recorded",
   "monitoring_result.reviewed",
   "monitoring_exception.reviewed",
   "monitoring_equipment.created",
+  "monitoring_equipment.retired",
   "equipment_calibration.recorded",
   "calibration_exception.reviewed",
   // External providers, communications and emergency preparedness (task T35).
@@ -109,6 +111,7 @@ export const AUDIT_EVENT_TYPES = [
   "emergency_scenario.status_changed",
   "emergency_plan.created",
   "emergency_plan.revised",
+  "emergency_plan.retired",
   "emergency_exercise.recorded",
   "emergency_exercise_action.recorded",
   // Applicability workflow (task T43).
@@ -116,6 +119,7 @@ export const AUDIT_EVENT_TYPES = [
   "applicability_assessment.submitted_for_review",
   "applicability_assessment.decided",
   "applicability_assessment.superseded",
+  "applicability_assessment.discarded",
   // Compliance obligation versioning and approval (task T44).
   "compliance_obligation_version.created",
   "compliance_obligation_version.submitted_for_review",
@@ -165,6 +169,7 @@ export const AUDIT_EVENT_TYPES = [
   "audit_programme.approved",
   "audit_programme.activated",
   "audit_programme.completed",
+  "audit_programme.cancelled",
   "audit_programme_item.created",
   "ems_audit.created",
   "ems_audit.rescheduled",
@@ -229,12 +234,15 @@ export const AUDIT_EVENT_TYPES = [
   "competence_requirement_version.approved",
   "competence_requirement_version.activated",
   "competence_requirement_version.superseded",
+  "competence_requirement_version.discarded",
   "competence_assignment.created",
   "competence_assignment.status_changed",
+  "competence_assignment.withdrawn",
   // Training, evidence, assessment and expiry (task T71).
   "competence_evidence.submitted",
   "competence_evidence.verified",
   "competence_evidence.rejected",
+  "competence_evidence.withdrawn",
   "competence_assessment.created",
   "competence_assessment.completed",
   "competence_assignment.expired",

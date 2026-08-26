@@ -68,3 +68,14 @@ export const monitoringExceptionReviewFormSchema = z.object({
 }).refine((value) => Boolean(value.resultId) !== Boolean(value.calibrationId), {
   message: "Review exactly one monitoring result or calibration.",
 });
+
+export const deactivateMonitoringPlanFormSchema = z.object({
+  planId: requiredText("Choose a monitoring plan.", 200),
+  reason: requiredText("Record why the monitoring plan is being deactivated.", 2000),
+});
+
+export const retireMonitoringEquipmentFormSchema = z.object({
+  equipmentId: requiredText("Choose monitoring equipment.", 200),
+  status: z.enum(["RETIRED", "OUT_OF_SERVICE"]),
+  reason: requiredText("Record why the equipment is being taken out of use.", 2000),
+});

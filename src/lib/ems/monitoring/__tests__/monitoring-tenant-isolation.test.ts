@@ -39,7 +39,9 @@ vi.mock("@/lib/prisma", () => {
   const monitoringPlan = {
     findFirst: vi.fn(async ({ where }: { where: Row }) => tables.plans.find((row) => matches(row, where)) ?? null),
     findMany: vi.fn(async ({ where }: { where: Row }) => tables.plans.filter((row) => matches(row, where))),
+    count: vi.fn(async ({ where }: { where: Row }) => tables.plans.filter((row) => matches(row, where)).length),
     create: vi.fn(async ({ data }: { data: Row }) => { const row = { id: `plan-${tables.nextId++}`, status: "ACTIVE", ...data }; tables.plans.push(row); return row; }),
+    update: vi.fn(async ({ where, data }: { where: Row; data: Row }) => { const row = tables.plans.find((item) => matches(item, where.organisationId_id ?? where)); if (!row) throw new Error("not found"); Object.assign(row, data); return row; }),
   };
   const monitoringResult = {
     findFirst: vi.fn(async ({ where }: { where: Row }) => tables.results.find((row) => matches(row, where)) ?? null),
@@ -196,5 +198,102 @@ describe("EquipmentCalibration cross-tenant isolation", () => {
         bytes: Buffer.from("synthetic"), actorUserId: "user-b",
       }),
     ).rejects.toThrow(TenantOwnershipError);
+  });
+});
+
+
+/**
+ * Lifecycle exits added by the lifecycle-coverage pass. A monitoring plan is
+ * deactivated and equipment retired — never deleted, because results and
+ * calibration history reference them with `onDelete: Restrict`.
+ */
+describe("deactivateMonitoringPlan", () => {
+  it("moves an active plan to INACTIVE and keeps its results", async () => {
+    const before = tables.results.filter((row) => row.planId === planA.id).length;
+    const deactivated = await monitoring.deactivateMonitoringPlan(contextA, {
+      planId: planA.id as string, reason: "Synthetic programme change.", actorUserId: "user-a",
+    });
+    expect(deactivated.status).toBe("INACTIVE");
+    expect(tables.results.filter((row) => row.planId === planA.id).length).toBe(before);
+  });
+
+  it("refuses a plan that is already inactive", async () => {
+    await monitoring.deactivateMonitoringPlan(contextA, { planId: planA.id as string, reason: "First.", actorUserId: "user-a" });
+    await expect(
+      monitoring.deactivateMonitoringPlan(contextA, { planId: planA.id as string, reason: "Again.", actorUserId: "user-a" }),
+    ).rejects.toThrow(/already inactive/i);
+  });
+
+  it("requires a reason", async () => {
+    await expect(
+      monitoring.deactivateMonitoringPlan(contextA, { planId: planA.id as string, reason: "   ", actorUserId: "user-a" }),
+    ).rejects.toThrow(/Record why/i);
+  });
+
+  it("refuses a foreign-tenant plan id", async () => {
+    await expect(
+      monitoring.deactivateMonitoringPlan(contextB, { planId: planA.id as string, reason: "Cross-tenant.", actorUserId: "user-b" }),
+    ).rejects.toBeInstanceOf(TenantOwnershipError);
+  });
+
+  it("denies a caller without ems.monitoring.record", async () => {
+    const viewer = makeOrganisationContext(ORG_A, { userId: "user-a", membershipId: "membership-a", permissions: new Set(["ems.view"]) as never });
+    await expect(
+      monitoring.deactivateMonitoringPlan(viewer, { planId: planA.id as string, reason: "No permission.", actorUserId: "user-a" }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("retireMonitoringEquipment", () => {
+  it("refuses while an active plan still depends on the equipment", async () => {
+    // equipmentA is OUT_OF_SERVICE after the beforeEach out-of-tolerance
+    // calibration, so a plan can only be attached to a fresh ACTIVE unit.
+    const spare = await calibration.createMonitoringEquipment(contextA, {
+      reference: "meter-a-spare", description: "Aster spare meter", location: "Aster bench",
+      calibrationFrequency: "Annual", calibrationDueDate: new Date("2026-08-01"),
+      ownerMembershipId: "membership-a", actorUserId: "user-a",
+    });
+    const plan = await monitoring.createMonitoringPlan(contextA, {
+      planKey: "plan-a-instrumented", parameter: "Synthetic parameter", method: "Synthetic method",
+      location: "Aster bench", frequency: "Monthly", unit: "synthetic-unit", acceptanceCriteria: "Synthetic threshold",
+      aspectId: "aspect-a", controlId: "control-a", responsibleMembershipId: "membership-a",
+      instrumentRequired: true, equipmentId: spare.id as string, actorUserId: "user-a",
+    });
+    expect(plan.equipmentId).toBe(spare.id);
+    await expect(
+      calibration.retireMonitoringEquipment(contextA, {
+        equipmentId: spare.id as string, status: "RETIRED", reason: "End of life.", actorUserId: "user-a",
+      }),
+    ).rejects.toThrow(/active monitoring plan/i);
+  });
+
+  it("retires equipment once no active plan depends on it, keeping calibration history", async () => {
+    const before = tables.calibrations.filter((row) => row.equipmentId === equipmentA.id).length;
+    expect(before).toBeGreaterThan(0);
+    const retired = await calibration.retireMonitoringEquipment(contextA, {
+      equipmentId: equipmentA.id as string, status: "RETIRED", reason: "End of life.", actorUserId: "user-a",
+    });
+    expect(retired.status).toBe("RETIRED");
+    expect(tables.calibrations.filter((row) => row.equipmentId === equipmentA.id).length).toBe(before);
+    expect(calibrationA.id).toBeTruthy();
+  });
+
+  it("refuses to return retired equipment to service", async () => {
+    await calibration.retireMonitoringEquipment(contextA, {
+      equipmentId: equipmentA.id as string, status: "RETIRED", reason: "End of life.", actorUserId: "user-a",
+    });
+    await expect(
+      calibration.retireMonitoringEquipment(contextA, {
+        equipmentId: equipmentA.id as string, status: "OUT_OF_SERVICE", reason: "Change of mind.", actorUserId: "user-a",
+      }),
+    ).rejects.toThrow(/cannot be returned to service/i);
+  });
+
+  it("refuses a foreign-tenant equipment id", async () => {
+    await expect(
+      calibration.retireMonitoringEquipment(contextB, {
+        equipmentId: equipmentA.id as string, status: "RETIRED", reason: "Cross-tenant.", actorUserId: "user-b",
+      }),
+    ).rejects.toBeInstanceOf(TenantOwnershipError);
   });
 });

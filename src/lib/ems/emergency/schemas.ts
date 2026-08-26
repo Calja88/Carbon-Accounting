@@ -46,3 +46,8 @@ export const emergencyExerciseActionFormSchema = z.object({
   incidentReference: z.string().trim().max(200).optional().or(z.literal("")),
   nonconformityReference: z.string().trim().max(200).optional().or(z.literal("")),
 });
+
+export const retireEmergencyPlanFormSchema = z.object({
+  planId: z.string().min(1),
+  reason: z.string().trim().min(1, "Record why the emergency plan is being retired.").max(2000),
+});

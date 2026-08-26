@@ -3,7 +3,15 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { LcaAssuranceType, LcaBoundary, LcaPcfVerificationStatus } from "@prisma/client";
-import { createSupplier, createSupplierPcf, importPactDocument } from "@/lib/lca/supplier-service";
+import {
+  archiveSupplier,
+  archiveSupplierPcf,
+  createSupplier,
+  createSupplierPcf,
+  importPactDocument,
+  SupplierLifecycleError,
+} from "@/lib/lca/supplier-service";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import { canManageSuppliers, getLcaContext } from "@/lib/lca/permissions";
 import { findUnit } from "@/lib/lca/units";
 import type { SupplierFormState } from "@/lib/lca/form-state";
@@ -181,4 +189,60 @@ export async function importPactDocumentAction(
     message: `Imported ${result.pcf?.productName} from ${result.pcf?.companyName}. The document has been kept verbatim on the record.`,
     warnings: result.warnings,
   };
+}
+
+const archiveSupplierSchema = z.object({
+  supplierId: z.string().min(1),
+  reason: z.string().trim().min(1, "Record why the supplier is being archived.").max(2000),
+});
+
+const archiveSupplierPcfSchema = z.object({
+  supplierPcfId: z.string().min(1),
+  reason: z.string().trim().min(1, "Record why the supplier PCF is being archived.").max(2000),
+});
+
+function lifecycleError(error: unknown): string {
+  if (error instanceof SupplierLifecycleError) return error.message;
+  if (error instanceof TenantOwnershipError) return "That record no longer exists.";
+  throw error;
+}
+
+export async function archiveSupplierAction(
+  _prev: SupplierFormState,
+  formData: FormData,
+): Promise<SupplierFormState> {
+  const context = await getLcaContext();
+  if (!canManageSuppliers(context)) return { error: "Your permissions do not allow archiving suppliers.", success: false };
+
+  const parsed = archiveSupplierSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Check the form and try again.", success: false };
+  }
+  try {
+    await archiveSupplier(context!, { ...parsed.data, actorUserId: context!.userId });
+  } catch (error) {
+    return { error: lifecycleError(error), success: false };
+  }
+  revalidatePath("/suppliers");
+  return { error: null, success: true, message: "Supplier archived." };
+}
+
+export async function archiveSupplierPcfAction(
+  _prev: SupplierFormState,
+  formData: FormData,
+): Promise<SupplierFormState> {
+  const context = await getLcaContext();
+  if (!canManageSuppliers(context)) return { error: "Your permissions do not allow archiving supplier PCFs.", success: false };
+
+  const parsed = archiveSupplierPcfSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Check the form and try again.", success: false };
+  }
+  try {
+    await archiveSupplierPcf(context!, { ...parsed.data, actorUserId: context!.userId });
+  } catch (error) {
+    return { error: lifecycleError(error), success: false };
+  }
+  revalidatePath("/suppliers");
+  return { error: null, success: true, message: "Supplier PCF archived." };
 }

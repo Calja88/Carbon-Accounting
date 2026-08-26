@@ -40,3 +40,7 @@ export const assignCompetenceRequirementFormSchema = z.object({
 export const markCompetenceAssignmentGapFormSchema = z.object({
   note: z.string().trim().max(2000).optional().or(z.literal("")),
 });
+
+export const withdrawCompetenceAssignmentFormSchema = z.object({
+  reason: z.string().trim().min(1, "Record why the assignment is being withdrawn.").max(2000),
+});

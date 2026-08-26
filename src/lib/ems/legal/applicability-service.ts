@@ -60,6 +60,7 @@ import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-sco
 import { runInTenantTransaction } from "@/lib/repositories/transaction";
 import { recordAuditEvent } from "@/lib/repositories/audit-repository";
 import { linkEvidence, uploadEvidenceObject } from "@/lib/documents/evidence-service";
+import { isUnderLegalHold } from "@/lib/retention/legal-hold-service";
 
 export { TenantOwnershipError };
 
@@ -414,6 +415,63 @@ export async function updateApplicabilityAssessmentDraft(
       after: { proposedDecision: input.decision },
     });
     return updated;
+  });
+}
+
+/**
+ * Discards a draft applicability assessment.
+ *
+ * Follows the `discardSignificanceMethod` precedent exactly: a DRAFT
+ * assessment is the one state that provably cannot be referenced by any
+ * downstream snapshot — `ComplianceObligationVersion` rows are only ever
+ * created from a *decided* assessment, and a successor assessment may only
+ * supersede a decided predecessor. A decided (APPLICABLE / NOT_APPLICABLE /
+ * UNCERTAIN) assessment is a legal record and is never deleted; it is
+ * superseded by a successor instead. IN_REVIEW is also refused, so a draft
+ * cannot be pulled out from under a reviewer mid-review — withdraw it back
+ * to DRAFT first is not a transition this workflow has, so the reviewer
+ * decides it instead.
+ */
+export async function discardApplicabilityAssessmentDraft(
+  context: OrganisationContext,
+  assessmentId: string,
+  actorUserId: string,
+) {
+  requirePermission(context, "ems.applicability.assess");
+  const ctx = toTenantRepositoryContext(context);
+  const assessment = await findTenantApplicabilityAssessment(ctx, assessmentId);
+  if (!assessment) throw new TenantOwnershipError();
+  if (assessment.status !== "DRAFT") {
+    throw new ApplicabilityWorkflowError("Only a draft applicability assessment can be discarded.");
+  }
+  if (await isUnderLegalHold(ctx, "applicability_assessment", assessment.id)) {
+    throw new ApplicabilityWorkflowError("This assessment is under legal hold and cannot be discarded.");
+  }
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    // Scopes cascade with the assessment row; the polymorphic evidence links
+    // are removed explicitly so no orphan link can later imply the
+    // assessment still exists. The shared EvidenceObject itself is retained.
+    await tx.evidenceLink.deleteMany({
+      where: tenantWhere(txCtx, { resourceType: "applicability_assessment", resourceId: assessment.id }),
+    });
+    await tx.applicabilityAssessmentScope.deleteMany({ where: tenantWhere(txCtx, { assessmentId: assessment.id }) });
+    await tx.applicabilityAssessment.delete({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: assessment.id } },
+    });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "applicability_assessment.discarded",
+      resourceType: "applicability_assessment",
+      resourceId: assessment.id,
+      summary: "Draft applicability assessment discarded before any decision was recorded.",
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: {
+        status: "DRAFT",
+        instrumentId: assessment.instrumentId,
+        otherRequirementSourceId: assessment.otherRequirementSourceId,
+      },
+    });
   });
 }
 

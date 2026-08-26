@@ -10,6 +10,7 @@ import {
   attachEvidenceToApplicabilityAssessment,
   createApplicabilityAssessment,
   decideApplicabilityAssessment,
+  discardApplicabilityAssessmentDraft,
   submitApplicabilityAssessmentForReview,
   updateApplicabilityAssessmentDraft,
   uploadEvidenceToApplicabilityAssessment,
@@ -200,6 +201,22 @@ export async function linkApplicabilityEvidenceAction(
     });
     revalidateApplicability();
     return { ...emptyState, message: "Evidence linked." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function discardApplicabilityAssessmentDraftAction(
+  _previous: ApplicabilityActionState,
+  formData: FormData,
+): Promise<ApplicabilityActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const assessmentId = String(formData.get("assessmentId") ?? "");
+    if (!assessmentId) return { ...emptyState, error: "Choose an assessment." };
+    await discardApplicabilityAssessmentDraft(context, assessmentId, context.userId);
+    revalidateApplicability();
+    return { ...emptyState, message: "Draft assessment discarded." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }

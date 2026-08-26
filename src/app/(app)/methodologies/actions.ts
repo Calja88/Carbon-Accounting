@@ -15,7 +15,13 @@ import { recordAuditEvent } from "@/lib/lca/audit-service";
 import { canManageMethodology, getLcaContext } from "@/lib/lca/permissions";
 import { assertEntityAccess } from "@/lib/rbac/authorize";
 import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
-import { assertMethodologyProfileMutable, findVisibleMethodologyProfile } from "@/lib/repositories/lca-repository";
+import {
+  assertMethodologyProfileEditable,
+  assertMethodologyProfileMutable,
+  countIssuedVersionsForMethodologyProfile,
+  findVisibleMethodologyProfile,
+  MethodologyProfileFrozenError,
+} from "@/lib/repositories/lca-repository";
 import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import type { MethodologyFormState } from "@/lib/lca/form-state";
 
@@ -122,9 +128,23 @@ export async function saveMethodologyAction(
     const entity = await prisma.entity.findFirst({ where: tenantWhere(ctx, { id: data.entityId }) });
     if (!entity) throw new TenantOwnershipError();
   }
+  let issuedVersionCount = 0;
   if (data.profileId) {
     const existing = await findVisibleMethodologyProfile(ctx, data.profileId);
-    assertMethodologyProfileMutable(ctx, existing);
+    const owned = assertMethodologyProfileMutable(ctx, existing);
+    if (owned.archivedAt) {
+      return { error: "This methodology profile is archived. Restore it before editing.", success: false };
+    }
+    // Part B: tenant ownership was the only guard here. An issued assessment
+    // version freezes its own methodology snapshot, so this cannot rewrite a
+    // reported figure — but it could make the register disagree with the
+    // methodology an issued report cites, so the normative fields are frozen.
+    try {
+      ({ issuedVersionCount } = await assertMethodologyProfileEditable(owned, values));
+    } catch (err) {
+      if (err instanceof MethodologyProfileFrozenError) return { error: err.message, success: false };
+      throw err;
+    }
   }
 
   const duplicate = await prisma.lcaMethodologyProfile.findFirst({
@@ -155,7 +175,7 @@ export async function saveMethodologyAction(
     action: data.profileId ? "updated" : "created",
     actorUserId: context!.userId,
     summary: data.profileId
-      ? `Methodology profile "${profile.name} ${profile.version}" updated. ${affected} assessment(s) read this profile; drafts among them pick the change up on their next calculation, and issued versions keep the methodology frozen into them.`
+      ? `Methodology profile "${profile.name} ${profile.version}" updated. ${affected} assessment(s) read this profile; drafts among them pick the change up on their next calculation, and issued versions (${issuedVersionCount}) keep the methodology frozen into them.`
       : `Methodology profile "${profile.name} ${profile.version}" created.`,
     after: values,
   });
@@ -168,4 +188,77 @@ export async function saveMethodologyAction(
       ? `Saved. ${affected} assessment(s) use this profile — recalculate them to apply the change.`
       : "Methodology profile created.",
   };
+}
+
+const archiveSchema = z.object({
+  profileId: z.string().min(1),
+  reason: z.string().trim().min(1, "Record why the profile is being archived.").max(2000),
+});
+
+/**
+ * Archives a methodology profile — the lifecycle exit a profile has never
+ * had.
+ *
+ * A profile is IMMUTABLE_ISSUED by association: assessments reference it
+ * live, and issued assessment versions cite it by name and version inside a
+ * frozen snapshot. Deleting it would orphan those citations, so archival is
+ * the only safe exit: `archivedAt` takes the profile out of selection for
+ * new assessments while every existing reference keeps resolving.
+ *
+ * Refused while assessments still read the profile live, so archiving can
+ * never silently leave a draft assessment pointing at a retired methodology.
+ */
+export async function archiveMethodologyAction(
+  _prev: MethodologyFormState,
+  formData: FormData,
+): Promise<MethodologyFormState> {
+  const context = await getLcaContext();
+  if (!canManageMethodology(context)) {
+    return { error: "Your permissions do not allow changing methodology profiles.", success: false };
+  }
+  const parsed = archiveSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Check the form and try again.", success: false };
+  }
+
+  const ctx = toTenantRepositoryContext(context!);
+  const existing = await findVisibleMethodologyProfile(ctx, parsed.data.profileId);
+  let owned;
+  try {
+    owned = assertMethodologyProfileMutable(ctx, existing);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return { error: "That methodology profile no longer exists.", success: false };
+    throw err;
+  }
+  if (owned.archivedAt) return { error: "This methodology profile is already archived.", success: false };
+
+  const liveAssessments = await prisma.lcaAssessment.count({
+    where: { methodologyProfileId: owned.id, organisationId: context!.organisationId },
+  });
+  if (liveAssessments > 0) {
+    return {
+      error: `${liveAssessments} assessment(s) still use "${owned.name} ${owned.version}". Move them to another profile before archiving it.`,
+      success: false,
+    };
+  }
+
+  const issuedVersionCount = await countIssuedVersionsForMethodologyProfile(owned.id);
+  const archived = await prisma.lcaMethodologyProfile.update({
+    where: { id: owned.id },
+    data: { archivedAt: new Date(), isDefault: false },
+  });
+
+  await recordAuditEvent({
+    entityType: "methodology",
+    entityId: archived.id,
+    action: "archived",
+    actorUserId: context!.userId,
+    summary: `Methodology profile "${archived.name} ${archived.version}" archived: ${parsed.data.reason.trim()}. `
+      + `${issuedVersionCount} issued assessment version(s) keep their frozen methodology snapshot.`,
+    before: { archivedAt: null, isDefault: owned.isDefault },
+    after: { archivedAt: archived.archivedAt, isDefault: false },
+  });
+
+  revalidatePath("/methodologies");
+  return { error: null, success: true, message: "Methodology profile archived." };
 }

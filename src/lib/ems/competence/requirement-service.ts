@@ -39,6 +39,7 @@ import {
 import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import { runInTenantTransaction } from "@/lib/repositories/transaction";
 import { recordAuditEvent } from "@/lib/repositories/audit-repository";
+import { isUnderLegalHold } from "@/lib/retention/legal-hold-service";
 
 export { TenantOwnershipError };
 
@@ -203,7 +204,11 @@ export async function createCompetenceRequirement(context: OrganisationContext, 
         version: 1,
         ...draftData(input),
         preparedByUserId: input.actorUserId,
-        scopes: { create: scopes.map((scope) => ({ organisationId: txCtx.organisationId, ...scope })) },
+        // `organisationId` is implied by the compound
+        // [organisationId, requirementVersionId] relation and is rejected by
+        // Prisma's generated nested-create type if set explicitly — the same
+        // defect already fixed in `createMethodVersion`.
+        scopes: { create: scopes.map((scope) => ({ ...scope })) },
       },
     });
 
@@ -246,7 +251,11 @@ export async function updateCompetenceRequirementVersionDraft(
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: version.id } },
       data: {
         ...draftData(input),
-        scopes: { create: scopes.map((scope) => ({ organisationId: txCtx.organisationId, ...scope })) },
+        // `organisationId` is implied by the compound
+        // [organisationId, requirementVersionId] relation and is rejected by
+        // Prisma's generated nested-create type if set explicitly — the same
+        // defect already fixed in `createMethodVersion`.
+        scopes: { create: scopes.map((scope) => ({ ...scope })) },
       },
     });
 
@@ -262,6 +271,67 @@ export async function updateCompetenceRequirementVersionDraft(
     });
 
     return updated;
+  });
+}
+
+/**
+ * Discards a draft competence requirement version.
+ *
+ * The `discardSignificanceMethod` precedent applies: DRAFT is the only state
+ * a version can be in and provably have no downstream snapshot.
+ * `CompetenceAssignment` may only be raised against an ACTIVE version, and
+ * `CompetenceRequirement.activeVersionId` only ever points at an activated
+ * one, so a draft cannot be referenced by an assignment, an evidence record
+ * or an assessment. Approved/active/superseded versions are the controlled
+ * revision chain and are never deleted — a superseding successor is the only
+ * way to change them.
+ *
+ * A discard that would leave the parent `CompetenceRequirement` with no
+ * versions at all removes the (now empty) requirement shell too, so the
+ * register never lists a requirement with nothing behind it.
+ */
+export async function discardCompetenceRequirementVersionDraft(
+  context: OrganisationContext,
+  versionId: string,
+  actorUserId: string,
+) {
+  requirePermission(context, MANAGE_PERMISSION);
+  const ctx = toTenantRepositoryContext(context);
+  const version = await findTenantCompetenceRequirementVersion(ctx, versionId);
+  if (!version) throw new TenantOwnershipError();
+  if (version.status !== "DRAFT") throw new CompetenceRequirementError("Only a draft version can be discarded.");
+  if (await isUnderLegalHold(ctx, "competence_requirement_version", version.id)) {
+    throw new CompetenceRequirementError("This requirement version is under legal hold and cannot be discarded.");
+  }
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    // CompetenceRequirementScope cascades on this relation; the delete is
+    // explicit so the intent is readable at the call site.
+    await tx.competenceRequirementScope.deleteMany({ where: tenantWhere(txCtx, { requirementVersionId: version.id }) });
+    await tx.competenceRequirementVersion.delete({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: version.id } },
+    });
+
+    const remaining = await tx.competenceRequirementVersion.count({
+      where: tenantWhere(txCtx, { requirementId: version.requirementId }),
+    });
+    if (remaining === 0) {
+      await tx.competenceRequirement.delete({
+        where: { organisationId_id: { organisationId: txCtx.organisationId, id: version.requirementId } },
+      });
+    }
+
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "competence_requirement_version.discarded",
+      resourceType: "competence_requirement_version",
+      resourceId: version.id,
+      summary: `Draft competence requirement version ${version.version} ("${version.title}") discarded.`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { status: "DRAFT", requirementId: version.requirementId, version: version.version },
+      after: { requirementRemoved: remaining === 0 },
+    });
   });
 }
 
@@ -397,7 +467,11 @@ export async function createSuccessorCompetenceRequirementVersion(
         preparedByUserId: input.actorUserId,
         revisionRationale: input.revisionRationale.trim(),
         supersedesVersionId: latest.id,
-        scopes: { create: scopes.map((scope) => ({ organisationId: txCtx.organisationId, ...scope })) },
+        // `organisationId` is implied by the compound
+        // [organisationId, requirementVersionId] relation and is rejected by
+        // Prisma's generated nested-create type if set explicitly — the same
+        // defect already fixed in `createMethodVersion`.
+        scopes: { create: scopes.map((scope) => ({ ...scope })) },
       },
     });
 
