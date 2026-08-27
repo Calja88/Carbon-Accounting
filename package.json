@@ -16,6 +16,7 @@
     "db:migrate:deploy": "node scripts/resolve-failed-migration.mjs && prisma migrate deploy",
     "backfill:organisation": "tsx scripts/backfill-organisation.ts",
     "migrate:contract-preflight": "tsx scripts/contract-migration-preflight.ts",
+    "migrate:evidence-to-sharepoint": "tsx scripts/migrate-evidence-to-sharepoint.ts",
     "test": "vitest run"
   },
   "dependencies": {

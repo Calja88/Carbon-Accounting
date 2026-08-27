@@ -167,11 +167,19 @@ vi.mock("@/lib/prisma", () => {
     }),
   };
 
+  // No revision in this file is ever SharePoint-linked (task SP04's own
+  // tests cover that) — approveRevision's resolveApprovalPin() call always
+  // finds nothing here, so approval proceeds exactly as it did before SP04.
+  const externalFileReference = {
+    findFirst: vi.fn(async () => null),
+  };
+
   const prisma = {
     controlledDocument,
     controlledDocumentRevision,
     evidenceObject,
     evidenceLink,
+    externalFileReference,
     $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma)),
   };
 

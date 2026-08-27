@@ -284,6 +284,26 @@ export const AUDIT_EVENT_TYPES = [
   "activity_entry.deleted",
   "commuting_survey.deleted",
   "site_energy_contract.deleted",
+  // Organisation storage configuration and external-file references (task SP01).
+  "storage_connection.created",
+  "storage_connection.status_changed",
+  "storage_site_binding.created",
+  "storage_site_binding.status_changed",
+  "external_file_reference.created",
+  "external_file_reference.pinned",
+  "external_file_reference.marked_stale",
+  // Controlled-document SharePoint revision integration (task SP04).
+  "external_file_reference.relinked",
+  // SharePoint delta reconciliation and external-file status sync (task SP06).
+  "external_file_reference.reconciliation_deleted",
+  "external_file_reference.reconciliation_moved_out_of_scope",
+  "external_file_reference.reconciliation_version_drift",
+  "external_file_reference.reconciliation_draft_updated",
+  "external_file_reference.reconciliation_renamed",
+  "external_file_reference.reconciliation_resolved",
+  "storage_site_binding.reconciliation_unreachable",
+  // Dry-run-first evidence migration to SharePoint (task SP07).
+  "evidence_object.migrated_to_sharepoint",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -374,7 +394,10 @@ export type AuditResourceType =
   | "organisation_export"
   | "activity_entry"
   | "commuting_survey"
-  | "site_energy_contract";
+  | "site_energy_contract"
+  | "organisation_storage_connection"
+  | "storage_site_binding"
+  | "external_file_reference";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

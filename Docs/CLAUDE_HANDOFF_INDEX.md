@@ -21,6 +21,7 @@ This is the shortest route from planning to implementation. Do not give Claude e
 | Build competence/review | Selected T70–T73 task + `PHASE7_COMPETENCE_MANAGEMENT_REVIEW_SPEC.md` excerpt |
 | Harden and assess readiness | Selected T80–T84 task + `PHASE8_HARDENING_READINESS_SPEC.md` excerpt |
 | Check current EMS UI coverage/deployment status | `EMS_UI_COVERAGE.md` |
+| Understand SharePoint integration boundaries | `SP00_SHAREPOINT_INTEGRATION_SPEC.md` |
 
 The planning documents are authoritative in this order when wording conflicts:
 

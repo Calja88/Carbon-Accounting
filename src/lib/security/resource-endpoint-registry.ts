@@ -61,6 +61,7 @@ export const REGISTRY_SOURCE_MODULES = {
   "documents-repository": "src/lib/repositories/documents-repository.ts",
   "notifications-repository": "src/lib/repositories/notifications-repository.ts",
   "audit-repository": "src/lib/repositories/audit-repository.ts",
+  "storage-connection-repository": "src/lib/repositories/storage-connection-repository.ts",
 } as const;
 
 const EMS_TEST_FILE = "src/lib/repositories/__tests__/ems-repository.test.ts";
@@ -242,6 +243,14 @@ export const RESOURCE_ENDPOINT_REGISTRY: ResourceEndpointEntry[] = [
   // Generic audit events (T20)
   // ---------------------------------------------------------------------
   { key: "audit.auditEvent", label: "Audit event", task: "T20", module: "audit-repository", fn: "getAuditEvent", hasParentGuard: false, contextShape: "tenant", testFile: "src/lib/repositories/__tests__/audit-repository.test.ts" },
+
+  // ---------------------------------------------------------------------
+  // SharePoint storage connection / external-file references (SP01)
+  // ---------------------------------------------------------------------
+  { key: "storage.organisationStorageConnection", label: "Organisation storage connection", task: "SP01", module: "storage-connection-repository", fn: "findTenantStorageConnection", hasParentGuard: false, contextShape: "tenant", testFile: "src/lib/repositories/__tests__/storage-connection-repository.test.ts" },
+  { key: "storage.storageSiteBinding", label: "Storage site binding", task: "SP01", module: "storage-connection-repository", fn: "findTenantSiteBinding", hasParentGuard: false, contextShape: "tenant", testFile: "src/lib/repositories/__tests__/storage-connection-repository.test.ts" },
+  { key: "storage.externalFileReference", label: "External file reference", task: "SP01", module: "storage-connection-repository", fn: "findTenantExternalFileReference", hasParentGuard: true, contextShape: "tenant", testFile: "src/lib/repositories/__tests__/storage-connection-repository.test.ts" },
+  { key: "storage.externalFileReferenceForRevision", label: "External file reference (by controlled-document revision)", task: "SP04", module: "storage-connection-repository", fn: "findTenantExternalFileReferenceForRevision", hasParentGuard: false, contextShape: "tenant", testFile: "src/lib/repositories/__tests__/storage-connection-repository.test.ts" },
 ];
 
 /** Every registered key must be unique — guards the registry itself against a copy/paste duplicate. */
