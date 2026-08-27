@@ -13,6 +13,7 @@ import {
   SubmitForReviewButton,
   RecordReviewButton,
   ApproveRevisionButton,
+  DiscardDraftRevisionButton,
   PublishRevisionEffectiveForm,
   CreateSuccessorRevisionForm,
   DistributeRevisionForm,
@@ -176,6 +177,9 @@ export default async function ControlledDocumentDetailPage({ params }: { params:
                 )}
                 {canApprove && revision.status === "IN_REVIEW" && revision.reviewedByUserId && (
                   <ApproveRevisionButton documentId={document.id} revisionId={revision.id} />
+                )}
+                {canManage && revision.status === "DRAFT" && (
+                  <DiscardDraftRevisionButton documentId={document.id} revisionId={revision.id} revisionNumber={revision.revisionNumber} />
                 )}
               </div>
 

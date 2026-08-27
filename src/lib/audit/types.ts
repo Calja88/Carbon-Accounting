@@ -35,6 +35,9 @@ export const AUDIT_EVENT_TYPES = [
   "controlled_document_revision.approved",
   "controlled_document_revision.published_effective",
   "controlled_document_revision.made_obsolete",
+  "controlled_document_revision.discarded",
+  "evidence_link.unlinked",
+  "evidence_object.discarded",
   "evidence_object.uploaded",
   "evidence_object.linked",
   // EMS programme, scope, context and interested parties (task T23).
@@ -325,6 +328,7 @@ export type AuditResourceType =
   | "controlled_document"
   | "controlled_document_revision"
   | "evidence_object"
+  | "evidence_link"
   | "ems_programme"
   | "ems_scope_version"
   | "standard_requirement_map"

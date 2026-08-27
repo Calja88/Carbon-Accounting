@@ -21,6 +21,7 @@ import { prisma } from "@/lib/prisma";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import {
   findTenantEvidenceObject,
+  findTenantEvidenceLink,
   toTenantRepositoryContext,
   tenantWhere,
 } from "@/lib/repositories/documents-repository";
@@ -28,6 +29,10 @@ import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import type { TenantRepositoryContext } from "@/lib/repositories/context";
 import { documentEvidenceStorage } from "@/lib/documents/storage/provider";
 import { scanEvidence } from "@/lib/documents/malware-scan";
+import { requirePermission } from "@/lib/rbac/authorize";
+import { runInTenantTransaction } from "@/lib/repositories/transaction";
+import { recordAuditEvent } from "@/lib/repositories/audit-repository";
+import { isUnderLegalHold } from "@/lib/retention/legal-hold-service";
 
 export { TenantOwnershipError };
 
@@ -316,6 +321,7 @@ export async function listEvidenceObjects(
   const search = options?.search?.trim();
   return prisma.evidenceObject.findMany({
     where: tenantWhere(ctx, search ? { filename: { contains: search, mode: "insensitive" as const } } : {}),
+    include: { _count: { select: { links: true } } },
     orderBy: { uploadedAt: "desc" },
   });
 }
@@ -346,4 +352,108 @@ export function formatBytes(bytes: number | null): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} kB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// ---------------------------------------------------------------------------
+// Safe removal — the evidence hub's "no removal action at all" gap.
+// `EvidenceObject` metadata/checksum rows are never physically deleted
+// wholesale by this module: `unlinkEvidence` only removes the application
+// link, and `discardUnlinkedEvidenceObject` is limited to an upload that
+// was never linked to anything. Neither ever calls the storage provider's
+// delete path in a way that removes real SharePoint bytes — the SharePoint
+// provider's `remove()` only unpins the app-side reference
+// (`storage/sharepoint-provider.ts`), matching "do not physically delete
+// SharePoint content".
+// ---------------------------------------------------------------------------
+
+export class EvidenceLifecycleError extends Error {}
+
+/**
+ * Removes one `EvidenceLink` — the application's pointer from a resource to
+ * an evidence object — without touching the `EvidenceObject` itself. Use
+ * this to correct a mistaken attachment; the evidence upload, its checksum,
+ * and any other link it still has remain intact.
+ */
+export async function unlinkEvidence(context: OrganisationContext, linkId: string, actorUserId: string) {
+  requirePermission(context, "ems.evidence.manage");
+  const ctx = toTenantRepositoryContext(context);
+  const link = await findTenantEvidenceLink(ctx, linkId);
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await tx.evidenceLink.delete({ where: { id: link.id, organisationId: txCtx.organisationId } });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "evidence_link.unlinked",
+      resourceType: "evidence_link",
+      resourceId: link.id,
+      summary: `Evidence link to ${link.resourceType} removed.`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { resourceType: link.resourceType, resourceId: link.resourceId },
+    });
+    return { id: link.id };
+  });
+}
+
+/**
+ * Discards an evidence upload that was never linked to anything — the
+ * accidental/duplicate-upload case. Blocked once any `EvidenceLink` exists,
+ * once it is a controlled-document revision's content, once it is under
+ * legal hold, or once it has already been retention-tombstoned. This is a
+ * distinct, immediate eligibility path from the scheduled
+ * `previewRetention`/`executeRetention` flow (`src/lib/retention/
+ * retention-service.ts`) — that flow governs *linked, retention-scheduled*
+ * evidence; this one is for evidence with no governance history at all yet.
+ * Only the `EvidenceObjectBlob`/storage bytes are removed (via the same
+ * provider `remove()` the retention tombstone uses, which never deletes
+ * real SharePoint content) — the metadata row, including its checksum, is
+ * kept, so an audit event recorded at upload time keeps resolving.
+ */
+export async function discardUnlinkedEvidenceObject(context: OrganisationContext, evidenceId: string, actorUserId: string) {
+  requirePermission(context, "ems.evidence.manage");
+  const ctx = toTenantRepositoryContext(context);
+  const evidence = await findTenantEvidenceObject(ctx, evidenceId);
+
+  if (evidence.retentionTombstonedAt) {
+    throw new EvidenceLifecycleError("This evidence has already been discarded.");
+  }
+  if (evidence.legalHold || (await isUnderLegalHold(ctx, "evidence_object", evidence.id))) {
+    throw new EvidenceLifecycleError("This evidence is under legal hold and cannot be discarded.");
+  }
+  const [linkCount, revision] = await Promise.all([
+    prisma.evidenceLink.count({ where: { evidenceId: evidence.id } }),
+    prisma.controlledDocumentRevision.findFirst({ where: { evidenceObjectId: evidence.id } }),
+  ]);
+  if (linkCount > 0) {
+    throw new EvidenceLifecycleError(
+      `This evidence is linked to ${linkCount} record${linkCount === 1 ? "" : "s"} and cannot be discarded. Unlink it first.`,
+    );
+  }
+  if (revision) {
+    throw new EvidenceLifecycleError("This evidence is a controlled-document revision's content and cannot be discarded here.");
+  }
+
+  if (evidence.storageKey) {
+    const provider = documentEvidenceStorage.forKey(evidence.storageProvider) ?? documentEvidenceStorage.active();
+    await provider.remove(evidence.storageKey);
+  }
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await tx.evidenceObjectBlob.deleteMany({ where: { evidenceObjectId: evidence.id } });
+    const updated = await tx.evidenceObject.update({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: evidence.id } },
+      data: { retentionTombstonedAt: new Date(), storageKey: null },
+    });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "evidence_object.discarded",
+      resourceType: "evidence_object",
+      resourceId: evidence.id,
+      summary: `Unlinked evidence upload "${evidence.filename}" discarded.`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { filename: evidence.filename },
+    });
+    return updated;
+  });
 }

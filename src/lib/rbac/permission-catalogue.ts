@@ -102,6 +102,7 @@ export const PERMISSION_CATALOGUE: PermissionCatalogueEntry[] = [
   entry("ems.management_review.approve", "Approve management review outputs", true),
   entry("ems.controlled_document.manage", "Manage controlled documents"),
   entry("ems.controlled_document.approve", "Approve a controlled document revision", true),
+  entry("ems.evidence.manage", "Unlink evidence and discard unlinked evidence uploads"),
   entry("ems.communication.manage", "Manage internal/external EMS communications"),
   entry("ems.emergency_plan.manage", "Manage emergency preparedness plans"),
   entry("ems.emergency_exercise.record", "Record emergency exercise outcomes"),

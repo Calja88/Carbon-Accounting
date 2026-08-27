@@ -13,8 +13,9 @@ import {
   approveRevision,
   publishRevisionEffective,
   createSuccessorRevision,
+  discardDraftRevision,
 } from "@/lib/documents/document-control-service";
-import { EvidenceError, uploadEvidenceObject } from "@/lib/documents/evidence-service";
+import { EvidenceError, EvidenceLifecycleError, uploadEvidenceObject, unlinkEvidence, discardUnlinkedEvidenceObject } from "@/lib/documents/evidence-service";
 import {
   createControlledDocumentFormSchema,
   createSuccessorRevisionFormSchema,
@@ -38,7 +39,7 @@ function friendlyError(error: unknown): string {
   if (error instanceof OrganisationAccessError) return "You must be signed in.";
   if (error instanceof PermissionDeniedError) return "You don't have permission to do that.";
   if (error instanceof TenantOwnershipError) return "That record could not be found in this organisation.";
-  if (error instanceof DocumentControlError || error instanceof EvidenceError) return error.message;
+  if (error instanceof DocumentControlError || error instanceof EvidenceError || error instanceof EvidenceLifecycleError) return error.message;
   if (error instanceof Error && error.message.includes("Unique constraint")) return "That reference is already in use.";
   throw error;
 }
@@ -176,6 +177,41 @@ export async function createSuccessorRevisionAction(_previous: DocumentsActionSt
     });
     revalidateDocuments(successor.documentId);
     return { ...emptyState, message: `Draft revision ${successor.revisionNumber} created.` };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function discardDraftRevisionAction(_previous: DocumentsActionState, formData: FormData): Promise<DocumentsActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const revisionId = String(formData.get("revisionId") ?? "");
+    const documentId = String(formData.get("documentId") ?? "");
+    const result = await discardDraftRevision(context, revisionId, context.userId);
+    revalidateDocuments(result.documentAlsoDeleted ? undefined : documentId);
+    return { ...emptyState, message: result.documentAlsoDeleted ? "Draft revision and document deleted." : "Draft revision discarded." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function unlinkEvidenceAction(_previous: DocumentsActionState, formData: FormData): Promise<DocumentsActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    await unlinkEvidence(context, String(formData.get("linkId") ?? ""), context.userId);
+    revalidateDocuments(String(formData.get("documentId") ?? "") || undefined);
+    return { ...emptyState, message: "Evidence link removed." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function discardUnlinkedEvidenceAction(_previous: DocumentsActionState, formData: FormData): Promise<DocumentsActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    await discardUnlinkedEvidenceObject(context, String(formData.get("evidenceId") ?? ""), context.userId);
+    revalidateDocuments();
+    return { ...emptyState, message: "Unlinked evidence discarded." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }

@@ -145,7 +145,7 @@ const EMS_INCIDENT_MANAGE = [
   "ems.corrective_action.effectiveness_review",
 ];
 const EMS_AUDIT_MANAGE = ["ems.audit_programme.manage", "ems.audit.perform", "ems.audit_report.issue"];
-const EMS_DOCUMENT_MANAGE = ["ems.controlled_document.manage"];
+const EMS_DOCUMENT_MANAGE = ["ems.controlled_document.manage", "ems.evidence.manage"];
 // T35: provider controls reuse ems.control.manage per Phase 3 spec §4 — no
 // separate provider permission code exists.
 const EMS_COMMUNICATIONS_EMERGENCY_MANAGE = ["ems.communication.manage", "ems.emergency_plan.manage", "ems.emergency_exercise.record"];

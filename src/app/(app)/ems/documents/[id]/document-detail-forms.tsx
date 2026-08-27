@@ -13,6 +13,7 @@ import {
   approveRevisionAction,
   publishRevisionEffectiveAction,
   createSuccessorRevisionAction,
+  discardDraftRevisionAction,
   distributeRevisionAction,
   acknowledgeDistributionAction,
   type DocumentsActionState,
@@ -87,6 +88,25 @@ export function SubmitForReviewButton({ documentId, revisionId }: { documentId: 
       <HiddenIds documentId={documentId} revisionId={revisionId} />
       <Button type="submit" size="sm" variant="secondary" disabled={pending}>
         {pending ? "Submitting…" : "Submit for review"}
+      </Button>
+      <Feedback state={state} />
+    </form>
+  );
+}
+
+export function DiscardDraftRevisionButton({ documentId, revisionId, revisionNumber }: { documentId: string; revisionId: string; revisionNumber: number }) {
+  const [state, formAction, pending] = useActionState(discardDraftRevisionAction, emptyState);
+  return (
+    <form
+      action={formAction}
+      className="inline-flex flex-col gap-1"
+      onSubmit={(event) => {
+        if (!window.confirm(`Discard draft revision ${revisionNumber}? This cannot be undone.`)) event.preventDefault();
+      }}
+    >
+      <HiddenIds documentId={documentId} revisionId={revisionId} />
+      <Button type="submit" size="sm" variant="danger" disabled={pending}>
+        {pending ? "Discarding…" : "Discard draft"}
       </Button>
       <Feedback state={state} />
     </form>

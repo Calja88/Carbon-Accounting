@@ -563,3 +563,78 @@ export async function createSuccessorRevision(context: OrganisationContext, inpu
     return successor;
   });
 }
+
+// ---------------------------------------------------------------------------
+// Discarding a draft — the "no removal action at all" gap this pass fills.
+// A DRAFT revision has never been reviewed/approved, so it carries no
+// governance weight of its own; the immutability trigger only starts
+// protecting a revision once it leaves DRAFT/IN_REVIEW. The linked
+// EvidenceObject (if any content was attached) is never deleted here —
+// only the revision row and its attachment link.
+// ---------------------------------------------------------------------------
+
+/**
+ * Discards a DRAFT controlled-document revision that was created by
+ * mistake or is no longer needed. If it is revision 1 of a document that
+ * has never had a current (EFFECTIVE) revision, the empty parent
+ * `ControlledDocument` is discarded too — otherwise only the draft revision
+ * is removed and the document (with its remaining revision history) is
+ * left in place. Never allowed once the revision has left DRAFT: use
+ * `createSuccessorRevision` or, once EFFECTIVE, let publishing a successor
+ * retire it to OBSOLETE automatically.
+ */
+export async function discardDraftRevision(context: OrganisationContext, revisionId: string, actorUserId: string) {
+  requirePermission(context, "ems.controlled_document.manage");
+  const ctx = toTenantRepositoryContext(context);
+  const revision = await findTenantControlledDocumentRevision(ctx, revisionId);
+  if (!revision) throw new TenantOwnershipError();
+
+  if (revision.status !== "DRAFT") {
+    throw new DocumentControlError(`Only a DRAFT revision can be discarded (this one is ${revision.status}).`);
+  }
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    const document = await tx.controlledDocument.findFirst({
+      where: { id: revision.documentId, organisationId: txCtx.organisationId },
+    });
+    if (!document) throw new TenantOwnershipError();
+    if (document.currentRevisionId === revision.id) {
+      // Can only happen if a future change ever lets currentRevisionId
+      // point at a non-EFFECTIVE revision — defence in depth.
+      throw new DocumentControlError("This revision is the document's current revision and cannot be discarded.");
+    }
+
+    const otherRevisionCount = await tx.controlledDocumentRevision.count({
+      where: { organisationId: txCtx.organisationId, documentId: document.id, id: { not: revision.id } },
+    });
+
+    try {
+      await tx.controlledDocumentRevision.delete({ where: { id: revision.id, organisationId: txCtx.organisationId } });
+    } catch {
+      throw new DocumentControlError(
+        "This draft revision is still referenced by another record (e.g. an environmental policy link or a pinned operational control) and cannot be discarded.",
+      );
+    }
+
+    let documentAlsoDeleted = false;
+    if (otherRevisionCount === 0 && document.currentRevisionId === null) {
+      await tx.controlledDocument.delete({ where: { id: document.id, organisationId: txCtx.organisationId } });
+      documentAlsoDeleted = true;
+    }
+
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "controlled_document_revision.discarded",
+      resourceType: "controlled_document_revision",
+      resourceId: revision.id,
+      summary: documentAlsoDeleted
+        ? `Draft revision ${revision.revisionNumber} discarded, along with its empty parent document "${document.reference}".`
+        : `Draft revision ${revision.revisionNumber} discarded.`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { revisionNumber: revision.revisionNumber, status: revision.status },
+    });
+
+    return { id: revision.id, documentAlsoDeleted, documentId: document.id };
+  });
+}

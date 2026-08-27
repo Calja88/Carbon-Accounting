@@ -24,6 +24,10 @@ export function canApproveControlledDocuments(context: OrganisationContext | nul
   return Boolean(context) && hasPermission(context as OrganisationContext, "ems.controlled_document.approve");
 }
 
+export function canManageEvidence(context: OrganisationContext | null | undefined): boolean {
+  return Boolean(context) && hasPermission(context as OrganisationContext, "ems.evidence.manage");
+}
+
 /** Resolved Organisation context, or null when signed out / no accessible organisation. */
 export async function getDocumentsContext(): Promise<OrganisationContext | null> {
   try {

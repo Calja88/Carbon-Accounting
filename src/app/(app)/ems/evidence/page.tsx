@@ -9,7 +9,7 @@ import {
   activeEvidenceStorageProviderName,
   formatBytes,
 } from "@/lib/documents/evidence-service";
-import { EvidenceSearchForm } from "./evidence-forms";
+import { EvidenceSearchForm, DiscardUnlinkedEvidenceButton } from "./evidence-forms";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +42,7 @@ export default async function EvidenceHubPage({
 
   const { q } = await searchParams;
   const canManage = hasPermission(context, "ems.controlled_document.manage");
+  const canManageEvidence = hasPermission(context, "ems.evidence.manage");
   const providerName = activeEvidenceStorageProviderName();
 
   const evidence = await listEvidenceObjects(context, { search: q });
@@ -86,12 +87,13 @@ export default async function EvidenceHubPage({
               <th scope="col" className="px-4 py-2">Scan status</th>
               <th scope="col" className="px-4 py-2">Uploaded</th>
               <th scope="col" className="px-4 py-2">Download</th>
+              {canManageEvidence && <th scope="col" className="px-4 py-2">Remove</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {evidence.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
+                <td colSpan={canManageEvidence ? 7 : 6} className="px-4 py-6 text-center text-slate-500">
                   No evidence objects match this organisation{q ? " and search" : ""} yet.
                 </td>
               </tr>
@@ -131,6 +133,17 @@ export default async function EvidenceHubPage({
                       </a>
                     )}
                   </td>
+                  {canManageEvidence && (
+                    <td className="px-4 py-2">
+                      {!tombstoned && !item.legalHold && item._count.links === 0 ? (
+                        <DiscardUnlinkedEvidenceButton evidenceId={item.id} fileName={item.filename} />
+                      ) : (
+                        <span className="text-xs text-slate-400">
+                          {tombstoned ? "Already discarded" : item.legalHold ? "Legal hold" : "Linked"}
+                        </span>
+                      )}
+                    </td>
+                  )}
                 </tr>
               );
             })}
