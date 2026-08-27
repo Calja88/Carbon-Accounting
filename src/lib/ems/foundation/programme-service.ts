@@ -154,6 +154,81 @@ export async function createEmsProgramme(context: OrganisationContext, input: Cr
   });
 }
 
+/**
+ * Hard-deletes a DRAFT EMS programme that has never been activated and has
+ * no scope versions of its own yet — the "created it by mistake, immediately
+ * after signup" case. Once a scope version exists (even in DRAFT), or the
+ * programme has ever moved past DRAFT, use `closeEmsProgramme` instead.
+ */
+export async function deleteDraftEmsProgramme(context: OrganisationContext, programmeId: string, actorUserId: string) {
+  requirePermission(context, "ems.programme.manage");
+  const ctx = toTenantRepositoryContext(context);
+  const programme = await findTenantEmsProgramme(ctx, programmeId);
+
+  if (programme.status !== "DRAFT") {
+    throw new EmsProgrammeError("Only a draft programme can be deleted. Close it instead.");
+  }
+  const scopeVersionCount = await prisma.emsScopeVersion.count({ where: { programmeId: programme.id } });
+  if (scopeVersionCount > 0) {
+    throw new EmsProgrammeError(
+      `This programme already has ${scopeVersionCount} scope version${scopeVersionCount === 1 ? "" : "s"} on record and cannot be deleted. Close it instead.`,
+    );
+  }
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await tx.emsProgramme.delete({ where: { id: programme.id, organisationId: txCtx.organisationId } });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "ems_programme.deleted",
+      resourceType: "ems_programme",
+      resourceId: programme.id,
+      summary: `Draft EMS programme "${programme.name}" deleted.`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { name: programme.name },
+    });
+    return { id: programme.id };
+  });
+}
+
+/**
+ * Hard-deletes a DRAFT scope version (and its own entity/site/activity
+ * boundary links) — never a version that has entered IN_REVIEW or beyond,
+ * which the immutability trigger in
+ * `20260811170000_add_ems_programme_foundation` protects regardless.
+ * `EmsProgramme.currentScopeVersionId` can never point at a DRAFT version
+ * (it is only set on approval), so this can never orphan the programme's
+ * current boundary.
+ */
+export async function deleteDraftScopeVersion(context: OrganisationContext, scopeVersionId: string, actorUserId: string) {
+  requirePermission(context, "ems.programme.manage");
+  const ctx = toTenantRepositoryContext(context);
+  const version = await findTenantEmsScopeVersion(ctx, scopeVersionId);
+  if (!version) throw new TenantOwnershipError();
+
+  if (version.status !== "DRAFT") {
+    throw new EmsProgrammeError("Only a draft scope version can be deleted.");
+  }
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await tx.emsScopeEntity.deleteMany({ where: { scopeVersionId: version.id } });
+    await tx.emsScopeSite.deleteMany({ where: { scopeVersionId: version.id } });
+    await tx.emsScopeActivity.deleteMany({ where: { scopeVersionId: version.id } });
+    await tx.emsScopeVersion.delete({ where: { id: version.id, organisationId: txCtx.organisationId } });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "ems_scope_version.deleted",
+      resourceType: "ems_scope_version",
+      resourceId: version.id,
+      summary: `Draft scope version ${version.versionNumber} deleted.`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { versionNumber: version.versionNumber },
+    });
+    return { id: version.id };
+  });
+}
+
 async function transitionProgrammeStatus(
   context: OrganisationContext,
   programmeId: string,

@@ -14,18 +14,24 @@ import {
   activateProgrammeAction,
   suspendProgrammeAction,
   closeProgrammeAction,
+  deleteProgrammeAction,
   createScopeVersionAction,
   submitScopeVersionAction,
   approveScopeVersionAction,
+  deleteScopeVersionAction,
   addScopeEntityAction,
   addScopeSiteAction,
   addScopeActivityAction,
   createContextIssueAction,
+  deleteContextIssueAction,
   createInterestedPartyAction,
   deactivateInterestedPartyAction,
+  deleteInterestedPartyAction,
   createInterestedPartyRequirementAction,
+  deleteInterestedPartyRequirementAction,
   createRiskOpportunityAction,
   recordResidualRatingAction,
+  deleteRiskOpportunityAction,
   createChangeAssessmentAction,
   submitChangeAssessmentAction,
   approveChangeAssessmentAction,
@@ -205,6 +211,7 @@ function ProgrammeStatusCard({ programme, canManage }: { programme: ProgrammeRow
   const [activateState, activateAction, activating] = useActionState(activateProgrammeAction, emptyState);
   const [suspendState, suspendAction, suspending] = useActionState(suspendProgrammeAction, emptyState);
   const [closeState, closeAction, closing] = useActionState(closeProgrammeAction, emptyState);
+  const [deleteState, deleteAction, deleting] = useActionState(deleteProgrammeAction, emptyState);
   const tone = programme.status === "ACTIVE" ? "success" : programme.status === "CLOSED" ? "neutral" : "warning";
   return (
     <Card>
@@ -232,11 +239,23 @@ function ProgrammeStatusCard({ programme, canManage }: { programme: ProgrammeRow
                 <Button type="submit" variant="secondary" disabled={closing}>{closing ? "Closing…" : "Close"}</Button>
               </form>
             )}
+            {programme.status === "DRAFT" && (
+              <form
+                action={deleteAction}
+                onSubmit={(event) => {
+                  if (!window.confirm(`Delete draft programme "${programme.name}"? This permanently removes it and cannot be undone.`)) event.preventDefault();
+                }}
+              >
+                <input type="hidden" name="programmeId" value={programme.id} />
+                <Button type="submit" variant="danger" disabled={deleting}>{deleting ? "Deleting…" : "Delete draft"}</Button>
+              </form>
+            )}
           </div>
         )}
         <Feedback state={activateState} />
         <Feedback state={suspendState} />
         <Feedback state={closeState} />
+        <Feedback state={deleteState} />
       </CardContent>
     </Card>
   );
@@ -330,6 +349,7 @@ function ScopeBoundaryEditor({ version, entities, sites }: { version: ScopeVersi
 function ScopeVersionCard({ version, canManage, entities, sites }: { version: ScopeVersionRow; canManage: boolean; entities: EntityOption[]; sites: SiteOption[] }) {
   const [submitState, submitAction, submitting] = useActionState(submitScopeVersionAction, emptyState);
   const [approveState, approveAction, approving] = useActionState(approveScopeVersionAction, emptyState);
+  const [deleteState, deleteAction, deleting] = useActionState(deleteScopeVersionAction, emptyState);
   const editable = version.status === "DRAFT" || version.status === "IN_REVIEW";
   return (
     <Card>
@@ -351,6 +371,16 @@ function ScopeVersionCard({ version, canManage, entities, sites }: { version: Sc
         )}
         {canManage && version.status === "IN_REVIEW" && (
           <form action={approveAction}><input type="hidden" name="scopeVersionId" value={version.id} /><Button type="submit" disabled={approving}>{approving ? "Approving…" : "Approve version"}</Button><Feedback state={approveState} /></form>
+        )}
+        {canManage && version.status === "DRAFT" && (
+          <form
+            action={deleteAction}
+            onSubmit={(event) => { if (!window.confirm(`Delete draft scope version ${version.versionNumber}? This cannot be undone.`)) event.preventDefault(); }}
+          >
+            <input type="hidden" name="scopeVersionId" value={version.id} />
+            <Button type="submit" variant="danger" size="sm" disabled={deleting}>{deleting ? "Deleting…" : "Delete draft version"}</Button>
+            <Feedback state={deleteState} />
+          </form>
         )}
       </CardContent>
     </Card>
@@ -397,23 +427,38 @@ function CreateContextIssueForm({ programmeId, members }: { programmeId: string;
   );
 }
 
-function ContextIssueList({ issues }: { issues: ContextIssueRow[] }) {
+function ContextIssueCard({ issue, canManage }: { issue: ContextIssueRow; canManage: boolean }) {
+  const [deleteState, deleteAction, deleting] = useActionState(deleteContextIssueAction, emptyState);
+  return (
+    <Card>
+      <CardContent className="space-y-2 py-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="font-medium text-slate-900">{issue.title}</h3>
+          <Badge tone="neutral">{issue.type.toLowerCase().replaceAll("_", " ")}</Badge>
+          <Badge tone="neutral">{issue.direction.toLowerCase().replaceAll("_", " ")}</Badge>
+        </div>
+        {issue.description && <p className="text-sm text-slate-600">{issue.description}</p>}
+        {issue.significance && <p className="text-sm text-slate-500"><strong>Significance:</strong> {issue.significance}</p>}
+        {canManage && (
+          <form
+            action={deleteAction}
+            onSubmit={(event) => { if (!window.confirm(`Delete context issue "${issue.title}"? This cannot be undone.`)) event.preventDefault(); }}
+          >
+            <input type="hidden" name="issueId" value={issue.id} />
+            <Button type="submit" variant="danger" size="sm" disabled={deleting}>{deleting ? "Deleting…" : "Delete"}</Button>
+            <Feedback state={deleteState} />
+          </form>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ContextIssueList({ issues, canManage }: { issues: ContextIssueRow[]; canManage: boolean }) {
   if (issues.length === 0) return <Card><CardContent className="py-8 text-center text-sm text-slate-500">No context issues recorded yet.</CardContent></Card>;
   return (
     <div className="space-y-3">
-      {issues.map((issue) => (
-        <Card key={issue.id}>
-          <CardContent className="space-y-2 py-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="font-medium text-slate-900">{issue.title}</h3>
-              <Badge tone="neutral">{issue.type.toLowerCase().replaceAll("_", " ")}</Badge>
-              <Badge tone="neutral">{issue.direction.toLowerCase().replaceAll("_", " ")}</Badge>
-            </div>
-            {issue.description && <p className="text-sm text-slate-600">{issue.description}</p>}
-            {issue.significance && <p className="text-sm text-slate-500"><strong>Significance:</strong> {issue.significance}</p>}
-          </CardContent>
-        </Card>
-      ))}
+      {issues.map((issue) => <ContextIssueCard key={issue.id} issue={issue} canManage={canManage} />)}
     </div>
   );
 }
@@ -461,8 +506,29 @@ function InterestedPartyRequirementForm({ partyId }: { partyId: string }) {
   );
 }
 
+function RequirementRow({ requirement, canManage }: { requirement: InterestedPartyRow["requirements"][number]; canManage: boolean }) {
+  const [deleteState, deleteAction, deleting] = useActionState(deleteInterestedPartyRequirementAction, emptyState);
+  return (
+    <li className="flex flex-wrap items-center gap-2">
+      <span>{requirement.summary}</span>
+      {requirement.isMandatory && <Badge tone="warning">mandatory</Badge>}
+      {canManage && (
+        <form
+          action={deleteAction}
+          onSubmit={(event) => { if (!window.confirm("Delete this requirement? This cannot be undone.")) event.preventDefault(); }}
+        >
+          <input type="hidden" name="requirementId" value={requirement.id} />
+          <Button type="submit" variant="danger" size="sm" disabled={deleting}>{deleting ? "Deleting…" : "Delete"}</Button>
+        </form>
+      )}
+      <Feedback state={deleteState} />
+    </li>
+  );
+}
+
 function InterestedPartyCard({ party, canManage }: { party: InterestedPartyRow; canManage: boolean }) {
   const [deactivateState, deactivateAction, deactivating] = useActionState(deactivateInterestedPartyAction, emptyState);
+  const [deleteState, deleteAction, deleting] = useActionState(deleteInterestedPartyAction, emptyState);
   return (
     <Card>
       <CardContent className="space-y-3 py-4">
@@ -476,15 +542,23 @@ function InterestedPartyCard({ party, canManage }: { party: InterestedPartyRow; 
           {canManage && party.isActive && (
             <form action={deactivateAction}><input type="hidden" name="partyId" value={party.id} /><Button type="submit" variant="secondary" size="sm" disabled={deactivating}>{deactivating ? "Deactivating…" : "Deactivate"}</Button></form>
           )}
+          {canManage && party.requirements.length === 0 && (
+            <form
+              action={deleteAction}
+              onSubmit={(event) => { if (!window.confirm(`Delete interested party "${party.name}"? This cannot be undone.`)) event.preventDefault(); }}
+            >
+              <input type="hidden" name="partyId" value={party.id} />
+              <Button type="submit" variant="danger" size="sm" disabled={deleting}>{deleting ? "Deleting…" : "Delete"}</Button>
+            </form>
+          )}
         </div>
         <Feedback state={deactivateState} />
+        <Feedback state={deleteState} />
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Requirements</p>
           {party.requirements.length === 0 ? <p className="mt-1 text-sm text-slate-500">None recorded.</p> : (
             <ul className="mt-1 space-y-1 text-sm text-slate-600">
-              {party.requirements.map((r) => (
-                <li key={r.id}>{r.summary}{r.isMandatory && <Badge tone="warning" className="ml-2">mandatory</Badge>}</li>
-              ))}
+              {party.requirements.map((r) => <RequirementRow key={r.id} requirement={r} canManage={canManage} />)}
             </ul>
           )}
         </div>
@@ -538,7 +612,9 @@ function ResidualRatingForm({ riskId }: { riskId: string }) {
 }
 
 function RiskCard({ risk, canManage }: { risk: RiskRow; canManage: boolean }) {
+  const [deleteState, deleteAction, deleting] = useActionState(deleteRiskOpportunityAction, emptyState);
   const tone = risk.status === "CLOSED" ? "neutral" : risk.status === "MONITORING" ? "warning" : "danger";
+  const deletable = risk.status === "OPEN" && risk.residualRating === null;
   return (
     <Card>
       <CardContent className="space-y-3 py-4">
@@ -553,6 +629,16 @@ function RiskCard({ risk, canManage }: { risk: RiskRow; canManage: boolean }) {
           <p><strong>Residual rating:</strong> {ratingText(risk.residualRating)}</p>
         </div>
         {canManage && risk.status !== "CLOSED" && <ResidualRatingForm riskId={risk.id} />}
+        {canManage && deletable && (
+          <form
+            action={deleteAction}
+            onSubmit={(event) => { if (!window.confirm(`Delete ${risk.kind === "RISK" ? "risk" : "opportunity"} "${risk.category}"? This cannot be undone.`)) event.preventDefault(); }}
+          >
+            <input type="hidden" name="riskOpportunityId" value={risk.id} />
+            <Button type="submit" variant="danger" size="sm" disabled={deleting}>{deleting ? "Deleting…" : "Delete"}</Button>
+            <Feedback state={deleteState} />
+          </form>
+        )}
       </CardContent>
     </Card>
   );
@@ -720,7 +806,7 @@ export function FoundationWorkspace({
       {tab === "context" && (
         <div className="space-y-6">
           {canManage && <CreateContextIssueForm programmeId={programme.id} members={members} />}
-          <ContextIssueList issues={contextIssues} />
+          <ContextIssueList issues={contextIssues} canManage={canManage} />
         </div>
       )}
 

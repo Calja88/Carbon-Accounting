@@ -133,6 +133,66 @@ export async function updateContextIssue(context: OrganisationContext, issueId: 
   });
 }
 
+/**
+ * Checks whether a foundation record (context issue, interested party, risk
+ * or opportunity) is cited by a change assessment's free-text `affectedRefs`
+ * pointer (Json, not a hard FK — see change-service.ts). Deleting a record
+ * a change assessment relies on would silently invalidate that assessment,
+ * so this is the dependency check the general deletion policy requires
+ * before any hard delete here.
+ */
+async function isReferencedByChangeAssessment(
+  ctx: { organisationId: string },
+  resourceType: "context_issue" | "interested_party" | "ems_risk_opportunity",
+  resourceId: string,
+): Promise<boolean> {
+  const assessments = await prisma.changeAssessment.findMany({
+    where: { organisationId: ctx.organisationId },
+    select: { affectedRefs: true },
+  });
+  return assessments.some((row) => {
+    const refs = row.affectedRefs;
+    if (!Array.isArray(refs)) return false;
+    return refs.some(
+      (ref) =>
+        ref &&
+        typeof ref === "object" &&
+        (ref as Record<string, unknown>).resourceType === resourceType &&
+        (ref as Record<string, unknown>).resourceId === resourceId,
+    );
+  });
+}
+
+/**
+ * Hard-deletes a context issue. These carry no approval workflow of their
+ * own (Phase 2 spec §3), so the only guard is that no change assessment
+ * already cites this issue as part of its record.
+ */
+export async function deleteContextIssue(context: OrganisationContext, issueId: string, actorUserId: string) {
+  requirePermission(context, "ems.programme.manage");
+  const ctx = toTenantRepositoryContext(context);
+  const issue = assertOwned(ctx, await prisma.contextIssue.findFirst({ where: { id: issueId } }));
+
+  if (await isReferencedByChangeAssessment(ctx, "context_issue", issue.id)) {
+    throw new EmsContextError("This context issue is cited by a change assessment and cannot be deleted.");
+  }
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await tx.contextIssue.delete({ where: { id: issue.id, organisationId: txCtx.organisationId } });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "context_issue.deleted",
+      resourceType: "context_issue",
+      resourceId: issue.id,
+      summary: `Context issue "${issue.title}" deleted.`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { title: issue.title, type: issue.type },
+    });
+    return { id: issue.id };
+  });
+}
+
 /** All context issues for a programme, newest first — read-only, UI02 listing. */
 export async function listContextIssues(context: OrganisationContext, programmeId: string) {
   const ctx = toTenantRepositoryContext(context);
@@ -216,6 +276,73 @@ export async function deactivateInterestedParty(context: OrganisationContext, pa
     });
 
     return updated;
+  });
+}
+
+/**
+ * Hard-deletes an interested party — only when it has no requirements
+ * recorded (an accidental duplicate entry) and no change assessment cites
+ * it. A party with requirement history must be deactivated instead
+ * (`deactivateInterestedParty`), which already exists.
+ */
+export async function deleteInterestedParty(context: OrganisationContext, partyId: string, actorUserId: string) {
+  requirePermission(context, "ems.programme.manage");
+  const ctx = toTenantRepositoryContext(context);
+  const party = await findTenantInterestedParty(ctx, partyId);
+
+  const requirementCount = await prisma.interestedPartyRequirement.count({ where: { interestedPartyId: party.id } });
+  if (requirementCount > 0) {
+    throw new EmsContextError(
+      `This interested party has ${requirementCount} requirement${requirementCount === 1 ? "" : "s"} on record and cannot be deleted. Deactivate it instead.`,
+    );
+  }
+  if (await isReferencedByChangeAssessment(ctx, "interested_party", party.id)) {
+    throw new EmsContextError("This interested party is cited by a change assessment and cannot be deleted. Deactivate it instead.");
+  }
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await tx.interestedParty.delete({ where: { id: party.id, organisationId: txCtx.organisationId } });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "interested_party.deleted",
+      resourceType: "interested_party",
+      resourceId: party.id,
+      summary: `Interested party "${party.name}" deleted.`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { name: party.name },
+    });
+    return { id: party.id };
+  });
+}
+
+/**
+ * Hard-deletes a requirement recorded against an interested party, along
+ * with any `EvidenceLink` rows pointing at it — the linked `EvidenceObject`
+ * itself is never touched, only the link.
+ */
+export async function deleteInterestedPartyRequirement(context: OrganisationContext, requirementId: string, actorUserId: string) {
+  requirePermission(context, "ems.programme.manage");
+  const ctx = toTenantRepositoryContext(context);
+  const requirement = await findTenantInterestedPartyRequirement(ctx, requirementId);
+  if (!requirement) throw new TenantOwnershipError();
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await tx.evidenceLink.deleteMany({
+      where: { organisationId: txCtx.organisationId, resourceType: "interested_party_requirement", resourceId: requirement.id },
+    });
+    await tx.interestedPartyRequirement.delete({ where: { id: requirement.id, organisationId: txCtx.organisationId } });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "interested_party_requirement.deleted",
+      resourceType: "interested_party_requirement",
+      resourceId: requirement.id,
+      summary: "Interested party requirement deleted.",
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { summary: requirement.summary },
+    });
+    return { id: requirement.id };
   });
 }
 
@@ -366,6 +493,44 @@ export async function recordResidualRating(context: OrganisationContext, riskOpp
     });
 
     return updated;
+  });
+}
+
+/**
+ * Hard-deletes a risk/opportunity register entry — only while it is still
+ * OPEN with no residual rating recorded yet (a fresh, disposable draft
+ * entry) and not cited by a change assessment. Once a residual rating has
+ * been recorded, or the entry has moved to MONITORING/CLOSED, it is
+ * governed register history: use `recordResidualRating` with
+ * `status: "CLOSED"` instead, which already exists as the archive path.
+ */
+export async function deleteEmsRiskOpportunity(context: OrganisationContext, riskOpportunityId: string, actorUserId: string) {
+  requirePermission(context, "ems.programme.manage");
+  const ctx = toTenantRepositoryContext(context);
+  const row = assertOwned(ctx, await prisma.emsRiskOpportunity.findFirst({ where: { id: riskOpportunityId } }));
+
+  if (row.status !== "OPEN" || row.residualRating !== null) {
+    throw new EmsContextError(
+      "This risk/opportunity already has a recorded residual rating or has moved on from OPEN. Close it instead of deleting it.",
+    );
+  }
+  if (await isReferencedByChangeAssessment(ctx, "ems_risk_opportunity", row.id)) {
+    throw new EmsContextError("This risk/opportunity is cited by a change assessment and cannot be deleted.");
+  }
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await tx.emsRiskOpportunity.delete({ where: { id: row.id, organisationId: txCtx.organisationId } });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "ems_risk_opportunity.deleted",
+      resourceType: "ems_risk_opportunity",
+      resourceId: row.id,
+      summary: `${row.kind === "RISK" ? "Risk" : "Opportunity"} "${row.category}" deleted.`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { category: row.category, kind: row.kind },
+    });
+    return { id: row.id };
   });
 }
 

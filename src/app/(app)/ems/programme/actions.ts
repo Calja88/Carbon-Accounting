@@ -17,15 +17,21 @@ import {
   addScopeEntity,
   addScopeSite,
   addScopeActivity,
+  deleteDraftEmsProgramme,
+  deleteDraftScopeVersion,
 } from "@/lib/ems/foundation/programme-service";
 import {
   EmsContextError,
   createContextIssue,
   createInterestedParty,
   deactivateInterestedParty,
+  deleteInterestedParty,
   createInterestedPartyRequirement,
+  deleteInterestedPartyRequirement,
   createEmsRiskOpportunity,
   recordResidualRating,
+  deleteContextIssue,
+  deleteEmsRiskOpportunity,
 } from "@/lib/ems/foundation/context-service";
 import {
   ChangeAssessmentError,
@@ -131,6 +137,17 @@ export async function closeProgrammeAction(_previous: FoundationActionState, for
   }
 }
 
+export async function deleteProgrammeAction(_previous: FoundationActionState, formData: FormData): Promise<FoundationActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    await deleteDraftEmsProgramme(context, String(formData.get("programmeId") ?? ""), context.userId);
+    revalidateProgramme();
+    return { ...emptyState, message: "Draft programme deleted." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Scope
 // ---------------------------------------------------------------------------
@@ -177,6 +194,17 @@ export async function approveScopeVersionAction(_previous: FoundationActionState
     await approveScopeVersion(context, String(formData.get("scopeVersionId") ?? ""), { actorUserId: context.userId });
     revalidateProgramme();
     return { ...emptyState, message: "Scope version approved." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function deleteScopeVersionAction(_previous: FoundationActionState, formData: FormData): Promise<FoundationActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    await deleteDraftScopeVersion(context, String(formData.get("scopeVersionId") ?? ""), context.userId);
+    revalidateProgramme();
+    return { ...emptyState, message: "Draft scope version deleted." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }
@@ -249,6 +277,17 @@ export async function createContextIssueAction(_previous: FoundationActionState,
   }
 }
 
+export async function deleteContextIssueAction(_previous: FoundationActionState, formData: FormData): Promise<FoundationActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    await deleteContextIssue(context, String(formData.get("issueId") ?? ""), context.userId);
+    revalidateProgramme();
+    return { ...emptyState, message: "Context issue deleted." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Interested parties
 // ---------------------------------------------------------------------------
@@ -282,6 +321,17 @@ export async function deactivateInterestedPartyAction(_previous: FoundationActio
   }
 }
 
+export async function deleteInterestedPartyAction(_previous: FoundationActionState, formData: FormData): Promise<FoundationActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    await deleteInterestedParty(context, String(formData.get("partyId") ?? ""), context.userId);
+    revalidateProgramme();
+    return { ...emptyState, message: "Interested party deleted." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
 export async function createInterestedPartyRequirementAction(_previous: FoundationActionState, formData: FormData): Promise<FoundationActionState> {
   try {
     const context = await requireOrganisationContext();
@@ -297,6 +347,20 @@ export async function createInterestedPartyRequirementAction(_previous: Foundati
     });
     revalidateProgramme();
     return { ...emptyState, message: "Requirement recorded." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function deleteInterestedPartyRequirementAction(
+  _previous: FoundationActionState,
+  formData: FormData,
+): Promise<FoundationActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    await deleteInterestedPartyRequirement(context, String(formData.get("requirementId") ?? ""), context.userId);
+    revalidateProgramme();
+    return { ...emptyState, message: "Requirement deleted." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }
@@ -342,6 +406,17 @@ export async function recordResidualRatingAction(_previous: FoundationActionStat
     });
     revalidateProgramme();
     return { ...emptyState, message: "Residual rating recorded." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function deleteRiskOpportunityAction(_previous: FoundationActionState, formData: FormData): Promise<FoundationActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    await deleteEmsRiskOpportunity(context, String(formData.get("riskOpportunityId") ?? ""), context.userId);
+    revalidateProgramme();
+    return { ...emptyState, message: "Risk/opportunity deleted." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }
