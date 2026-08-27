@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { upsertSiteEnergyContract } from "@/lib/entries-service";
+import { upsertSiteEnergyContract, deleteSiteEnergyContract } from "@/lib/entries-service";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { assertSiteAccess, requirePermission } from "@/lib/rbac/authorize";
 import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
@@ -53,6 +53,43 @@ export async function submitContractAction(
     });
 
     revalidatePath(`/entry/${data.siteId}`);
+    return { error: null, success: true };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Something went wrong.", success: false };
+  }
+}
+
+const deleteSchema = z.object({
+  siteId: z.string().min(1),
+  contractId: z.string().min(1),
+});
+
+export async function deleteContractAction(
+  _prevState: ContractFormState,
+  formData: FormData,
+): Promise<ContractFormState> {
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) return { error: "You must be signed in.", success: false };
+    throw err;
+  }
+
+  const parsed = deleteSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input.", success: false };
+  }
+  const data = parsed.data;
+
+  try {
+    requirePermission(context, "carbon.contract.manage");
+    assertSiteAccess(context, data.siteId);
+
+    await deleteSiteEnergyContract(toTenantRepositoryContext(context), data.contractId, context.userId);
+
+    revalidatePath(`/entry/${data.siteId}`);
+    revalidatePath(`/entry/${data.siteId}/electricity-contract`);
     return { error: null, success: true };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Something went wrong.", success: false };

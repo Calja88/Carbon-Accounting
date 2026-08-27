@@ -277,6 +277,13 @@ export const AUDIT_EVENT_TYPES = [
   "evidence_object.retention_previewed",
   "evidence_object.retention_executed",
   "organisation_export.generated",
+  // Carbon & Lifecycle safe-deletion pass — the entries-service.ts
+  // creation screens (activity entries, commuting surveys, user-managed
+  // energy contracts) previously had no removal action at all.
+  "activity_entry.retracted",
+  "activity_entry.deleted",
+  "commuting_survey.deleted",
+  "site_energy_contract.deleted",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -364,7 +371,10 @@ export type AuditResourceType =
   | "management_review_minute_revision"
   | "management_review_action_link"
   | "legal_hold"
-  | "organisation_export";
+  | "organisation_export"
+  | "activity_entry"
+  | "commuting_survey"
+  | "site_energy_contract";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

@@ -52,6 +52,7 @@ export default async function ElectricityContractPage({ params }: { params: Prom
           existing={
             contract
               ? {
+                  id: contract.id,
                   supplierName: contract.supplierName,
                   tariffType: contract.tariffType,
                   regoBacked: contract.regoBacked,

@@ -121,7 +121,9 @@ async function loadCalculations(
     where: tenantWhere<Prisma.CalculationWhereInput>(ctx, {
       activityEntry: {
         periodStart: { gte: periodStart, lte: periodEnd },
-        status: { not: "FLAGGED" },
+        // Retracted entries (EntryStatus.REJECTED) must stop contributing
+        // to future calculations and dashboards, same as flagged ones.
+        status: { notIn: ["FLAGGED", "REJECTED"] },
         ...accessibleActivityEntryFilter(context),
       },
     }),

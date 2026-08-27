@@ -129,7 +129,9 @@ export async function buildReportPayload(
       where: tenantWhere<Prisma.CalculationWhereInput>(ctx, {
         activityEntry: {
           periodStart: { gte: periodStart, lte: periodEnd },
-          status: { not: "FLAGGED" },
+          // Retracted entries (EntryStatus.REJECTED) must stop contributing
+          // to future reports, same as flagged ones.
+          status: { notIn: ["FLAGGED", "REJECTED"] },
           ...accessibleActivityEntryFilter(context),
         },
       }),

@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 import Link from "next/link";
-import { submitContractAction, ContractFormState } from "./actions";
+import { submitContractAction, deleteContractAction, ContractFormState } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,7 +19,7 @@ export function ContractForm({
   site: { id: string; name: string };
   supplierPrompt: string;
   regoPrompt: string;
-  existing: { supplierName: string; tariffType: string; regoBacked: boolean; regoVolumeKwh: string | null } | null;
+  existing: { id: string; supplierName: string; tariffType: string; regoBacked: boolean; regoVolumeKwh: string | null } | null;
 }) {
   const [state, formAction, pending] = useActionState(submitContractAction, initialState);
   const [regoBacked, setRegoBacked] = useState(existing?.regoBacked ? "yes" : "no");
@@ -103,6 +103,31 @@ export function ContractForm({
       <Button type="submit" disabled={pending}>
         {pending ? "Saving…" : "Save"}
       </Button>
+
+      {existing && <DeleteContractButton siteId={site.id} siteName={site.name} contractId={existing.id} />}
+    </form>
+  );
+}
+
+const deleteInitialState: ContractFormState = { error: null, success: false };
+
+function DeleteContractButton({ siteId, siteName, contractId }: { siteId: string; siteName: string; contractId: string }) {
+  const [state, action, pending] = useActionState(deleteContractAction, deleteInitialState);
+  return (
+    <form action={action} className="flex flex-col items-start gap-1 border-t border-slate-200 pt-4">
+      <input type="hidden" name="siteId" value={siteId} />
+      <input type="hidden" name="contractId" value={contractId} />
+      <Button
+        type="submit"
+        variant="danger"
+        disabled={pending}
+        onClick={(event) => {
+          if (!confirm(`Remove the electricity contract on file for ${siteName}? This cannot be undone.`)) event.preventDefault();
+        }}
+      >
+        {pending ? "Removing…" : "Remove contract"}
+      </Button>
+      {state.error && <p className="text-sm text-red-600">{state.error}</p>}
     </form>
   );
 }

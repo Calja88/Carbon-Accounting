@@ -17,6 +17,8 @@ import { SCOPE3_CAT3_LABEL, wttMappingFor } from "@/lib/scope3-derived";
 import type { TenantRepositoryContext } from "@/lib/repositories/context";
 import { assertOwned, tenantWhere } from "@/lib/repositories/tenant-scope";
 import { systemTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { runInTenantTransaction } from "@/lib/repositories/transaction";
+import { recordAuditEvent } from "@/lib/repositories/audit-repository";
 
 /** Real activity data with no matching EmissionFactor (yet) — never crashes
  * a save; the entry is stored and surfaced as "awaiting emission factor"
@@ -559,5 +561,161 @@ export async function upsertSiteEnergyContract(ctx: TenantRepositoryContext, inp
       source: input.source,
       enteredByUserId: input.enteredByUserId,
     },
+  });
+}
+
+/**
+ * Safe removal for the carbon module's three "creation screen with no
+ * removal action" gaps: activity entries, commuting surveys and
+ * user-managed energy contracts. Follows the `SupplierLifecycleError` /
+ * `archiveSupplier` template from `src/lib/lca/supplier-service.ts` — a
+ * dedicated error class, a mandatory reason for anything governed, an
+ * audit event, and a dependency check before any hard delete.
+ */
+export class ActivityEntryLifecycleError extends Error {}
+
+/**
+ * Retracts an activity entry (EntryStatus.REJECTED) so it stops
+ * contributing to future calculations and reports — see the `status: {
+ * not: "FLAGGED" }` filters in `src/lib/report-service.ts` and
+ * `src/lib/analytics-service.ts`, which now also exclude REJECTED. The
+ * entry and its existing `Calculation` rows are never deleted: both stay
+ * in the audit trail exactly as spec'd ("Calculations ... remain immutable
+ * audit records").
+ */
+export async function retractActivityEntry(
+  ctx: TenantRepositoryContext,
+  entryId: string,
+  input: { reason: string; actorUserId: string },
+) {
+  if (!input.reason.trim()) throw new ActivityEntryLifecycleError("Record why this activity entry is being retracted.");
+  const found = await prisma.activityEntry.findFirst({ where: tenantWhere(ctx, { id: entryId }) });
+  const entry = assertOwned(ctx, found);
+  if (entry.status === "REJECTED") throw new ActivityEntryLifecycleError("This activity entry is already retracted.");
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    const updated = await tx.activityEntry.update({
+      where: { id: entry.id },
+      data: { status: "REJECTED" },
+    });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "activity_entry.retracted",
+      resourceType: "activity_entry",
+      resourceId: entry.id,
+      summary: `Activity entry retracted: ${input.reason.trim()}`,
+      actorUserId: input.actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { status: entry.status },
+      after: { status: updated.status, reason: input.reason.trim() },
+    });
+    return updated;
+  });
+}
+
+/**
+ * Hard-deletes an activity entry only when it has no governed downstream
+ * dependency: no `Calculation` rows (an entry only lacks these while
+ * AWAITING_FACTOR, or if a prior calculation attempt failed), no derived
+ * `CommutingSurveyResponse` link, and no LCA corporate-data citation.
+ * Anything else must be retracted instead.
+ */
+export async function deleteActivityEntry(ctx: TenantRepositoryContext, entryId: string, actorUserId: string) {
+  const found = await prisma.activityEntry.findFirst({ where: tenantWhere(ctx, { id: entryId }) });
+  const entry = assertOwned(ctx, found);
+
+  const [calculationCount, surveyResponse, lcaLinkCount] = await Promise.all([
+    prisma.calculation.count({ where: { activityEntryId: entry.id } }),
+    prisma.commutingSurveyResponse.findFirst({ where: { activityEntryId: entry.id } }),
+    prisma.lcaCorporateDataLink.count({ where: { activityEntryId: entry.id } }),
+  ]);
+  if (calculationCount > 0) {
+    throw new ActivityEntryLifecycleError(
+      `This entry has ${calculationCount} calculated emission figure${calculationCount === 1 ? "" : "s"} and cannot be deleted. Retract it instead.`,
+    );
+  }
+  if (surveyResponse) {
+    throw new ActivityEntryLifecycleError("This entry was derived from a commuting survey response and cannot be deleted directly.");
+  }
+  if (lcaLinkCount > 0) {
+    throw new ActivityEntryLifecycleError(
+      `This entry is cited by ${lcaLinkCount} product assessment${lcaLinkCount === 1 ? "" : "s"} and cannot be deleted. Retract it instead.`,
+    );
+  }
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await tx.activityEntry.delete({ where: { id: entry.id } });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "activity_entry.deleted",
+      resourceType: "activity_entry",
+      resourceId: entry.id,
+      summary: "Activity entry deleted (no calculations or dependent records).",
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+      before: { status: entry.status, canonicalValue: entry.canonicalValue.toString() },
+    });
+    return { id: entry.id };
+  });
+}
+
+/**
+ * Deletes a commuting survey header row and any of its responses that have
+ * not yet been resolved into an `ActivityEntry`. Blocks the whole delete if
+ * any response already produced an entry — those entries carry their own
+ * calculation history and must be retracted individually first.
+ */
+export async function deleteCommutingSurvey(ctx: TenantRepositoryContext, surveyId: string, actorUserId: string) {
+  const found = await prisma.commutingSurvey.findFirst({
+    where: tenantWhere(ctx, { id: surveyId }),
+    include: { responses: true },
+  });
+  const survey = assertOwned(ctx, found);
+
+  const resolvedCount = survey.responses.filter((r) => r.activityEntryId).length;
+  if (resolvedCount > 0) {
+    throw new ActivityEntryLifecycleError(
+      `${resolvedCount} response${resolvedCount === 1 ? "" : "s"} on this survey already produced activity entries with calculations. Retract those entries first.`,
+    );
+  }
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await tx.commutingSurveyResponse.deleteMany({ where: { surveyId: survey.id } });
+    await tx.commutingSurvey.delete({ where: { id: survey.id } });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "commuting_survey.deleted",
+      resourceType: "commuting_survey",
+      resourceId: survey.id,
+      summary: "Commuting survey deleted (no responses had produced activity entries).",
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+    });
+    return { id: survey.id };
+  });
+}
+
+/**
+ * User-managed site energy contracts carry no downstream foreign key
+ * (Category-3 WTT derivation reads them by site/period lookup, not by ID),
+ * so a tenant-owned contract may always be hard-deleted once ownership is
+ * confirmed server-side.
+ */
+export async function deleteSiteEnergyContract(ctx: TenantRepositoryContext, contractId: string, actorUserId: string) {
+  const found = await prisma.siteEnergyContract.findFirst({ where: tenantWhere(ctx, { id: contractId }) });
+  const contract = assertOwned(ctx, found);
+
+  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await tx.siteEnergyContract.delete({ where: { id: contract.id } });
+    await recordAuditEvent(tx, txCtx, {
+      eventType: "site_energy_contract.deleted",
+      resourceType: "site_energy_contract",
+      resourceId: contract.id,
+      summary: `Energy contract with ${contract.supplierName} deleted.`,
+      actorUserId,
+      correlationId: txCtx.correlationId,
+      source: "web-app",
+    });
+    return { id: contract.id };
   });
 }
