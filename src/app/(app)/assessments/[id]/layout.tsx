@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getAssessmentHeader } from "@/lib/lca/assessment-service";
 import { isCalculationStale, runTotals } from "@/lib/lca/calculation-service";
 import { runValidation } from "@/lib/lca/validation-service";
-import { getLcaContext } from "@/lib/lca/permissions";
+import { canEditLcaData, getLcaContext } from "@/lib/lca/permissions";
 import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { formatKgPrecise } from "@/components/charts/palette";
@@ -13,6 +13,7 @@ import { BackLink, Notice, StatusBadge } from "@/components/lca/ui";
 import { BOUNDARY_LABELS } from "@/lib/lca/labels";
 import { AssessmentNav } from "./assessment-nav";
 import { RunCalculationButton } from "./run-calculation-button";
+import { DeleteDraftAssessmentButton } from "./delete-draft-assessment-button";
 
 export const dynamic = "force-dynamic";
 
@@ -119,6 +120,13 @@ export default async function AssessmentLayout({
               <div className="text-right text-sm text-slate-500">Not yet calculated</div>
             )}
             <RunCalculationButton assessmentId={id} stale={staleness.stale} />
+            {assessment.status === "DRAFT" && canEditLcaData(context) && (
+              <DeleteDraftAssessmentButton
+                assessmentId={id}
+                reference={assessment.reference}
+                dependencyHint={{ evidenceCount, scenarioCount }}
+              />
+            )}
           </div>
         </div>
 

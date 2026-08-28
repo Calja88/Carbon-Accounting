@@ -738,6 +738,71 @@ export async function supersedeWithRevision(
   });
 }
 
+/**
+ * Hard-deletes a disposable draft assessment: only permitted while still
+ * DRAFT, and only once nothing governed depends on it. Anything that has
+ * left pure draft state — a computed result, evidence, a verification, an
+ * issued version, a later revision, or a scenario copied from it — must be
+ * superseded or discontinued instead of erased.
+ */
+export async function deleteDraftAssessment(context: OrganisationContext, assessmentId: string, actorUserId: string) {
+  const assessment = await requireAssessmentInScope(context, assessmentId);
+
+  if (assessment.status !== LcaAssessmentStatus.DRAFT) {
+    throw new Error("Only a draft assessment can be deleted. Use a new revision or mark it superseded instead.");
+  }
+
+  const counted = await prisma.lcaAssessment.findUniqueOrThrow({
+    where: { id: assessmentId },
+    select: {
+      _count: {
+        select: {
+          evidence: true,
+          calculationRuns: true,
+          results: true,
+          versions: true,
+          verifications: true,
+          revisions: true,
+          scenarioCopies: true,
+        },
+      },
+    },
+  });
+
+  const dependencyLabels: Record<string, string> = {
+    evidence: "evidence file(s)",
+    calculationRuns: "calculation run(s)",
+    results: "calculation result(s)",
+    versions: "issued version(s)",
+    verifications: "verification record(s)",
+    revisions: "later revision(s)",
+    scenarioCopies: "scenario(s)",
+  };
+  const blocking = Object.entries(counted._count).filter(([, n]) => n > 0);
+  if (blocking.length > 0) {
+    const detail = blocking.map(([key, n]) => `${n} ${dependencyLabels[key]}`).join(", ");
+    throw new Error(
+      `This assessment can't be deleted because it has ${detail}. Discontinue it, or supersede it with a new revision, instead.`,
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.lcaAssessment.delete({ where: { id: assessmentId } });
+    // No assessmentId on the event: the row it would point at no longer
+    // exists, and that relation cascades on delete. entityId keeps the
+    // identity of what was removed for the tenant-wide audit trail.
+    await tx.lcaAuditEvent.create({
+      data: {
+        entityType: "assessment",
+        entityId: assessmentId,
+        action: "deleted",
+        actorUserId,
+        summary: `Deleted disposable draft assessment "${assessment.reference} — ${assessment.title}".`,
+      },
+    });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Products
 // ---------------------------------------------------------------------------

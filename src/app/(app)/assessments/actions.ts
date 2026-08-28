@@ -9,6 +9,7 @@ import {
   changeStatus,
   cloneAssessment,
   createAssessment,
+  deleteDraftAssessment,
   issueVersion,
   supersedeWithRevision,
 } from "@/lib/lca/assessment-service";
@@ -260,6 +261,35 @@ export async function changeStatusAction(
 
   revalidatePath(`/assessments/${assessmentId}`, "layout");
   return ok(`Status moved to ${to.replace(/_/g, " ").toLowerCase()}.`);
+}
+
+/**
+ * Hard-deletes a disposable DRAFT assessment with no governed dependencies —
+ * the removal action for an accidental or duplicate assessment created by
+ * mistake. Anything past DRAFT, or carrying evidence/results/versions/
+ * verifications/revisions/scenarios, must be superseded or discontinued
+ * instead; `deleteDraftAssessment` enforces that server-side regardless of
+ * what this action already checked.
+ */
+export async function deleteDraftAssessmentAction(
+  _prev: AssessmentFormState,
+  formData: FormData,
+): Promise<AssessmentFormState> {
+  const assessmentId = String(formData.get("assessmentId") ?? "");
+
+  const context = await getLcaContext();
+  if (!canEditLcaData(context)) return fail("Your permissions do not allow deleting assessments.");
+
+  try {
+    await deleteDraftAssessment(context!, assessmentId, context!.userId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return fail("That assessment no longer exists.");
+    if (err instanceof Error) return fail(err.message);
+    throw err;
+  }
+
+  revalidatePath("/assessments");
+  redirect("/assessments");
 }
 
 // ---------------------------------------------------------------------------

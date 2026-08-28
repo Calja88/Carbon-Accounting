@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { DataTable, EmptyState, PageHeading, StatusBadge, Td } from "@/components/lca/ui";
 import { BOUNDARY_LABELS } from "@/lib/lca/labels";
 import { NewAssessmentForm } from "./new-assessment-form";
+import { DeleteDraftAssessmentButton } from "./[id]/delete-draft-assessment-button";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +90,7 @@ export default async function AssessmentsPage() {
                 "Status",
                 { label: "Per functional unit", align: "right" },
                 "Owner",
+                ...(canEdit ? ["Actions"] : []),
               ]}
             >
               {assessments.map((assessment) => {
@@ -129,6 +131,13 @@ export default async function AssessmentsPage() {
                       )}
                     </Td>
                     <Td>{assessment.owner?.name ?? <span className="text-slate-400">Unassigned</span>}</Td>
+                    {canEdit && (
+                      <Td>
+                        {assessment.status === "DRAFT" && (
+                          <DeleteDraftAssessmentButton assessmentId={assessment.id} reference={assessment.reference} />
+                        )}
+                      </Td>
+                    )}
                   </tr>
                 );
               })}
