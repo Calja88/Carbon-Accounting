@@ -211,3 +211,161 @@ describe("reviewed exact-match credential allowlist (src/app/invite/[token]/page
     expect(JSON.stringify(finding)).not.toContain(secretValue);
   });
 });
+
+// Checkpoint A: three synthetic Prisma URL-derivation fixtures in
+// src/lib/__tests__/prisma-config.test.ts, each matching both the
+// connection-string and neon-host rules. Split before the "@" (not just
+// after "postgres://"), since neon-host needs no scheme prefix at all.
+describe("reviewed exact-match credential allowlist (src/lib/__tests__/prisma-config.test.ts)", () => {
+  const prismaConfigPath = join("src/lib/__tests__/", "prisma-config.test.ts");
+  const fixtures = [
+    { hostFragment: join("synthetic@fake-pooler.example", ".neon.tech/example") },
+    { hostFragment: join("synthetic@ep-example-pooler.eu-west-2.aws", ".neon.tech/example") },
+    { hostFragment: join("synthetic@ep-example.eu-west-2.aws", ".neon.tech/example") },
+  ];
+
+  it.each(fixtures)("allows the reviewed synthetic fixture $hostFragment for both overlapping rules", ({ hostFragment }) => {
+    const hostMatch = join("synthetic:", hostFragment);
+    const urlMatch = join("postgresql://synthetic:", hostFragment);
+    expect(scanContentForSecrets(`const pooled = "${urlMatch}";`, prismaConfigPath)).toBeNull();
+    expect(scanContentForSecrets(hostMatch, prismaConfigPath)).toBeNull();
+  });
+
+  it("still fails a different synthetic-looking host in the same file", () => {
+    const url = join("postgresql://synthetic:", "synthetic@ep-different-fixture-not-reviewed.eu-west-2.aws.neon.tech/example");
+    expect(scanContentForSecrets(`const pooled = "${url}";`, prismaConfigPath)).not.toBeNull();
+  });
+
+  it("still fails a different username/password on an otherwise-reviewed host", () => {
+    const url = join("postgresql://realuser:", "realpass20261234567890@fake-pooler.example.neon.tech/example");
+    expect(scanContentForSecrets(`const pooled = "${url}";`, prismaConfigPath)).not.toBeNull();
+  });
+
+  it("still fails a literal generic credential assignment in the same file", () => {
+    const fixture = `const apiSecret = "${join("th1s-l00ks-like-a-real", "-secret-value")}";`;
+    expect(scanContentForSecrets(fixture, prismaConfigPath)).not.toBeNull();
+  });
+
+  it("does not allow the same reviewed fixture text in a different, non-reviewed file", () => {
+    const urlMatch = join("postgresql://synthetic:", fixtures[0].hostFragment);
+    expect(scanContentForSecrets(`const pooled = "${urlMatch}";`, join("src/lib/__tests__/", "other.test.ts"))).not.toBeNull();
+  });
+
+  it("other reviewed exceptions (RLS-spike, invite actions/page) are unaffected", () => {
+    const ownerMatch = join("RLS_SPIKE_OWNER_PASSWORD", ":-rls_spike_owner_local_only");
+    expect(scanContentForSecrets(`OWNER_PASSWORD="\${${ownerMatch}}"`, join("scripts/rls-spike/", "setup-test-db.sh"))).toBeNull();
+    const tokenHashMatch = join("tokenHash ", "= hashInvitationToken");
+    expect(scanContentForSecrets(`const ${tokenHashMatch}(token);`, join("src/app/invite/[token]/", "actions.ts"))).toBeNull();
+  });
+
+  it("never echoes the matched fixture text for a case it still flags", () => {
+    const secretValue = join("th1s-l00ks-like-a-real", "-secret-value");
+    const finding = scanContentForSecrets(`const apiSecret = "${secretValue}";`, prismaConfigPath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
+
+// Checkpoint A: the synthetic export-service redaction-test fixture in
+// src/lib/exports/__tests__/organisation-export-service.test.ts.
+describe("reviewed exact-match credential allowlist (src/lib/exports/__tests__/organisation-export-service.test.ts)", () => {
+  const exportServicePath = join("src/lib/exports/__tests__/", "organisation-export-service.test.ts");
+  const fixtureMatch = join("inviteTokenHash", join(": ", '"super-secret-hash"'));
+
+  it("allows the reviewed synthetic redaction-test fixture", () => {
+    expect(scanContentForSecrets(`inviteTokenHash: "${join("super-secret", "-hash")}"`, exportServicePath)).toBeNull();
+  });
+
+  it("still fails a different fixture value assigned to the same field", () => {
+    const fixture = `inviteTokenHash: "${join("some-other-fixture", "-value-here-too")}"`;
+    expect(scanContentForSecrets(fixture, exportServicePath)).not.toBeNull();
+  });
+
+  it("still fails an unrelated literal token/password assignment in the same file", () => {
+    const fixture = `password = "${join("a-literal-password", "-value-here")}"`;
+    expect(scanContentForSecrets(fixture, exportServicePath)).not.toBeNull();
+  });
+
+  it("does not allow the same fixture text in a different, non-reviewed file", () => {
+    expect(scanContentForSecrets(fixtureMatch, join("src/lib/exports/__tests__/", "other.test.ts"))).not.toBeNull();
+  });
+
+  it("never echoes the fixture text for a case it still flags", () => {
+    const secretValue = join("some-other-fixture", "-value-here-too");
+    const finding = scanContentForSecrets(`inviteTokenHash: "${secretValue}"`, exportServicePath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
+
+// Checkpoint A: the synthetic cookie test fixture in
+// src/lib/organisation/__tests__/cookie.test.ts.
+describe("reviewed exact-match credential allowlist (src/lib/organisation/__tests__/cookie.test.ts)", () => {
+  const cookieTestPath = join("src/lib/organisation/__tests__/", "cookie.test.ts");
+
+  it("allows the reviewed synthetic NEXTAUTH_SECRET test fixture", () => {
+    const fixture = `process.env.NEXTAUTH_SECRET = "${join("test-secret-value-not", "-a-real-credential")}";`;
+    expect(scanContentForSecrets(fixture, cookieTestPath)).toBeNull();
+  });
+
+  it("still fails a different value assigned to NEXTAUTH_SECRET in the same file", () => {
+    const fixture = `process.env.NEXTAUTH_SECRET = "${join("some-other-real-look", "ing-secret-value")}";`;
+    expect(scanContentForSecrets(fixture, cookieTestPath)).not.toBeNull();
+  });
+
+  it("still fails an unrelated literal token assignment in the same file", () => {
+    const fixture = `apiToken = "${join("a-literal-api-token", "-value-here")}"`;
+    expect(scanContentForSecrets(fixture, cookieTestPath)).not.toBeNull();
+  });
+
+  it("does not allow the same fixture text in a different, non-reviewed file", () => {
+    const fixture = `process.env.NEXTAUTH_SECRET = "${join("test-secret-value-not", "-a-real-credential")}";`;
+    expect(scanContentForSecrets(fixture, join("src/lib/organisation/__tests__/", "other.test.ts"))).not.toBeNull();
+  });
+
+  it("never echoes the fixture text for a case it still flags", () => {
+    const secretValue = join("some-other-real-look", "ing-secret-value");
+    const finding = scanContentForSecrets(`process.env.NEXTAUTH_SECRET = "${secretValue}";`, cookieTestPath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
+
+// Checkpoint A: the runtime token-hash property assignment in the
+// production application file src/lib/organisation/invitation-service.ts
+// — reviewed with extra scrutiny as production source, not test code.
+// Distinct matched text from the actions.ts/page.tsx exception above
+// (object-literal `tokenHash: ...` vs. `const tokenHash = ...`).
+describe("reviewed exact-match credential allowlist (src/lib/organisation/invitation-service.ts)", () => {
+  const invitationServicePath = join("src/lib/organisation/", "invitation-service.ts");
+  const propertyMatch = join("tokenHash", ": hashInvitationToken");
+
+  it("allows the reviewed runtime hash-assignment property in its file", () => {
+    const fixture = `  return {\n    token,\n    ${propertyMatch}(token),\n    expiresAt,\n  };`;
+    expect(scanContentForSecrets(fixture, invitationServicePath)).toBeNull();
+  });
+
+  it("still fails a literal token-hash value in the same file", () => {
+    const fixture = `tokenHash: "${join("a-hardcoded-literal", "-hash-value-here")}"`;
+    expect(scanContentForSecrets(fixture, invitationServicePath)).not.toBeNull();
+  });
+
+  it("still fails a different, non-allowlisted token-related property in the same file", () => {
+    const fixture = `sessionToken: ${join("computeSomethingElse", "Entirely")}(value)`;
+    expect(scanContentForSecrets(fixture, invitationServicePath)).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    expect(scanContentForSecrets(`${propertyMatch}(token)`, join("src/lib/organisation/", "other-service.ts"))).not.toBeNull();
+  });
+
+  it("is a distinct exception from the actions.ts/page.tsx assignment-form match", () => {
+    // The object-literal colon form is allowlisted for this file; the
+    // const-assignment equals form (reviewed for a different file) is not.
+    const assignmentMatch = join("tokenHash ", "= hashInvitationToken");
+    expect(scanContentForSecrets(`const ${assignmentMatch}(token);`, invitationServicePath)).not.toBeNull();
+  });
+
+  it("never echoes the matched text for a case it still flags", () => {
+    const secretValue = join("a-hardcoded-literal", "-hash-value-here");
+    const finding = scanContentForSecrets(`tokenHash: "${secretValue}"`, invitationServicePath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});

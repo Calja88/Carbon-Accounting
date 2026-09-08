@@ -189,6 +189,50 @@ export function isAllowlistedForSecretScan(relPath) {
  * independent application code. Confirmed by reading the entire file: no
  * literal token, password, API key, connection string or other secret
  * anywhere in it.
+ *
+ * src/lib/__tests__/prisma-config.test.ts (Checkpoint A, board demo
+ * sprint): three synthetic Prisma URL-derivation test fixtures (file's own
+ * header: "T02 Neon configuration tests. Every URL is synthetic."), each
+ * matching both the connection-string and neon-host rules. All three use
+ * the literal username/password `synthetic:synthetic` and either
+ * `localhost` (already allowed via the placeholder-marker check, not
+ * listed here) or a hostname whose endpoint id is literally the word
+ * "example"/"fake" — never a real Neon compute id shape (a real one looks
+ * like `ep-cool-cake-20837205`, an actual project this sprint created —
+ * compare Docs/board-sprint/CONTINUITY.md — never the literal word
+ * "example"). Confirmed by reading the whole file: exercises only the pure
+ * `assertValidDatabaseUrl`/`deriveDirectUrl`/`resolveDirectUrl` functions
+ * (already reviewed at BD02), no environment-derived or live value.
+ *
+ * src/lib/exports/__tests__/organisation-export-service.test.ts
+ * (Checkpoint A, board demo sprint): a synthetic export-service credential
+ * fixture — the `OrganisationMembership` fixture row's invite-token-hash
+ * field is set to a deliberately secret-shaped fake value, seeded into an
+ * in-memory fixture table specifically so the same test can assert the
+ * export service's own redaction logic strips that field from the output,
+ * the same "fixture proves a redaction feature" pattern already reviewed
+ * for `REVIEWED_SAFE_FIXTURE_FILES`'s openrouter-provider.test.ts entry
+ * above. Confirmed by reading the whole file: no real credential anywhere.
+ *
+ * src/lib/organisation/__tests__/cookie.test.ts (Checkpoint A, board demo
+ * sprint): a cookie test fixture — sets `process.env.NEXTAUTH_SECRET` to
+ * the literal string `test-secret-value-not-a-real-credential` for this
+ * isolated test process only, self-documenting as fake, used solely to
+ * exercise the organisation-cookie HMAC sign/verify round-trip. Confirmed
+ * by reading the whole file: no other credential-like content.
+ *
+ * src/lib/organisation/invitation-service.ts (Checkpoint A, board demo
+ * sprint): production application source, reviewed with extra scrutiny for
+ * that reason. Inside `issueInvitationToken`, the returned object's
+ * token-hash property is set from a call to the local `hashInvitationToken`
+ * helper — a runtime invitation-token generation/hash assignment, not a
+ * literal: the plaintext token comes from `randomBytes(32)`
+ * (cryptographically random, generated fresh per call) and `tokenHash` is
+ * its SHA-256 digest via the same `hashInvitationToken` helper reviewed
+ * above for actions.ts/page.tsx. Confirmed by reading the entire 107-line
+ * file: no hardcoded token, salt, pepper, or any other credential anywhere
+ * in it; comparison is constant-time (`timingSafeEqual`); the plaintext
+ * token is documented as never persisted or logged.
  */
 // Built from parts rather than written as literal contiguous strings, same
 // reason as src/lib/__tests__/handoff-secret-scan.test.ts's fixtures: this
@@ -196,15 +240,50 @@ export function isAllowlistedForSecretScan(relPath) {
 // so a literal match-shaped string here would trip the scanner on itself.
 // Split *before* the `:`/`=` (the rule's `[:=]` operator), not just anywhere
 // in the value — otherwise the first fragment alone is still
-// keyword+operator+16 more chars and matches on its own.
+// keyword+operator+16 more chars and matches on its own. For the
+// connection-string/neon-host pair, split before the `@` instead, so
+// neither the `user:pass` fragment nor the `host/path` fragment alone
+// satisfies either rule (neon-host needs `user:pass@host`, with no
+// `postgres://` prefix required at all, so splitting only after the
+// `postgres://` scheme isn't enough on its own).
 const RLS_SPIKE_OWNER_MATCH = ["RLS_SPIKE_OWNER_PASSWORD", ":-rls_spike_owner_local_only"].join("");
 const RLS_SPIKE_APP_MATCH = ["RLS_SPIKE_APP_PASSWORD", ":-rls_spike_app_local_only"].join("");
-const INVITE_TOKEN_HASH_MATCH = ["tokenHash ", "= hashInvitationToken"].join("");
+const INVITE_TOKEN_HASH_ASSIGNMENT_MATCH = ["tokenHash ", "= hashInvitationToken"].join("");
+const INVITE_TOKEN_HASH_PROPERTY_MATCH = ["tokenHash", ": hashInvitationToken"].join("");
+
+const PRISMA_FAKE_POOLER_HOST_FRAGMENT = "synthetic@fake-pooler.example.neon.tech/example";
+const PRISMA_FAKE_POOLER_HOST_MATCH = ["synthetic:", PRISMA_FAKE_POOLER_HOST_FRAGMENT].join("");
+const PRISMA_FAKE_POOLER_URL_MATCH = ["postgresql://synthetic:", PRISMA_FAKE_POOLER_HOST_FRAGMENT].join("");
+
+const PRISMA_EP_POOLER_HOST_FRAGMENT = "synthetic@ep-example-pooler.eu-west-2.aws.neon.tech/example";
+const PRISMA_EP_POOLER_HOST_MATCH = ["synthetic:", PRISMA_EP_POOLER_HOST_FRAGMENT].join("");
+const PRISMA_EP_POOLER_URL_MATCH = ["postgresql://synthetic:", PRISMA_EP_POOLER_HOST_FRAGMENT].join("");
+
+const PRISMA_EP_DIRECT_HOST_FRAGMENT = "synthetic@ep-example.eu-west-2.aws.neon.tech/example";
+const PRISMA_EP_DIRECT_HOST_MATCH = ["synthetic:", PRISMA_EP_DIRECT_HOST_FRAGMENT].join("");
+const PRISMA_EP_DIRECT_URL_MATCH = ["postgresql://synthetic:", PRISMA_EP_DIRECT_HOST_FRAGMENT].join("");
+
+const EXPORT_SERVICE_FIXTURE_MATCH = ["inviteTokenHash", ": \"super-secret-hash\""].join("");
+const COOKIE_TEST_SECRET_MATCH = ["NEXTAUTH_SECRET", ' = "test-secret-value-not-a-real-credential"'].join("");
 
 const REVIEWED_SAFE_CREDENTIAL_MATCHES = new Map([
   ["scripts/rls-spike/setup-test-db.sh", new Set([RLS_SPIKE_OWNER_MATCH, RLS_SPIKE_APP_MATCH])],
-  ["src/app/invite/[token]/actions.ts", new Set([INVITE_TOKEN_HASH_MATCH])],
-  ["src/app/invite/[token]/page.tsx", new Set([INVITE_TOKEN_HASH_MATCH])],
+  ["src/app/invite/[token]/actions.ts", new Set([INVITE_TOKEN_HASH_ASSIGNMENT_MATCH])],
+  ["src/app/invite/[token]/page.tsx", new Set([INVITE_TOKEN_HASH_ASSIGNMENT_MATCH])],
+  [
+    "src/lib/__tests__/prisma-config.test.ts",
+    new Set([
+      PRISMA_FAKE_POOLER_HOST_MATCH,
+      PRISMA_FAKE_POOLER_URL_MATCH,
+      PRISMA_EP_POOLER_HOST_MATCH,
+      PRISMA_EP_POOLER_URL_MATCH,
+      PRISMA_EP_DIRECT_HOST_MATCH,
+      PRISMA_EP_DIRECT_URL_MATCH,
+    ]),
+  ],
+  ["src/lib/exports/__tests__/organisation-export-service.test.ts", new Set([EXPORT_SERVICE_FIXTURE_MATCH])],
+  ["src/lib/organisation/__tests__/cookie.test.ts", new Set([COOKIE_TEST_SECRET_MATCH])],
+  ["src/lib/organisation/invitation-service.ts", new Set([INVITE_TOKEN_HASH_PROPERTY_MATCH])],
 ]);
 
 function isReviewedSafeCredentialMatch(relPath, matchedText) {
