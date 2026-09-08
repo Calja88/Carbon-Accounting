@@ -137,19 +137,31 @@ export function isAllowlistedForSecretScan(relPath) {
  * connection string"), confirmed by reading the entire 51-line file: no
  * other credential-like, connection-string, key, token, or private-key
  * material appears anywhere in it.
+ *
+ * src/app/invite/[token]/actions.ts (Checkpoint A, board demo sprint): the
+ * `tokenHash` local variable is assigned the return value of calling the
+ * local SHA-256 helper `hashInvitationToken(...)` (from
+ * src/lib/organisation/invitation-service.ts, no embedded secret/salt/
+ * pepper) on the visitor's own submitted invite token; not a hardcoded
+ * value. Confirmed by reading the entire file: no literal invitation
+ * token, API key, password, connection string or other secret is embedded
+ * anywhere in it — `password`/`confirmPassword` are zod schema field
+ * names validating user input, not hardcoded credentials.
  */
 // Built from parts rather than written as literal contiguous strings, same
 // reason as src/lib/__tests__/handoff-secret-scan.test.ts's fixtures: this
 // scanner's own source is itself a candidate file in every handoff bundle,
 // so a literal match-shaped string here would trip the scanner on itself.
-// Split *before* the `:` (the rule's `[:=]` operator), not just anywhere in
-// the value — otherwise the first fragment alone is still keyword+operator+
-// 16 more chars and matches on its own.
+// Split *before* the `:`/`=` (the rule's `[:=]` operator), not just anywhere
+// in the value — otherwise the first fragment alone is still
+// keyword+operator+16 more chars and matches on its own.
 const RLS_SPIKE_OWNER_MATCH = ["RLS_SPIKE_OWNER_PASSWORD", ":-rls_spike_owner_local_only"].join("");
 const RLS_SPIKE_APP_MATCH = ["RLS_SPIKE_APP_PASSWORD", ":-rls_spike_app_local_only"].join("");
+const INVITE_TOKEN_HASH_MATCH = ["tokenHash ", "= hashInvitationToken"].join("");
 
 const REVIEWED_SAFE_CREDENTIAL_MATCHES = new Map([
   ["scripts/rls-spike/setup-test-db.sh", new Set([RLS_SPIKE_OWNER_MATCH, RLS_SPIKE_APP_MATCH])],
+  ["src/app/invite/[token]/actions.ts", new Set([INVITE_TOKEN_HASH_MATCH])],
 ]);
 
 function isReviewedSafeCredentialMatch(relPath, matchedText) {

@@ -111,3 +111,54 @@ describe("reviewed exact-match credential allowlist (scripts/rls-spike/setup-tes
     expect(JSON.stringify(finding)).not.toContain(secretValue);
   });
 });
+
+// Checkpoint A: the narrow, exact-match allowlist for
+// src/app/invite/[token]/actions.ts's benign `tokenHash =
+// hashInvitationToken(...)` assignment (calls the local SHA-256 helper on
+// the visitor's own submitted token; no embedded secret). Built from parts
+// for the same self-scanning reason as above.
+describe("reviewed exact-match credential allowlist (src/app/invite/[token]/actions.ts)", () => {
+  // Split before the "=" (the rule's operator), same reasoning as the
+  // RLS-spike fixtures above.
+  const tokenHashMatch = join("tokenHash ", "= hashInvitationToken");
+  const invitePath = join("src/app/invite/[token]/", "actions.ts");
+
+  it("allows the exact reviewed benign hashInvitationToken assignment in its file", () => {
+    const fixture = `  const ${tokenHashMatch}(parsed.data.token);`;
+    expect(scanContentForSecrets(fixture, invitePath)).toBeNull();
+  });
+
+  it("still fails a literal token/hash/password assignment in the same file", () => {
+    for (const fixture of [
+      `tokenHash = "${join("actual-secret-value-that", "-is-long-enough")}"`,
+      `token = "${join("some-long-secret-value", "-here-too")}"`,
+      `apiToken = "${join("another-long-secret", "-value-here")}"`,
+      `password = "${join("yet-another-long-secret", "-value")}"`,
+    ]) {
+      expect(scanContentForSecrets(fixture, invitePath)).not.toBeNull();
+    }
+  });
+
+  it("still fails a different token-related assignment in the same file unless separately allowlisted", () => {
+    const fixture = `otherTokenHash ${join("= hashSomethingElse", "AndDifferent")}(value);`;
+    expect(scanContentForSecrets(fixture, invitePath)).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    const fixture = `const ${tokenHashMatch}(parsed.data.token);`;
+    expect(scanContentForSecrets(fixture, join("src/app/invite/[token]/", "other-file.ts"))).not.toBeNull();
+  });
+
+  it("the reviewed RLS-spike exception is unaffected by this second exception", () => {
+    const ownerMatch = join("RLS_SPIKE_OWNER_PASSWORD", ":-rls_spike_owner_local_only");
+    const fixture = `OWNER_PASSWORD="\${${ownerMatch}}"`;
+    expect(scanContentForSecrets(fixture, join("scripts/rls-spike/", "setup-test-db.sh"))).toBeNull();
+  });
+
+  it("never includes the matched text for the cases it still flags here", () => {
+    const secretValue = join("actual-secret-value-that", "-is-long-enough");
+    const fixture = `tokenHash = "${secretValue}"`;
+    const finding = scanContentForSecrets(fixture, invitePath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
