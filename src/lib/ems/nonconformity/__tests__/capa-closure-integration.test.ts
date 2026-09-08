@@ -58,6 +58,12 @@ function simpleModel(rows: Row[], prefix: string, defaults: Row = {}) {
       }
       return matched[0] ?? null;
     }),
+    findUniqueOrThrow: vi.fn(async ({ where }: FindArgs) => {
+      const key = (where as Row & { organisationId_id?: Row })?.organisationId_id ?? where ?? {};
+      const row = find(rows, key as Row);
+      if (!row) throw new Error(`${prefix} not found`);
+      return row;
+    }),
     findMany: vi.fn(async ({ where }: FindArgs) => rows.filter((r) => matchesSimple(r, where ?? {}))),
     create: vi.fn(async ({ data }: { data: Row }) => {
       const row: Row = { id: `${prefix}-${tables.nextId++}`, createdAt: new Date(), updatedAt: new Date(), ...defaults, ...data };

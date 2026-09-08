@@ -71,9 +71,22 @@ export async function requestEffectivenessReview(context: OrganisationContext, n
   }
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
-    const updated = await tx.nonconformity.update({
-      where: { organisationId_id: { organisationId: txCtx.organisationId, id: nonconformity.id } },
+    // BD02: CAS on the write — a corrective action completing/reopening (or
+    // this same transition firing twice concurrently) between the reads
+    // above and this write gets a conflict, not a silent duplicate
+    // transition. The action-completeness check itself isn't re-run inside
+    // the transaction (it would need every action row locked too); the
+    // status guard below still stops a second, now-stale request from
+    // re-entering effectiveness review.
+    const { count } = await tx.nonconformity.updateMany({
+      where: { organisationId: txCtx.organisationId, id: nonconformity.id, status: "ACTIONS_IN_PROGRESS" },
       data: { status: "EFFECTIVENESS_REVIEW" },
+    });
+    if (count === 0) {
+      throw new EffectivenessError("Nonconformity status changed before the request could be recorded.");
+    }
+    const updated = await tx.nonconformity.findUniqueOrThrow({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: nonconformity.id } },
     });
     await recordAuditEvent(tx, txCtx, {
       eventType: "nonconformity.effectiveness_review_requested",
@@ -96,15 +109,22 @@ export interface PerformEffectivenessReviewInput {
   result: EffectivenessResult;
   decision: string;
   actorUserId: string;
-  /** Whether this organisation enforces owner/reviewer independence. Caller-supplied, like every other four-eyes check in this codebase. */
-  fourEyesEnabled?: boolean;
 }
 
 /**
  * Records an effectiveness review. Denies the reviewer when they own any
- * corrective action on this nonconformity and four-eyes is enabled, then
- * applies the organisation's `ineffectiveOutcomePolicy` to a non-EFFECTIVE
- * result.
+ * corrective action on this nonconformity, then applies the organisation's
+ * `ineffectiveOutcomePolicy` to a non-EFFECTIVE result.
+ *
+ * BD02: four-eyes is always enforced, server-side and non-overridable — the
+ * `fourEyesEnabled?: boolean` parameter this function previously accepted
+ * (mirroring a pattern repeated across the EMS layer) was never actually
+ * supplied by any live caller; removing it closes the unused override
+ * before it becomes one, without changing behaviour for any real caller.
+ * The check is re-proven fresh inside the transaction below (not just from
+ * the pre-transaction `actions` read here), and the status transition is a
+ * compare-and-swap so a second, now-stale request gets a conflict rather
+ * than a duplicate review.
  */
 export async function performEffectivenessReview(context: OrganisationContext, nonconformityId: string, input: PerformEffectivenessReviewInput) {
   requirePermission(context, EFFECTIVENESS_REVIEW_PERMISSION);
@@ -121,8 +141,7 @@ export async function performEffectivenessReview(context: OrganisationContext, n
     where: tenantWhere(ctx, { nonconformityId: nonconformity.id }),
     select: { ownerMembershipId: true },
   });
-  const fourEyesEnabled = input.fourEyesEnabled ?? true;
-  if (fourEyesEnabled && actions.some((action) => action.ownerMembershipId === context.membershipId)) {
+  if (actions.some((action) => action.ownerMembershipId === context.membershipId)) {
     throw new PermissionDeniedError("FOUR_EYES_SELF_APPROVAL");
   }
 
@@ -130,6 +149,30 @@ export async function performEffectivenessReview(context: OrganisationContext, n
   const ineffectiveOutcomePolicy = policy?.ineffectiveOutcomePolicy ?? "REOPEN_NONCONFORMITY";
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    // BD02: CAS + row lock — a no-op conditional update on the nonconformity
+    // both re-proves it is still EFFECTIVENESS_REVIEW at write time and, via
+    // Postgres row-level locking, holds a lock on it for the rest of this
+    // transaction, so a concurrent second review request serializes behind
+    // this one rather than racing it. A stale caller gets a conflict here,
+    // never a duplicate review.
+    const { count: stillReviewable } = await tx.nonconformity.updateMany({
+      where: { organisationId: txCtx.organisationId, id: nonconformity.id, status: "EFFECTIVENESS_REVIEW" },
+      data: { status: "EFFECTIVENESS_REVIEW" },
+    });
+    if (stillReviewable === 0) {
+      throw new EffectivenessError("Nonconformity status changed before this review could be recorded.");
+    }
+    // Re-prove four-eyes fresh, inside the lock just taken above — not just
+    // from the pre-transaction read, which a concurrent reassignment could
+    // have made stale.
+    const freshActions = await tx.correctiveAction.findMany({
+      where: tenantWhere(txCtx, { nonconformityId: nonconformity.id }),
+      select: { ownerMembershipId: true },
+    });
+    if (freshActions.some((action) => action.ownerMembershipId === context.membershipId)) {
+      throw new PermissionDeniedError("FOUR_EYES_SELF_APPROVAL");
+    }
+
     const review = await tx.effectivenessReview.create({
       data: {
         organisationId: txCtx.organisationId,

@@ -255,14 +255,23 @@ export async function completeCorrectiveAction(context: OrganisationContext, cor
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const now = new Date();
-    const updated = await tx.correctiveAction.update({
-      where: { organisationId_id: { organisationId: txCtx.organisationId, id: action.id } },
+    // BD02: CAS on the write itself, not just the read above — closes the
+    // race between the pre-transaction status check and this write (a
+    // concurrent duplicate submit, or the action closing via another path
+    // mid-request). A stale caller gets a conflict, never a silent
+    // second "completed" transition.
+    const { count } = await tx.correctiveAction.updateMany({
+      where: { organisationId: txCtx.organisationId, id: action.id, status: { notIn: [...CLOSED_STATUSES] } },
       data: {
         status: "COMPLETED",
         completedAt: now,
         completedByUserId: input.actorUserId,
         completionEvidenceNote: input.completionEvidenceNote.trim(),
       },
+    });
+    if (count === 0) throw new CorrectiveActionError("Corrective action was already closed by another update.");
+    const updated = await tx.correctiveAction.findUniqueOrThrow({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: action.id } },
     });
     await suppressNotificationsForResource(tx, txCtx, "corrective_action", action.id);
     await recordAuditEvent(tx, txCtx, {
@@ -282,25 +291,51 @@ export async function completeCorrectiveAction(context: OrganisationContext, cor
 
 export interface VerifyCorrectiveActionInput {
   actorUserId: string;
-  /** Whether this organisation requires the completor and verifier to differ. Caller-supplied, mirroring T52's `verifyActionItem`. */
-  fourEyesEnabled?: boolean;
 }
 
+/**
+ * BD02: four-eyes is always enforced here, server-side and non-overridable
+ * — no organisation setting currently relaxes it, so unlike the sibling
+ * `fourEyesEnabled?: boolean` parameter this module and others in the EMS
+ * layer historically accepted (never actually supplied by any live caller,
+ * confirmed by inspection), there is no legitimate value a caller could
+ * pass here. Removing the parameter closes that unused override before it
+ * becomes one. The same pattern exists elsewhere in the EMS layer
+ * (objectives, legal obligations, documents); left alone here as outside
+ * this package's demonstrated corrective-action/effectiveness chain.
+ */
 export async function verifyCorrectiveAction(context: OrganisationContext, correctiveActionId: string, input: VerifyCorrectiveActionInput) {
   requirePermission(context, CORRECTIVE_ACTION_MANAGE_PERMISSION);
   const ctx = toTenantRepositoryContext(context);
   const action = await findTenantCorrectiveAction(ctx, correctiveActionId);
   if (!action) throw new TenantOwnershipError();
   if (action.status !== "COMPLETED") throw new CorrectiveActionError("Only a completed corrective action can be verified.");
-  if ((input.fourEyesEnabled ?? true) && action.completedByUserId === input.actorUserId) {
+  if (action.completedByUserId === input.actorUserId) {
     throw new CorrectiveActionError("The person who completed this corrective action cannot also verify it.");
   }
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const now = new Date();
-    const updated = await tx.correctiveAction.update({
-      where: { organisationId_id: { organisationId: txCtx.organisationId, id: action.id } },
+    // BD02: CAS re-proves both the status and the self-verification
+    // exclusion at the moment of the write — closes the race where the
+    // action changed (or was completed by this same actor) between the
+    // reads above and this transaction.
+    const { count } = await tx.correctiveAction.updateMany({
+      where: {
+        organisationId: txCtx.organisationId,
+        id: action.id,
+        status: "COMPLETED",
+        completedByUserId: { not: input.actorUserId },
+      },
       data: { status: "VERIFIED", verifiedAt: now, verifiedByMembershipId: context.membershipId },
+    });
+    if (count === 0) {
+      throw new CorrectiveActionError(
+        "Corrective action could not be verified — it may have changed since you loaded it, or you completed it yourself.",
+      );
+    }
+    const updated = await tx.correctiveAction.findUniqueOrThrow({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: action.id } },
     });
     await recordAuditEvent(tx, txCtx, {
       eventType: "corrective_action.verified",

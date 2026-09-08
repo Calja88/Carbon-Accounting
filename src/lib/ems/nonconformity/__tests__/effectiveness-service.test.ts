@@ -47,6 +47,17 @@ function simpleModel(rows: Row[], prefix: string, defaults: Row = {}) {
       const key = (where as Row & { organisationId_id?: Row })?.organisationId_id ?? where ?? {};
       return find(rows, key as Row);
     }),
+    findUniqueOrThrow: vi.fn(async ({ where }: FindArgs) => {
+      const key = (where as Row & { organisationId_id?: Row })?.organisationId_id ?? where ?? {};
+      const row = find(rows, key as Row);
+      if (!row) throw new Error(`${prefix} not found`);
+      return row;
+    }),
+    updateMany: vi.fn(async ({ where, data }: { where: Row; data: Row }) => {
+      const matched = rows.filter((r) => matchesSimple(r, where ?? {}));
+      matched.forEach((r) => Object.assign(r, data));
+      return { count: matched.length };
+    }),
     findMany: vi.fn(async ({ where, orderBy }: FindArgs) => {
       const matched = rows.filter((r) => matchesSimple(r, where ?? {}));
       if (orderBy && "createdAt" in orderBy && orderBy.createdAt === "desc") {
@@ -184,14 +195,28 @@ describe("performEffectivenessReview — owner independence", () => {
     expect(result.review.reviewerMembershipId).toBe("membership-reviewer");
   });
 
-  it("allows the owner to review when four-eyes is explicitly disabled", async () => {
+  it("BD02: four-eyes has no client-supplied override — the owner is denied regardless of caller input", async () => {
     tables.correctiveActions.push({ id: "ca-1", organisationId: ORG_A, nonconformityId: "nc-review", status: "COMPLETED", ownerMembershipId: "membership-owner" });
-    const result = await performEffectivenessReview(ownerContextA, "nc-review", reviewInput({ actorUserId: ownerContextA.userId, fourEyesEnabled: false }));
-    expect(result.review.reviewerMembershipId).toBe("membership-owner");
+    // No `fourEyesEnabled` field exists on the input type any more — this
+    // proves there is no way to reach the old bypass, not just that the
+    // default is safe.
+    await expect(
+      performEffectivenessReview(ownerContextA, "nc-review", reviewInput({ actorUserId: ownerContextA.userId })),
+    ).rejects.toThrow(PermissionDeniedError);
   });
 });
 
 describe("performEffectivenessReview — outcome handling", () => {
+  it("BD02: a stale double-submit is rejected once the nonconformity has already left EFFECTIVENESS_REVIEW", async () => {
+    tables.correctiveActions.push({ id: "ca-1", organisationId: ORG_A, nonconformityId: "nc-review", status: "COMPLETED", ownerMembershipId: "membership-owner" });
+    // First submit reopens the nonconformity (INEFFECTIVE, default policy).
+    await performEffectivenessReview(reviewerContextA, "nc-review", reviewInput({ result: "INEFFECTIVE" }));
+    // A second, now-stale request against the same pre-loaded record must
+    // get a conflict rather than silently recording a second review or
+    // re-reopening an already-reopened nonconformity.
+    await expect(performEffectivenessReview(reviewerContextA, "nc-review", reviewInput())).rejects.toThrow(EffectivenessError);
+  });
+
   it("EFFECTIVE leaves the nonconformity in EFFECTIVENESS_REVIEW, ready to close", async () => {
     tables.correctiveActions.push({ id: "ca-1", organisationId: ORG_A, nonconformityId: "nc-review", status: "COMPLETED", ownerMembershipId: "membership-owner" });
     const result = await performEffectivenessReview(reviewerContextA, "nc-review", reviewInput());

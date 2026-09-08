@@ -48,6 +48,12 @@ function simpleModel(rows: Row[], prefix: string, defaults: Row = {}) {
       const key = (where as Row & { organisationId_id?: Row })?.organisationId_id ?? where ?? {};
       return find(rows, key as Row);
     }),
+    findUniqueOrThrow: vi.fn(async ({ where }: FindArgs) => {
+      const key = (where as Row & { organisationId_id?: Row })?.organisationId_id ?? where ?? {};
+      const row = find(rows, key as Row);
+      if (!row) throw new Error(`${prefix} not found`);
+      return row;
+    }),
     findMany: vi.fn(async ({ where }: FindArgs) => rows.filter((r) => matchesSimple(r, where ?? {}))),
     create: vi.fn(async ({ data }: { data: Row }) => {
       const row: Row = { id: `${prefix}-${tables.nextId++}`, createdAt: new Date(), updatedAt: new Date(), ...defaults, ...data };
@@ -197,6 +203,29 @@ describe("status transitions, completion and verification", () => {
     const ownerContext = makeOrganisationContext(ORG_A, { userId: "user-manager", membershipId: "membership-owner", permissions: MANAGE_PERMS });
     await completeCorrectiveAction(ownerContext, action.id, { completionEvidenceNote: "Fictional evidence.", actorUserId: ownerContext.userId });
     await expect(verifyCorrectiveAction(ownerContext, action.id, { actorUserId: ownerContext.userId })).rejects.toThrow(CorrectiveActionError);
+  });
+
+  it("BD02: a stale double-submit of completeCorrectiveAction is rejected as a conflict, not a silent no-op", async () => {
+    const action = await createCorrectiveAction(managerContextA, "nc-root-cause-approved", actionInput());
+    // Both requests read the same OPEN action before either writes —
+    // simulated here by simply calling twice with the same stale reference.
+    await completeCorrectiveAction(managerContextA, action.id, { completionEvidenceNote: "First submit.", actorUserId: managerContextA.userId });
+    await expect(
+      completeCorrectiveAction(managerContextA, action.id, { completionEvidenceNote: "Stale duplicate submit.", actorUserId: managerContextA.userId }),
+    ).rejects.toThrow(CorrectiveActionError);
+  });
+
+  it("BD02: verifying twice (or after the action changed) is a conflict, not a duplicate VERIFIED transition", async () => {
+    const action = await createCorrectiveAction(managerContextA, "nc-root-cause-approved", actionInput());
+    await completeCorrectiveAction(managerContextA, action.id, { completionEvidenceNote: "Evidence.", actorUserId: managerContextA.userId });
+    const secondReviewerContext = makeOrganisationContext(ORG_A, { userId: "user-second-reviewer", membershipId: "membership-second-reviewer", permissions: MANAGE_PERMS });
+    tables.memberships.push({ id: "membership-second-reviewer", organisationId: ORG_A, status: "ACTIVE" });
+    await verifyCorrectiveAction(secondReviewerContext, action.id, { actorUserId: secondReviewerContext.userId });
+    // The action is now VERIFIED; a second, now-stale verify call must not
+    // silently succeed again or overwrite the first verifier's record.
+    await expect(verifyCorrectiveAction(secondReviewerContext, action.id, { actorUserId: secondReviewerContext.userId })).rejects.toThrow(
+      CorrectiveActionError,
+    );
   });
 
   it("refuses to change status on a closed action", async () => {
