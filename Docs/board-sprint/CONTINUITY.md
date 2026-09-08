@@ -88,6 +88,30 @@ Deferred / not done in BD04 (by design, not oversight):
 - `src/app/(app)/carbon/page.tsx` still queries Prisma directly, unscoped by organisation/site — flagged since BD01/BD04, now BD03's to fix (its own metrics/adapter package).
 - Same pre-transaction-check-only pattern and `fourEyesEnabled` override exist in `closeNonconformity`, `reopenCorrectiveAction`, and 9 other EMS services outside the demonstrated chain — not fixed in BD02, noted for future hardening.
 
+## BD02 follow-up — disposable Neon environment provisioned; verification blocked by sandbox network capability, not by cost or code
+
+**Neon org `org-flat-field-50332528` inspected (read-only) before any creation.** Two existing projects: `twilight-breeze-25854149` has a branch literally named `production`, actively used minutes before this inspection — confirmed live, never touched or queried. `falling-hall-18424294` ("t30-migration-scratch") has a stale partial schema (8 tables, missing 30+ current EMS tables) and unverified-origin `Organisation`/`Site` rows — not current-schema-compatible and not provably empty, so not reused. Owner `calja88@gmail.com` is on `subscription_type: "free_v3"` (free plan, no overage billing) on both existing projects, so a new small project is covered by the existing free allowance — no known additional paid cost.
+
+**Provisioned a brand-new, verified-empty project:** id `cool-cake-20837205`, name `board-demo-sprint-2026-09-22`, org `org-flat-field-50332528`, branch `main`, database `board_demo`, region `aws-us-west-2`, pg18, autoscaling capped at the cheapest tier (0.25 CU). `get_database_tables` confirmed 0 tables immediately after creation. This is the positively-identified disposable environment for the rest of the sprint — record its project id (`cool-cake-20837205`) and env-manifest values below in any future session; do not create another one without reason.
+
+Env manifest for `isVerifiedDemoEnvironment` (`src/lib/board/live-environment.ts`), written to local `.env.local` (gitignored, not committed — a future session needs to recreate it or pull the real connection string from Neon):
+```
+BOARD_DEMO_DATA_MODE=synthetic
+BOARD_DEMO_DEPLOYMENT_CLASS=private-demo
+BOARD_DEMO_DATABASE_ID=cool-cake-20837205
+BOARD_DEMO_ALLOWED_DATABASE_ID=cool-cake-20837205
+BOARD_DEMO_ENVIRONMENT_ID=board-demo-sprint-2026-09-22
+```
+
+**Blocked: this sandbox cannot reach the database at all, over any protocol.** Confirmed by direct probe: raw TCP to Neon's Postgres port (5432) times out on both the pooled and direct endpoints, and even a plain HTTPS request to `console.neon.tech` is rejected by the sandbox's egress proxy ("organization policy," 403) — only the small allowlist of hosts the harness proxies (npm registry, GitHub, Anthropic's own API, and the Neon/GitHub *MCP tool servers*, which run outside this sandbox and proxy on the harness side) are reachable. Prisma's classic engine (`prisma.config.ts` sets `engine: "classic"`) makes a native TCP connection for every operation that touches a live database — `migrate deploy`, `db pull`, `migrate status`, and the Next.js app's own runtime Prisma client alike. None of them can run from this shell, regardless of which database is targeted. This is a capability of *this execution environment*, not a code, schema, or cost problem — a session with normal outbound network access (a developer's machine, CI, or a future Claude Code session with different network policy) can use this same project immediately with no further setup.
+
+Considered and rejected as workarounds: (1) hand-applying the 43 migration files (8,184 lines of SQL) via the Neon MCP `run_sql` tool, bypassing Prisma's CLI — rejected because it would still leave the actual app runtime unable to reach the database (same TCP block), so it couldn't unblock the build/browser checks anyway, while adding real risk of getting Prisma's `_prisma_migrations` bookkeeping subtly wrong for whoever connects next; (2) switching the app to Neon's HTTP/serverless driver — rejected as an architecture change outside BD02's scope, not a "smallest safe adaptation."
+
+**Consequently still NOT RUN, for a network-capability reason rather than a database-identity reason:**
+- migration-free build run / proof the build doesn't mutate schema — needs a reachable database to run `prisma migrate deploy` then `next build` against it and confirm no writes
+- DB-backed tenant/site/approval tests (the ones needing real Prisma, not the mocked-Prisma Vitest suite — that suite already passed, see the original BD02 commit)
+- synthetic banner / runtime verification, browser checks — needs a running app with database access
+
 ## Next package
 
-**BD03** — do not start automatically; wait for explicit instruction.
+**BD03** — do not start automatically; wait for explicit instruction. Whoever next has real network access to Neon (a local machine, CI, or a differently-configured session) can run `pnpm run db:migrate:deploy` against `cool-cake-20837205` immediately — no further provisioning needed.
