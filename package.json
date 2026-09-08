@@ -11,7 +11,9 @@
     "db:seed": "tsx prisma/seed/index.ts",
     "db:seed:lca-methodology": "tsx prisma/seed/lca-methodology-only.ts",
     "db:migrate": "prisma migrate dev",
-    "test": "vitest run"
+    "test": "vitest run",
+    "handoff:full": "node scripts/handoff/full-handoff.mjs",
+    "handoff:review": "node scripts/handoff/review-handoff.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
@@ -36,6 +38,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "archiver": "^8.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "tailwindcss": "^4",
