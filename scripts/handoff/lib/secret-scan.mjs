@@ -147,6 +147,14 @@ export function isAllowlistedForSecretScan(relPath) {
  * token, API key, password, connection string or other secret is embedded
  * anywhere in it — `password`/`confirmPassword` are zod schema field
  * names validating user input, not hardcoded credentials.
+ *
+ * src/app/invite/[token]/page.tsx (Checkpoint A, board demo sprint): the
+ * sibling page component's own `tokenHash` local variable, assigned from
+ * the same `hashInvitationToken(...)` call on the route's own `token`
+ * param — the identical reviewed pattern as actions.ts above, in
+ * independent application code. Confirmed by reading the entire file: no
+ * literal token, password, API key, connection string or other secret
+ * anywhere in it.
  */
 // Built from parts rather than written as literal contiguous strings, same
 // reason as src/lib/__tests__/handoff-secret-scan.test.ts's fixtures: this
@@ -162,6 +170,7 @@ const INVITE_TOKEN_HASH_MATCH = ["tokenHash ", "= hashInvitationToken"].join("")
 const REVIEWED_SAFE_CREDENTIAL_MATCHES = new Map([
   ["scripts/rls-spike/setup-test-db.sh", new Set([RLS_SPIKE_OWNER_MATCH, RLS_SPIKE_APP_MATCH])],
   ["src/app/invite/[token]/actions.ts", new Set([INVITE_TOKEN_HASH_MATCH])],
+  ["src/app/invite/[token]/page.tsx", new Set([INVITE_TOKEN_HASH_MATCH])],
 ]);
 
 function isReviewedSafeCredentialMatch(relPath, matchedText) {

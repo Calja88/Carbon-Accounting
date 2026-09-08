@@ -162,3 +162,52 @@ describe("reviewed exact-match credential allowlist (src/app/invite/[token]/acti
     expect(JSON.stringify(finding)).not.toContain(secretValue);
   });
 });
+
+// Checkpoint A: the identical reviewed benign hashInvitationToken
+// assignment also appears in the sibling page component. Same exact-match
+// allowlist mechanism, scoped to this specific file.
+describe("reviewed exact-match credential allowlist (src/app/invite/[token]/page.tsx)", () => {
+  const tokenHashMatch = join("tokenHash ", "= hashInvitationToken");
+  const pagePath = join("src/app/invite/[token]/", "page.tsx");
+
+  it("allows the reviewed benign helper-call assignment in page.tsx", () => {
+    const fixture = `  const ${tokenHashMatch}(token);`;
+    expect(scanContentForSecrets(fixture, pagePath)).toBeNull();
+  });
+
+  it("still fails a literal token assignment in page.tsx", () => {
+    const fixture = `token = "${join("some-long-literal-token", "-value-here")}"`;
+    expect(scanContentForSecrets(fixture, pagePath)).not.toBeNull();
+  });
+
+  it("still fails a literal password/API token assignment in page.tsx", () => {
+    for (const fixture of [
+      `password = "${join("a-long-literal-password", "-value-here")}"`,
+      `apiToken = "${join("a-long-literal-api-token", "-value-here")}"`,
+    ]) {
+      expect(scanContentForSecrets(fixture, pagePath)).not.toBeNull();
+    }
+  });
+
+  it("still fails a different, non-allowlisted token assignment in page.tsx", () => {
+    const fixture = `sessionToken ${join("= readFromSomewhereElse", "Unrelated")}(value);`;
+    expect(scanContentForSecrets(fixture, pagePath)).not.toBeNull();
+  });
+
+  it("the actions.ts exception still works alongside this one", () => {
+    const fixture = `  const ${tokenHashMatch}(parsed.data.token);`;
+    expect(scanContentForSecrets(fixture, join("src/app/invite/[token]/", "actions.ts"))).toBeNull();
+  });
+
+  it("the RLS-spike exception still works alongside this one", () => {
+    const ownerMatch = join("RLS_SPIKE_OWNER_PASSWORD", ":-rls_spike_owner_local_only");
+    const fixture = `OWNER_PASSWORD="\${${ownerMatch}}"`;
+    expect(scanContentForSecrets(fixture, join("scripts/rls-spike/", "setup-test-db.sh"))).toBeNull();
+  });
+
+  it("never echoes secret values for the cases it still flags in page.tsx", () => {
+    const secretValue = join("some-long-literal-token", "-value-here");
+    const finding = scanContentForSecrets(`token = "${secretValue}"`, pagePath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
