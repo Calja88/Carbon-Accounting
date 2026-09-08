@@ -4,9 +4,9 @@ Keep this to ~1-2 pages. Update at the end of every package.
 
 ## Current state
 
-- **Package completed:** BD02 (demo isolation / security). BD01 and BD04 also complete.
+- **Package completed:** BD03 (honest metrics / calculation & report reliability). BD01, BD04, BD02 also complete. **Checkpoint A is next** (BD01+BD04+BD02+BD03 cumulative Astra review) — do not merge PR #63 before it.
 - **Branch:** `board/foundations-2026-09-22` (created from `origin/claude/paragon-id-uk-carbon-mvp-1h1uvb` @ `c9487554b058087736e031b06a672f2f61fcfbcb`)
-- **Head:** see PR #63 for current head; BD01 merge commit `7dba8a6`, docs `a343203`, package-manager decision `292355b`, BD04 `559cc48`, BD02 commit below.
+- **Head:** see PR #63 for current head; BD01 merge commit `7dba8a6`, docs `a343203`, package-manager decision `292355b`, BD04 `559cc48`, BD02 `9835e2d` + `0cd84e8`, BD03 `37f043f`.
 - **PR:** [#63](https://github.com/Calja88/Carbon-Accounting/pull/63) (draft), branch `board/foundations-2026-09-22` against `claude/paragon-id-uk-carbon-mvp-1h1uvb`.
 - Build pack extracted (outside the repo) at `/home/user/carbon-overhaul/build-pack`; dossier at `/home/user/carbon-overhaul/Carbon_Ledger_Product_Transformation_Implementation_Dossier.docx`. Both are on ephemeral container storage — not guaranteed to survive to a future session; re-upload if a future session can't find them.
 
@@ -112,6 +112,24 @@ Considered and rejected as workarounds: (1) hand-applying the 43 migration files
 - DB-backed tenant/site/approval tests (the ones needing real Prisma, not the mocked-Prisma Vitest suite — that suite already passed, see the original BD02 commit)
 - synthetic banner / runtime verification, browser checks — needs a running app with database access
 
+## BD03 — honest metrics, reliable calculation/report preparation (complete)
+
+**Astra files installed verbatim:** `src/lib/board/{carbon-adapter,calculation-orchestration,attention,overview-service}.ts` + their tests (`__tests__/{board,carbon-adapter}.test.ts`). `contracts.ts`/`metrics.ts`/`navigation.ts`/`schemas.ts` were already installed byte-identical by BD01/BD02, reused not overwritten. All 59 focused board tests pass — includes BOARD-1's -20% comparison, the missing-current-data counterexample, and `buildCarbonSection`'s own "rejects a market companion added into headline" guard.
+
+**Two genuine live-engine gaps found and fixed** in `src/lib/entries-service.ts`'s `runCalculationsForEntry` (the actual Scope 1/2/3 calculation write path, found by inspection against `PRISMA_PROPOSALS/BD02-BD03-INVARIANTS.md`, not by assumption):
+1. **Dual Scope 2 atomicity.** Location-based and market-based basis rows were written by two independent `prisma.calculation.create` calls raced via `Promise.all`, outside any transaction — a mid-write failure could leave exactly one committed. Now both writes for one call happen sequentially inside a single `prisma.$transaction` (sequential, not `Promise.all`, inside the tx — concurrent queries against one Prisma interactive transaction are not safe).
+2. **Calculation idempotency.** No guard existed at all: calling the function twice for the same entry (retry, double submit, two concurrent `recalculatePendingEntries` passes) created duplicate `Calculation` rows that every downstream total (dashboard, reports) would silently double-count — there is no unique constraint on `(activityEntryId, basis)` and the schema's own `supersededById` field, seemingly meant for this, is unused everywhere. Fixed by checking for existing rows inside the transaction and returning them unchanged instead of creating duplicates. Verified safe for all three live callers (`createActivityEntryWithCalculations`, `recalculatePendingEntries`, `createCommutingSurvey`) — none ever intends to replace an entry's existing calculations; a contract change deliberately does not retroactively touch already-calculated periods (factor values are snapshotted for the audit trail).
+
+New tests: `src/lib/__tests__/entries-service-idempotency.test.ts` (first call creates one row; second call is a no-op with the same result; simulated-concurrent duplicate calls still leave exactly one row).
+
+**Verified already correct, not touched:** headline total already excludes market-based Scope 2 (`analytics-service.ts`'s `totalsFor`: `total = scope1 + scope2Location + scope3`, MB kept as a separate `scope2Market` field); issued `ReportSnapshot` rows are genuinely append-only (no `update`/`upsert` call exists anywhere in the codebase); `buildReportPayload` is pure read/compute, no write side effect; `resolveMonthRange` only falls back to today's period on genuinely missing/malformed input, never silently overriding a valid selection.
+
+**Identified, deliberately not restructured:** `reports/actions.ts`'s `generateReportAction` calls `deriveCategory3Calculations` (a real write — new Scope 3 Cat 3 `Calculation` rows, DB-idempotent via the `derivedFromCalculationId` unique constraint) and then immediately builds and issues the `ReportSnapshot`, all in one action with no separate prepare/preview step. Not a correctness bug (the derived rows are accurate and necessary — skipping them would understate Scope 3, and the constraint prevents duplicates even under a race, just surfaces as an unhandled error rather than a graceful retry) but an undisclosed side effect: generating a report also permanently mutates the organisation's live Scope 3 total, not just this report's snapshot. Restructuring into an explicit two-step "prepare then issue" workflow would need new UI/schema state and is out of BD03's minimal-adaptation scope — flagged for a future package, not fixed here.
+
+**Schema/migration impact:** none. The engine fix reuses the existing `Calculation` model unchanged — no new migration authored or needed.
+
+**DB-backed tests:** BLOCKED — disposable Neon (`cool-cake-20837205`) exists (see BD02 above) but this sandbox still has no Postgres network egress. Concurrent/duplicate-run and dual-basis-atomicity proof against real Postgres, and browser drilldown checks, remain deferred to a session with network access — not weakened, not faked. The equivalent logic is proven by the new mocked-Prisma regression tests above instead.
+
 ## Next package
 
-**BD03** — do not start automatically; wait for explicit instruction. Whoever next has real network access to Neon (a local machine, CI, or a differently-configured session) can run `pnpm run db:migrate:deploy` against `cool-cake-20837205` immediately — no further provisioning needed.
+**Checkpoint A** (BD01 + BD04 + BD02 + BD03 cumulative Astra review) — do not contact Astra or generate the H00 review bundle automatically; wait for explicit instruction. Do not merge PR #63 before Checkpoint A. Whoever next has real network access to Neon (a local machine, CI, or a differently-configured session) can run `pnpm run db:migrate:deploy` against `cool-cake-20837205` immediately — no further provisioning needed.
