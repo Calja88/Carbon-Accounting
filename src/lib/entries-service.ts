@@ -312,39 +312,70 @@ export async function runCalculationsForEntry(ctx: TenantRepositoryContext, entr
     throw err;
   }
 
-  const calculations = await Promise.all(
-    results.map(({ basis, result, tierOverride }) =>
-      prisma.calculation.create({
-        data: {
-          organisationId: ctx.organisationId,
-          activityEntryId: entry.id,
-          emissionFactorId: result.emissionFactorId,
-          scope: dataPoint.scope,
-          basis,
-          scope3Category: dataPoint.scope3Category ?? null,
-          inputValue: result.inputValue,
-          inputUnit: result.inputUnit,
-          factorValueSnapshot: result.factorValueSnapshot,
-          factorUnitSnapshot: result.factorUnitSnapshot,
-          factorSourceSnapshot: result.factorSourceSnapshot,
-          factorVintageSnapshot: result.factorVintageSnapshot,
-          formulaApplied: result.formulaApplied,
-          resultKgCo2e: result.resultKgCo2e,
-          dataQualityTier: tierOverride ?? entry.dataQualityTier,
-          calculatedByUserId: entry.enteredByUserId,
-        },
-      }),
-    ),
-  );
-
-  if (entry.status === EntryStatus.AWAITING_FACTOR) {
-    await prisma.activityEntry.update({
-      where: { id: entry.id, organisationId: ctx.organisationId },
-      data: { status: entry.plausibilityFlagged ? EntryStatus.FLAGGED : EntryStatus.SUBMITTED },
+  // BD03: atomic and idempotent. Previously each basis row was written by
+  // an independent `prisma.calculation.create` outside any transaction and
+  // raced via `Promise.all` — for Scope 2 (two basis rows: location-based
+  // and market-based) a mid-write failure could leave exactly one of the
+  // two committed, and a retried/duplicate call (network retry, double
+  // form submit, or two concurrent `recalculatePendingEntries` passes
+  // picking up the same row) had nothing stopping it from creating a
+  // second, duplicate set of Calculation rows that every downstream total
+  // would then silently double-count.
+  //
+  // Every current caller (`createActivityEntryWithCalculations`,
+  // `recalculatePendingEntries`, `createCommutingSurvey`) only ever invokes
+  // this on a freshly-created entry with no calculations yet — there is no
+  // live path that intentionally replaces an entry's existing calculations
+  // (a contract change, for instance, deliberately does not retroactively
+  // touch already-calculated periods; see calc-engine.ts's snapshot
+  // comment). So finding existing rows already means "this exact request
+  // already happened" and returning them unchanged is always correct here,
+  // not just a safe default — never a masked bug. All writes for a call
+  // that does need to create rows happen sequentially inside one
+  // transaction (concurrent queries against a single Prisma interactive
+  // transaction are not safe), so a failure partway through leaves neither
+  // basis row committed.
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.calculation.findMany({
+      where: { organisationId: ctx.organisationId, activityEntryId: entry.id },
     });
-  }
+    if (existing.length > 0) return existing;
 
-  return calculations;
+    const calculations = [];
+    for (const { basis, result, tierOverride } of results) {
+      calculations.push(
+        await tx.calculation.create({
+          data: {
+            organisationId: ctx.organisationId,
+            activityEntryId: entry.id,
+            emissionFactorId: result.emissionFactorId,
+            scope: dataPoint.scope,
+            basis,
+            scope3Category: dataPoint.scope3Category ?? null,
+            inputValue: result.inputValue,
+            inputUnit: result.inputUnit,
+            factorValueSnapshot: result.factorValueSnapshot,
+            factorUnitSnapshot: result.factorUnitSnapshot,
+            factorSourceSnapshot: result.factorSourceSnapshot,
+            factorVintageSnapshot: result.factorVintageSnapshot,
+            formulaApplied: result.formulaApplied,
+            resultKgCo2e: result.resultKgCo2e,
+            dataQualityTier: tierOverride ?? entry.dataQualityTier,
+            calculatedByUserId: entry.enteredByUserId,
+          },
+        }),
+      );
+    }
+
+    if (entry.status === EntryStatus.AWAITING_FACTOR) {
+      await tx.activityEntry.update({
+        where: { id: entry.id, organisationId: ctx.organisationId },
+        data: { status: entry.plausibilityFlagged ? EntryStatus.FLAGGED : EntryStatus.SUBMITTED },
+      });
+    }
+
+    return calculations;
+  });
 }
 
 /**
