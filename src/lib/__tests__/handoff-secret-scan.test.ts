@@ -75,8 +75,11 @@ describe("handoff secret scanner", () => {
 // from parts for the same reason as the fixtures above: this test file's
 // own source text must never contain the literal matched string.
 describe("reviewed exact-match credential allowlist (scripts/rls-spike/setup-test-db.sh)", () => {
-  const ownerMatch = join("RLS_SPIKE_OWNER_PASSWORD:-rls_spike_owner_local", "_only");
-  const appMatch = join("RLS_SPIKE_APP_PASSWORD:-rls_spike_app_local", "_only");
+  // Split before the ":" (the rule's operator) — splitting only within the
+  // value leaves the first fragment alone still keyword+operator+16 chars,
+  // which matches on its own.
+  const ownerMatch = join("RLS_SPIKE_OWNER_PASSWORD", ":-rls_spike_owner_local_only");
+  const appMatch = join("RLS_SPIKE_APP_PASSWORD", ":-rls_spike_app_local_only");
   const rlsSpikePath = join("scripts/rls-spike/", "setup-test-db.sh");
 
   it("allows the exact reviewed synthetic RLS-spike credential defaults in their file", () => {

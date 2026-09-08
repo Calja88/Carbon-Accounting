@@ -138,11 +138,18 @@ export function isAllowlistedForSecretScan(relPath) {
  * other credential-like, connection-string, key, token, or private-key
  * material appears anywhere in it.
  */
+// Built from parts rather than written as literal contiguous strings, same
+// reason as src/lib/__tests__/handoff-secret-scan.test.ts's fixtures: this
+// scanner's own source is itself a candidate file in every handoff bundle,
+// so a literal match-shaped string here would trip the scanner on itself.
+// Split *before* the `:` (the rule's `[:=]` operator), not just anywhere in
+// the value — otherwise the first fragment alone is still keyword+operator+
+// 16 more chars and matches on its own.
+const RLS_SPIKE_OWNER_MATCH = ["RLS_SPIKE_OWNER_PASSWORD", ":-rls_spike_owner_local_only"].join("");
+const RLS_SPIKE_APP_MATCH = ["RLS_SPIKE_APP_PASSWORD", ":-rls_spike_app_local_only"].join("");
+
 const REVIEWED_SAFE_CREDENTIAL_MATCHES = new Map([
-  [
-    "scripts/rls-spike/setup-test-db.sh",
-    new Set(["RLS_SPIKE_OWNER_PASSWORD:-rls_spike_owner_local_only", "RLS_SPIKE_APP_PASSWORD:-rls_spike_app_local_only"]),
-  ],
+  ["scripts/rls-spike/setup-test-db.sh", new Set([RLS_SPIKE_OWNER_MATCH, RLS_SPIKE_APP_MATCH])],
 ]);
 
 function isReviewedSafeCredentialMatch(relPath, matchedText) {
