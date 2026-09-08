@@ -2,6 +2,8 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { auth } from "@/auth";
 import { getAiAvailability } from "@/lib/ai";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { hasPermission } from "@/lib/rbac/authorize";
 import { AssistantPanel } from "@/components/ai/assistant-panel";
 import { Providers } from "./providers";
 import { SignOutButton } from "./sign-out-button";
@@ -26,11 +28,30 @@ function initials(name: string) {
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
-  const isAdmin = session?.user?.role === "ADMIN";
 
   // Resolved on the server so the assistant opens already knowing whether it
   // can answer — the platform never offers an AI affordance that will fail.
-  const aiAvailability = await getAiAvailability();
+  // Phase 1 tenancy (T18): AI availability is per-Organisation, so this needs
+  // a resolved OrganisationContext first. A visitor with no active
+  // membership yet (mid-onboarding, or between organisations) simply sees
+  // the assistant as unavailable, same as being signed out — this layout
+  // renders for both states and must not throw for either.
+  const organisation = await requireOrganisationContext().catch((err) => {
+    if (err instanceof OrganisationAccessError) return null;
+    throw err;
+  });
+  const aiAvailability = organisation
+    ? await getAiAvailability(organisation.organisationId)
+    : { available: false, reason: null, message: null };
+
+  // Nav visibility for the platform-admin section (factor administration,
+  // AI settings) — gated on this Organisation's own current permission
+  // grants (T1A), not the legacy JWT role. Either permission is enough to
+  // show the section; the destination pages each enforce their own,
+  // narrower permission.
+  const canViewPlatformAdmin =
+    organisation !== null &&
+    (hasPermission(organisation, "carbon.factor.view") || hasPermission(organisation, "ai.settings.manage"));
 
   return (
     <Providers>
@@ -72,7 +93,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </div>
         </div>
         <div className="mx-auto max-w-6xl px-4 pb-2">
-          <NavLinks isAdmin={isAdmin} />
+          <NavLinks
+            canViewPlatformAdmin={canViewPlatformAdmin}
+            canManageOrganisation={organisation !== null && hasPermission(organisation, "organisation.membership.manage")}
+            canViewEms={organisation !== null && hasPermission(organisation, "ems.view")}
+          />
         </div>
       </header>
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">{children}</main>

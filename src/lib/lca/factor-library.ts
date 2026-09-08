@@ -6,13 +6,26 @@
  * loaded through the same admin importer — this module just queries it with
  * the filters a product modeller needs (category, geography, unit, vintage),
  * and surfaces the lifecycle metadata that corporate reporting doesn't use.
+ *
+ * Phase 1 tenancy (T18): every query here is restricted to platform factor
+ * sets plus the caller's own Organisation's sets — never another tenant's
+ * supplier-specific/customer-created set (PHASE1_FILE_REFACTOR_MAP.md §10).
  */
 
-import { LcaFactorBoundary, LcaItemType, Prisma } from "@prisma/client";
+import { FactorVisibility, LcaFactorBoundary, LcaItemType, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { lcaFactorCategoriesForItemType, LCA_FACTOR_CATEGORIES } from "./factor-categories";
 import { FACTOR_CATEGORIES } from "@/lib/factor-categories";
 import { areUnitsCompatible } from "./units";
+
+function visibleFactorSetFilter(organisationId: string): Prisma.EmissionFactorSetWhereInput {
+  return {
+    OR: [
+      { visibility: FactorVisibility.PLATFORM },
+      { visibility: FactorVisibility.ORGANISATION, ownerOrganisationId: organisationId },
+    ],
+  };
+}
 
 const include = { factorSet: true } as const;
 
@@ -30,7 +43,7 @@ export interface FactorSearchOptions {
   take?: number;
 }
 
-export async function searchFactors(options: FactorSearchOptions = {}): Promise<LibraryFactor[]> {
+export async function searchFactors(organisationId: string, options: FactorSearchOptions = {}): Promise<LibraryFactor[]> {
   const categories = options.category
     ? [options.category]
     : options.itemType
@@ -40,7 +53,10 @@ export async function searchFactors(options: FactorSearchOptions = {}): Promise<
   const where: Prisma.EmissionFactorWhereInput = {
     ...(categories ? { category: { in: categories } } : {}),
     ...(options.region ? { region: { equals: options.region, mode: "insensitive" } } : {}),
-    ...(options.includePlaceholders === false ? { factorSet: { isPlaceholder: false } } : {}),
+    factorSet: {
+      ...(options.includePlaceholders === false ? { isPlaceholder: false } : {}),
+      AND: [visibleFactorSetFilter(organisationId)],
+    },
     ...(options.query
       ? {
           OR: [
@@ -67,8 +83,11 @@ export async function searchFactors(options: FactorSearchOptions = {}): Promise<
   return factors.filter((f) => areUnitsCompatible(f.unit, options.compatibleWithUnit as string));
 }
 
-export async function getFactor(factorId: string): Promise<LibraryFactor | null> {
-  return prisma.emissionFactor.findUnique({ where: { id: factorId }, include });
+export async function getFactor(organisationId: string, factorId: string): Promise<LibraryFactor | null> {
+  return prisma.emissionFactor.findFirst({
+    where: { id: factorId, factorSet: visibleFactorSetFilter(organisationId) },
+    include,
+  });
 }
 
 /** Categories that actually have factors loaded, with counts, for the picker. */

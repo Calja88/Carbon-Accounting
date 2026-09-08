@@ -79,15 +79,16 @@ export interface AiAvailability {
 }
 
 /**
- * Can AI run right now? Used by the UI to show an honest disabled state
- * instead of offering a button that will fail.
+ * Can AI run right now, for this Organisation? Used by the UI to show an
+ * honest disabled state instead of offering a button that will fail.
  */
-export async function getAiAvailability(): Promise<AiAvailability> {
-  // Self-initialising: creates the settings row and loads/refreshes the
-  // model catalogue automatically when a key is present, throttled so this
-  // never becomes a fetch-per-request. No-ops with no key configured.
-  await ensureAiInitialized();
-  const config = await getAiConfig();
+export async function getAiAvailability(organisationId: string): Promise<AiAvailability> {
+  // Self-initialising: creates this Organisation's settings row and loads/
+  // refreshes the platform-wide model catalogue automatically when a key is
+  // present, throttled so this never becomes a fetch-per-request. No-ops
+  // with no key configured.
+  await ensureAiInitialized(organisationId);
+  const config = await getAiConfig(organisationId);
 
   if (!config.aiEnabled) {
     return {
@@ -159,7 +160,7 @@ async function runChain<T>(
   jsonSchema: { name: string; schema: Record<string, unknown> } | null,
 ): Promise<AiRunResult<T>> {
   const started = Date.now();
-  const availability = await getAiAvailability();
+  const availability = await getAiAvailability(options.audit.organisationId);
   const config = availability.config;
 
   const auditBase: AiAuditContext = { ...options.audit, task: options.task, feature: options.feature };
@@ -193,7 +194,7 @@ async function runChain<T>(
   }
 
   if (options.audit.userId) {
-    const verdict = await checkAiRateLimit(options.audit.userId, config);
+    const verdict = await checkAiRateLimit(options.audit.userId, options.audit.organisationId, config);
     if (!verdict.allowed) {
       await fail(new AiUnavailableError("RATE_LIMITED", verdict.reason ?? "Too many AI requests."), "(none)", 0, null);
     }

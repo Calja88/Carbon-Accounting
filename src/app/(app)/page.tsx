@@ -1,9 +1,13 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { AlertTriangle, ArrowRight, CheckCircle2, Clock, FlagTriangleRight } from "lucide-react";
-import { prisma } from "@/lib/prisma";
 import { getSiteQuantityStatus } from "@/lib/entry-status";
 import { buildAnalyticsSnapshot, buildDelta } from "@/lib/analytics-service";
 import { formatRangeLabel, resolveMonthRange } from "@/lib/report-period";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { accessibleSiteFilter, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
+import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ENTITY_LOGOS } from "@/lib/entity-logos";
@@ -21,19 +25,36 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ from?: string; to?: string }>;
 }) {
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) {
+      // UI14: only an unauthenticated visitor belongs at /login. A signed-in
+      // user with no ACTIVE membership (suspended, removed, or never
+      // invited) redirected here too before this fix — and /login itself
+      // redirects a signed-in visitor straight back to /, an infinite loop
+      // that left the account unable to reach any page, including sign-out.
+      if (err.reason === "NOT_AUTHENTICATED") redirect("/login");
+      return <NoOrganisationAccess reason={err.reason} />;
+    }
+    throw err;
+  }
+
   const { from, to } = await searchParams;
   const range = resolveMonthRange(from, to);
-  const analytics = await buildAnalyticsSnapshot(range.periodStart, range.periodEnd);
+  const analytics = await buildAnalyticsSnapshot(context, range.periodStart, range.periodEnd);
 
+  const tenantCtx = toTenantRepositoryContext(context);
   const sites = await prisma.site.findMany({
-    where: { isActive: true },
+    where: tenantWhere(tenantCtx, { isActive: true, ...accessibleSiteFilter(context) }),
     include: { entity: true },
     orderBy: [{ entity: { name: "asc" } }, { name: "asc" }],
   });
 
   const siteSummaries = await Promise.all(
     sites.map(async (site) => {
-      const statuses = await getSiteQuantityStatus(site.id);
+      const statuses = await getSiteQuantityStatus(context, site.id);
       return {
         site,
         missing: statuses.filter((s) => s.status === "missing").length,
@@ -333,6 +354,27 @@ export default async function DashboardPage({
           })}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function NoOrganisationAccess({ reason }: { reason: "NO_ACTIVE_MEMBERSHIP" | "ORGANISATION_NOT_ACCESSIBLE" }) {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center px-4">
+      <div className="w-full max-w-md">
+        <Card>
+          <CardHeader>
+            <CardTitle>No organisation access</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-slate-600">
+              {reason === "NO_ACTIVE_MEMBERSHIP"
+                ? "Your account isn't an active member of any organisation right now. If this is unexpected — for example your access was recently suspended — contact your organisation administrator."
+                : "The organisation you were last using is no longer accessible. Contact your organisation administrator, or sign out and sign back in to pick another organisation."}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

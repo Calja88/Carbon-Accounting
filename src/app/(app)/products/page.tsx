@@ -2,7 +2,8 @@ import Link from "next/link";
 import { Package } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { listProducts } from "@/lib/lca/assessment-service";
-import { canEditLcaData, getLcaActor } from "@/lib/lca/permissions";
+import { canEditLcaData, getLcaContext } from "@/lib/lca/permissions";
+import { redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { DataTable, EmptyState, PageHeading, Td } from "@/components/lca/ui";
@@ -11,8 +12,14 @@ import { CreateProductForm } from "./product-forms";
 export const dynamic = "force-dynamic";
 
 export default async function ProductsPage() {
-  const [products, entities, actor] = await Promise.all([listProducts(), prisma.entity.findMany({ orderBy: { name: "asc" } }), getLcaActor()]);
-  const canEdit = canEditLcaData(actor);
+  const context = await getLcaContext();
+  if (!context) redirect("/login");
+
+  const [products, entities] = await Promise.all([
+    listProducts(context),
+    prisma.entity.findMany({ where: { organisationId: context.organisationId }, orderBy: { name: "asc" } }),
+  ]);
+  const canEdit = canEditLcaData(context);
 
   return (
     <div className="space-y-6">

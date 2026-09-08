@@ -14,6 +14,7 @@
  */
 
 import { AiTaskType } from "@prisma/client";
+import type { OrganisationContext } from "@/lib/organisation/context";
 import { AiActor } from "../authorization";
 import { buildCarbonContext } from "../carbon-context";
 import { formatMethodologyNotes, retrieveMethodologyNotes } from "../methodology";
@@ -46,10 +47,14 @@ function needsCatalogue(question: string): boolean {
   return /\b(missing|collect|record|enter|data point|category|categories|what should|which data|complete)\b/i.test(question);
 }
 
-export async function askCarbonAssistant(actor: AiActor, input: CarbonChatInput): Promise<CarbonChatResult> {
+export async function askCarbonAssistant(
+  organisation: OrganisationContext,
+  actor: AiActor,
+  input: CarbonChatInput,
+): Promise<CarbonChatResult> {
   const nonce = newFenceNonce();
 
-  const context = await buildCarbonContext(actor, {
+  const carbonContext = await buildCarbonContext(organisation, actor, {
     periodStart: input.periodStart,
     periodEnd: input.periodEnd,
     siteId: input.siteId ?? null,
@@ -68,7 +73,7 @@ export async function askCarbonAssistant(actor: AiActor, input: CarbonChatInput)
       "Before describing any period-on-period decrease as a genuine reduction, check the DATA STATUS line in the COMPLETENESS section below. If it says NO_DATA, state plainly that no activity has been recorded for the current period yet and that the total shown reflects missing data, not a measured reduction — never say emissions 'decreased' or 'fell' in that case. If it says PARTIAL_DATA, say the comparison may not be reliable because the current period looks incomplete. Only describe a decrease as real when entry counts for the two periods are broadly comparable.",
       "Write `answer` as the complete, final reply the user will read: natural, concise plain prose or short bullet lists, no headings for a short answer, ready to display exactly as written with nothing added or removed.",
     ].join(" "),
-    context: `OUR DATA:\n${context.text}\n\nOUR METHODOLOGY (authoritative for anything this platform calculates):\n${notes}`,
+    context: `OUR DATA:\n${carbonContext.text}\n\nOUR METHODOLOGY (authoritative for anything this platform calculates):\n${notes}`,
     outputContract: JSON_ONLY_CONTRACT,
     untrustedRules: untrustedContentRules(nonce),
   });
@@ -94,6 +99,7 @@ export async function askCarbonAssistant(actor: AiActor, input: CarbonChatInput)
     requirements: { prefersStructuredOutputs: true },
     audit: {
       userId: actor.userId,
+      organisationId: actor.organisationId,
       siteId: input.siteId ?? null,
       relatedType: "CARBON_CHAT",
       relatedId: null,
@@ -104,5 +110,5 @@ export async function askCarbonAssistant(actor: AiActor, input: CarbonChatInput)
   // state and reasoningSummary are recorded in the audit row (see run.ts)
   // but are never rendered, and any field the model invented beyond this
   // schema was already discarded by the Zod parse before this line runs.
-  return { answer: run.data.answer, periodLabel: context.periodLabel, meta: run.meta };
+  return { answer: run.data.answer, periodLabel: carbonContext.periodLabel, meta: run.meta };
 }

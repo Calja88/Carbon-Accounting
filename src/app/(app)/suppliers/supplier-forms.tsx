@@ -12,7 +12,13 @@ import { Hint, Notice } from "@/components/lca/ui";
 import { BOUNDARY_LABELS, PCF_VERIFICATION_LABELS } from "@/lib/lca/labels";
 import { CONFORMANCE_NOTICE } from "@/lib/lca/pact/types";
 import { emptySupplierState } from "@/lib/lca/form-state";
-import { createSupplierAction, createSupplierPcfAction, importPactDocumentAction } from "./actions";
+import {
+  archiveSupplierAction,
+  archiveSupplierPcfAction,
+  createSupplierAction,
+  createSupplierPcfAction,
+  importPactDocumentAction,
+} from "./actions";
 
 export function CreateSupplierForm({ entities }: { entities: { id: string; name: string }[] }) {
   const [state, formAction, pending] = useActionState(createSupplierAction, emptySupplierState);
@@ -335,6 +341,78 @@ export function PactImportForm({
         <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(false)}>
           Cancel
         </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Archive controls for a supplier and a supplier PCF. Both are archival, not
+ * deletion: existing inventory items and issued assessment versions keep
+ * resolving against the record.
+ */
+export function ArchiveSupplierForm({ supplierId, supplierName }: { supplierId: string; supplierName: string }) {
+  const [state, formAction, pending] = useActionState(archiveSupplierAction, emptySupplierState);
+  const [open, setOpen] = useState(false);
+
+  if (!open) {
+    return <Button size="sm" variant="danger" onClick={() => setOpen(true)}>Archive</Button>;
+  }
+
+  return (
+    <form action={formAction} className="space-y-2 text-left">
+      {state.error && <Notice tone="danger">{state.error}</Notice>}
+      {state.success && <Notice tone="success">{state.message}</Notice>}
+      <input type="hidden" name="supplierId" value={supplierId} />
+      <div>
+        <Label htmlFor={`archive-supplier-reason-${supplierId}`}>Reason</Label>
+        <Input id={`archive-supplier-reason-${supplierId}`} name="reason" required className="mt-1" />
+      </div>
+      <Hint>Archiving also archives this supplier&apos;s footprints. Nothing is deleted.</Hint>
+      <div className="flex gap-2">
+        <Button
+          type="submit"
+          size="sm"
+          variant="danger"
+          disabled={pending}
+          onClick={(event) => { if (!confirm(`Archive "${supplierName}" and its supplier footprints?`)) event.preventDefault(); }}
+        >
+          {pending ? "Archiving…" : "Archive supplier"}
+        </Button>
+        <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
+      </div>
+    </form>
+  );
+}
+
+export function ArchiveSupplierPcfForm({ supplierPcfId, productName }: { supplierPcfId: string; productName: string }) {
+  const [state, formAction, pending] = useActionState(archiveSupplierPcfAction, emptySupplierState);
+  const [open, setOpen] = useState(false);
+
+  if (!open) {
+    return <Button size="sm" variant="danger" onClick={() => setOpen(true)}>Archive</Button>;
+  }
+
+  return (
+    <form action={formAction} className="space-y-2 text-left">
+      {state.error && <Notice tone="danger">{state.error}</Notice>}
+      {state.success && <Notice tone="success">{state.message}</Notice>}
+      <input type="hidden" name="supplierPcfId" value={supplierPcfId} />
+      <div>
+        <Label htmlFor={`archive-pcf-reason-${supplierPcfId}`}>Reason</Label>
+        <Input id={`archive-pcf-reason-${supplierPcfId}`} name="reason" required className="mt-1" />
+      </div>
+      <div className="flex gap-2">
+        <Button
+          type="submit"
+          size="sm"
+          variant="danger"
+          disabled={pending}
+          onClick={(event) => { if (!confirm(`Withdraw "${productName}" from further factor selection?`)) event.preventDefault(); }}
+        >
+          {pending ? "Archiving…" : "Archive footprint"}
+        </Button>
+        <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
       </div>
     </form>
   );

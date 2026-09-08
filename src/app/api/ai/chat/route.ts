@@ -4,6 +4,7 @@ import { carbonAI, AiUnavailableError, resolveAiActor, AiAuthorizationError } fr
 import { assistLca } from "@/lib/ai/services/lca-copilot";
 import { claimDedupeSlot, dedupeKey } from "@/lib/ai/rate-limit";
 import { resolveMonthRange } from "@/lib/report-period";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 
 /**
  * The assistant endpoint, for both the group-wide carbon assistant and the
@@ -31,7 +32,17 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const actor = await resolveAiActor();
+  let organisation;
+  try {
+    organisation = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) {
+      return NextResponse.json({ error: { reason: "UNAUTHENTICATED", message: "Sign in to use the assistant." } }, { status: 401 });
+    }
+    throw err;
+  }
+
+  const actor = await resolveAiActor(organisation);
   if (!actor) {
     return NextResponse.json({ error: { reason: "UNAUTHENTICATED", message: "Sign in to use the assistant." } }, { status: 401 });
   }
@@ -72,7 +83,7 @@ export async function POST(request: NextRequest) {
     }
 
     const range = resolveMonthRange(body.from, body.to);
-    const result = await carbonAI.chat(actor, {
+    const result = await carbonAI.chat(organisation, actor, {
       question: body.question,
       periodStart: range.periodStart,
       periodEnd: range.periodEnd,

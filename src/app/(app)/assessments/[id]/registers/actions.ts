@@ -3,7 +3,6 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { LcaMateriality } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
 import {
   approveAssumption,
   approveExclusion,
@@ -12,17 +11,25 @@ import {
   upsertAssumption,
   upsertExclusion,
 } from "@/lib/lca/registers-service";
-import { checkCanApprove, checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
+import { checkCanApprove, checkCanEditAssessment, getLcaContext, type OrganisationContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import type { AssessmentFormState } from "@/lib/lca/form-state";
 
 
-async function guard(assessmentId: string) {
-  const actor = await getLcaActor();
-  const assessment = await prisma.lcaAssessment.findUnique({ where: { id: assessmentId } });
-  if (!assessment) return { error: "That assessment no longer exists.", actor: null };
-  const permission = checkCanEditAssessment(actor, assessment.status);
-  if (!permission.ok) return { error: permission.reason, actor: null };
-  return { error: null, actor: actor! };
+async function guard(assessmentId: string): Promise<{ error: string; orgContext: null } | { error: null; orgContext: OrganisationContext }> {
+  const orgContext = await getLcaContext();
+  if (!orgContext) return { error: "You must be signed in.", orgContext: null };
+  let assessment;
+  try {
+    assessment = await requireAssessmentInScope(orgContext, assessmentId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return { error: "That assessment no longer exists.", orgContext: null };
+    throw err;
+  }
+  const permission = checkCanEditAssessment(orgContext, assessment.status);
+  if (!permission.ok) return { error: permission.reason, orgContext: null };
+  return { error: null, orgContext };
 }
 
 const assumptionSchema = z.object({
@@ -52,7 +59,7 @@ export async function saveAssumptionAction(
   const check = await guard(data.assessmentId);
   if (check.error) return { error: check.error, success: false };
 
-  await upsertAssumption({
+  await upsertAssumption(check.orgContext!, {
     id: data.assumptionId || null,
     assessmentId: data.assessmentId,
     assumption: data.assumption,
@@ -64,7 +71,7 @@ export async function saveAssumptionAction(
     ownerUserId: data.ownerUserId,
     processId: data.processId,
     inventoryItemId: data.inventoryItemId,
-    actorUserId: check.actor!.id,
+    actorUserId: check.orgContext!.userId,
   });
 
   revalidatePath(`/assessments/${data.assessmentId}`, "layout");
@@ -74,11 +81,11 @@ export async function saveAssumptionAction(
 export async function approveAssumptionAction(formData: FormData): Promise<void> {
   const assessmentId = String(formData.get("assessmentId") ?? "");
   const assumptionId = String(formData.get("assumptionId") ?? "");
-  const actor = await getLcaActor();
-  const permission = checkCanApprove(actor);
+  const context = await getLcaContext();
+  const permission = checkCanApprove(context);
   if (!permission.ok || !assumptionId) return;
 
-  await approveAssumption(assumptionId, actor!.id);
+  await approveAssumption(context!, assumptionId, context!.userId);
   revalidatePath(`/assessments/${assessmentId}`, "layout");
 }
 
@@ -88,7 +95,7 @@ export async function deleteAssumptionAction(formData: FormData): Promise<void> 
   const check = await guard(assessmentId);
   if (check.error || !assumptionId) return;
 
-  await deleteAssumption(assumptionId, check.actor!.id);
+  await deleteAssumption(check.orgContext!, assumptionId, check.orgContext!.userId);
   revalidatePath(`/assessments/${assessmentId}`, "layout");
 }
 
@@ -123,7 +130,7 @@ export async function saveExclusionAction(
     }
   }
 
-  await upsertExclusion({
+  await upsertExclusion(check.orgContext!, {
     id: data.exclusionId || null,
     assessmentId: data.assessmentId,
     excludedItem: data.excludedItem,
@@ -132,7 +139,7 @@ export async function saveExclusionAction(
     estimatedPercentOfTotal: data.estimatedPercentOfTotal?.trim() || null,
     ownerUserId: data.ownerUserId,
     processId: data.processId,
-    actorUserId: check.actor!.id,
+    actorUserId: check.orgContext!.userId,
   });
 
   revalidatePath(`/assessments/${data.assessmentId}`, "layout");
@@ -142,11 +149,11 @@ export async function saveExclusionAction(
 export async function approveExclusionAction(formData: FormData): Promise<void> {
   const assessmentId = String(formData.get("assessmentId") ?? "");
   const exclusionId = String(formData.get("exclusionId") ?? "");
-  const actor = await getLcaActor();
-  const permission = checkCanApprove(actor);
+  const context = await getLcaContext();
+  const permission = checkCanApprove(context);
   if (!permission.ok || !exclusionId) return;
 
-  await approveExclusion(exclusionId, actor!.id);
+  await approveExclusion(context!, exclusionId, context!.userId);
   revalidatePath(`/assessments/${assessmentId}`, "layout");
 }
 
@@ -156,6 +163,6 @@ export async function deleteExclusionAction(formData: FormData): Promise<void> {
   const check = await guard(assessmentId);
   if (check.error || !exclusionId) return;
 
-  await deleteExclusion(exclusionId, check.actor!.id);
+  await deleteExclusion(check.orgContext!, exclusionId, check.orgContext!.userId);
   revalidatePath(`/assessments/${assessmentId}`, "layout");
 }

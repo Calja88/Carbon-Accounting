@@ -31,6 +31,17 @@ import { buildReadinessReport } from "./readiness-service";
 import { runValidation } from "./validation-service";
 import { toMethodologyConfig } from "./methodology";
 import { STAGES_IN_BOUNDARY } from "./labels";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import { assertEntityAccess } from "@/lib/rbac/authorize";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import {
+  accessibleAssessmentFilter,
+  accessibleProductFilter,
+  findTenantAssessmentVersion,
+  requireAssessmentInScope,
+  requireProductInScope,
+} from "@/lib/repositories/lca-repository";
+import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 
 // ---------------------------------------------------------------------------
 // Listing
@@ -46,26 +57,34 @@ const listInclude = {
 
 export type AssessmentListItem = Prisma.LcaAssessmentGetPayload<{ include: typeof listInclude }>;
 
-export async function listAssessments(options: { includeScenarios?: boolean; entityId?: string } = {}) {
+export async function listAssessments(
+  context: OrganisationContext,
+  options: { includeScenarios?: boolean; entityId?: string } = {},
+) {
+  const ctx = toTenantRepositoryContext(context);
   return prisma.lcaAssessment.findMany({
-    where: {
+    where: tenantWhere(ctx, {
       ...(options.includeScenarios ? {} : { isScenario: false }),
       ...(options.entityId ? { entityId: options.entityId } : {}),
-    },
+      ...accessibleAssessmentFilter(context),
+    }),
     include: listInclude,
     orderBy: [{ updatedAt: "desc" }],
   });
 }
 
-export async function listAssessmentsForProduct(productId: string) {
+export async function listAssessmentsForProduct(context: OrganisationContext, productId: string) {
+  await requireProductInScope(context, productId);
+  const ctx = toTenantRepositoryContext(context);
   return prisma.lcaAssessment.findMany({
-    where: { productVersion: { productId }, isScenario: false },
+    where: tenantWhere(ctx, { productVersion: { productId }, isScenario: false }),
     include: listInclude,
     orderBy: [{ createdAt: "desc" }],
   });
 }
 
-export async function getAssessmentHeader(assessmentId: string) {
+export async function getAssessmentHeader(context: OrganisationContext, assessmentId: string) {
+  await requireAssessmentInScope(context, assessmentId);
   return prisma.lcaAssessment.findUnique({
     where: { id: assessmentId },
     include: {
@@ -104,7 +123,24 @@ export interface CreateAssessmentInput {
  * that is in scope but never populated shows up as a gap rather than being
  * quietly absent.
  */
-export async function createAssessment(input: CreateAssessmentInput) {
+export async function createAssessment(context: OrganisationContext, input: CreateAssessmentInput) {
+  assertEntityAccess(context, input.entityId);
+  const ctx = toTenantRepositoryContext(context);
+  const [entity, productVersion] = await Promise.all([
+    prisma.entity.findFirst({ where: tenantWhere(ctx, { id: input.entityId }) }),
+    prisma.productVersion.findUnique({ where: { id: input.productVersionId }, include: { product: true } }),
+  ]);
+  if (!entity) throw new TenantOwnershipError();
+  if (!productVersion || productVersion.product.organisationId !== context.organisationId) {
+    throw new TenantOwnershipError();
+  }
+  if (input.methodologyProfileId) {
+    const profile = await prisma.lcaMethodologyProfile.findUnique({ where: { id: input.methodologyProfileId } });
+    if (!profile || (profile.organisationId !== null && profile.organisationId !== context.organisationId)) {
+      throw new TenantOwnershipError();
+    }
+  }
+
   const boundary = input.boundary ?? LcaBoundary.CRADLE_TO_GATE;
   const stages = STAGES_IN_BOUNDARY[boundary] ?? [];
 
@@ -112,6 +148,7 @@ export async function createAssessment(input: CreateAssessmentInput) {
     const created = await tx.lcaAssessment.create({
       data: {
         entityId: input.entityId,
+        organisationId: context.organisationId,
         productVersionId: input.productVersionId,
         reference: input.reference,
         title: input.title,
@@ -186,13 +223,15 @@ export interface CloneOptions {
  * Runs, results, versions, verifications and the audit trail are deliberately
  * NOT copied: they describe what happened to the original, not to the copy.
  */
-export async function cloneAssessment(options: CloneOptions) {
+export async function cloneAssessment(context: OrganisationContext, options: CloneOptions) {
+  await requireAssessmentInScope(context, options.sourceAssessmentId);
   const source = await loadAssessmentOrThrow(options.sourceAssessmentId);
 
   const clone = await prisma.$transaction(async (tx) => {
     const created = await tx.lcaAssessment.create({
       data: {
         entityId: source.entityId,
+        organisationId: context.organisationId,
         productVersionId: source.productVersionId,
         reference: options.reference,
         title: options.title,
@@ -483,12 +522,13 @@ export async function cloneAssessment(options: CloneOptions) {
 // ---------------------------------------------------------------------------
 
 export async function changeStatus(
+  context: OrganisationContext,
   assessmentId: string,
   to: LcaAssessmentStatus,
   actorUserId: string,
   note?: string | null,
 ) {
-  const assessment = await prisma.lcaAssessment.findUniqueOrThrow({ where: { id: assessmentId } });
+  const assessment = await requireAssessmentInScope(context, assessmentId);
   const from = assessment.status;
 
   const updated = await prisma.lcaAssessment.update({
@@ -580,9 +620,9 @@ export interface IssueVersionInput {
   actorUserId: string;
 }
 
-export async function issueVersion(input: IssueVersionInput) {
+export async function issueVersion(context: OrganisationContext, input: IssueVersionInput) {
+  const assessment = await requireAssessmentInScope(context, input.assessmentId);
   const payload = await buildVersionPayload(input.assessmentId);
-  const assessment = await prisma.lcaAssessment.findUniqueOrThrow({ where: { id: input.assessmentId } });
   const latest = await prisma.lcaAssessmentVersion.findFirst({
     where: { assessmentId: input.assessmentId },
     orderBy: { version: "desc" },
@@ -599,6 +639,7 @@ export async function issueVersion(input: IssueVersionInput) {
     const created = await tx.lcaAssessmentVersion.create({
       data: {
         assessmentId: input.assessmentId,
+        organisationId: context.organisationId,
         version: nextVersion,
         label: input.label ?? null,
         status: LcaVersionStatus.ISSUED,
@@ -642,7 +683,8 @@ export async function issueVersion(input: IssueVersionInput) {
   return version;
 }
 
-export async function listVersions(assessmentId: string) {
+export async function listVersions(context: OrganisationContext, assessmentId: string) {
+  await requireAssessmentInScope(context, assessmentId);
   return prisma.lcaAssessmentVersion.findMany({
     where: { assessmentId },
     include: { issuedBy: true },
@@ -650,7 +692,16 @@ export async function listVersions(assessmentId: string) {
   });
 }
 
-export async function getVersion(versionId: string) {
+/**
+ * Loads an issued/draft version, scoped to the caller's Organisation and
+ * (when `expectedAssessmentId` is supplied, as the versions detail page
+ * always does) verified to belong to that exact assessment — the version
+ * path named in the T17 acceptance criteria.
+ */
+export async function getVersion(context: OrganisationContext, versionId: string, expectedAssessmentId?: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const scoped = await findTenantAssessmentVersion(ctx, versionId, expectedAssessmentId);
+  if (!scoped) return null;
   return prisma.lcaAssessmentVersion.findUnique({
     where: { id: versionId },
     include: { issuedBy: true, assessment: { include: { productVersion: { include: { product: true } }, entity: true } } },
@@ -661,7 +712,14 @@ export async function getVersion(versionId: string) {
  * Marks the old assessment superseded by a new revision and links the two, so
  * an assessment always says which record replaced it.
  */
-export async function supersedeWithRevision(oldAssessmentId: string, newAssessmentId: string, actorUserId: string) {
+export async function supersedeWithRevision(
+  context: OrganisationContext,
+  oldAssessmentId: string,
+  newAssessmentId: string,
+  actorUserId: string,
+) {
+  await requireAssessmentInScope(context, oldAssessmentId);
+  await requireAssessmentInScope(context, newAssessmentId);
   await prisma.$transaction(async (tx) => {
     await tx.lcaAssessment.update({
       where: { id: oldAssessmentId },
@@ -684,9 +742,10 @@ export async function supersedeWithRevision(oldAssessmentId: string, newAssessme
 // Products
 // ---------------------------------------------------------------------------
 
-export async function listProducts(entityId?: string) {
+export async function listProducts(context: OrganisationContext, entityId?: string) {
+  const ctx = toTenantRepositoryContext(context);
   return prisma.product.findMany({
-    where: entityId ? { entityId } : {},
+    where: tenantWhere(ctx, { ...(entityId ? { entityId } : {}), ...accessibleProductFilter(context) }),
     include: {
       entity: true,
       versions: {
@@ -701,7 +760,8 @@ export async function listProducts(entityId?: string) {
   });
 }
 
-export async function getProduct(productId: string) {
+export async function getProduct(context: OrganisationContext, productId: string) {
+  await requireProductInScope(context, productId);
   return prisma.product.findUnique({
     where: { id: productId },
     include: {

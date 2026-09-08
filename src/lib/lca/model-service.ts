@@ -24,6 +24,25 @@ import {
 import { prisma } from "@/lib/prisma";
 import { recordAuditEvent } from "./audit-service";
 import { STAGE_LABELS } from "./labels";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import {
+  findTenantSupplierPcf,
+  requireAssessmentInScope,
+  toTenantRepositoryContext,
+} from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+
+/** Same nested-parent-substitution guard as registers-service's requireRegisterRowInScope, for the lifecycle-model tables. */
+async function requireModelRowInScope(
+  context: OrganisationContext,
+  assessmentId: string,
+  expectedAssessmentId?: string,
+): Promise<void> {
+  if (expectedAssessmentId !== undefined && assessmentId !== expectedAssessmentId) {
+    throw new TenantOwnershipError();
+  }
+  await requireAssessmentInScope(context, assessmentId);
+}
 
 // ---------------------------------------------------------------------------
 // Processes
@@ -46,7 +65,7 @@ export interface UpsertProcessInput {
   actorUserId: string;
 }
 
-export async function upsertProcess(input: UpsertProcessInput) {
+export async function upsertProcess(context: OrganisationContext, input: UpsertProcessInput) {
   const data = {
     parentProcessId: input.parentProcessId || null,
     stage: input.stage,
@@ -63,6 +82,7 @@ export async function upsertProcess(input: UpsertProcessInput) {
 
   if (input.id) {
     const before = await prisma.lcaProcess.findUniqueOrThrow({ where: { id: input.id } });
+    await requireModelRowInScope(context, before.assessmentId, input.assessmentId);
     const updated = await prisma.lcaProcess.update({ where: { id: input.id }, data });
 
     const allocationChanged =
@@ -97,6 +117,8 @@ export async function upsertProcess(input: UpsertProcessInput) {
     return updated;
   }
 
+  await requireModelRowInScope(context, input.assessmentId);
+
   const lastOrder = await prisma.lcaProcess.aggregate({
     where: { assessmentId: input.assessmentId },
     _max: { sortOrder: true },
@@ -119,11 +141,12 @@ export async function upsertProcess(input: UpsertProcessInput) {
   return created;
 }
 
-export async function deleteProcess(processId: string, actorUserId: string) {
+export async function deleteProcess(context: OrganisationContext, processId: string, actorUserId: string) {
   const process = await prisma.lcaProcess.findUniqueOrThrow({
     where: { id: processId },
     include: { _count: { select: { inventoryItems: true, childProcesses: true } } },
   });
+  await requireModelRowInScope(context, process.assessmentId);
 
   if (process._count.inventoryItems > 0) {
     throw new Error(
@@ -163,7 +186,7 @@ export interface UpsertProcessOutputInput {
   actorUserId: string;
 }
 
-export async function upsertProcessOutput(input: UpsertProcessOutputInput) {
+export async function upsertProcessOutput(context: OrganisationContext, input: UpsertProcessOutputInput) {
   const data = {
     name: input.name,
     isAssessedProduct: input.isAssessedProduct,
@@ -176,9 +199,16 @@ export async function upsertProcessOutput(input: UpsertProcessOutputInput) {
     notes: input.notes || null,
   };
 
-  const output = input.id
-    ? await prisma.lcaProcessOutput.update({ where: { id: input.id }, data })
-    : await prisma.lcaProcessOutput.create({ data: { ...data, processId: input.processId } });
+  let output;
+  if (input.id) {
+    const existing = await prisma.lcaProcessOutput.findUniqueOrThrow({ where: { id: input.id }, include: { process: true } });
+    await requireModelRowInScope(context, existing.process.assessmentId, input.assessmentId);
+    output = await prisma.lcaProcessOutput.update({ where: { id: input.id }, data });
+  } else {
+    const process = await prisma.lcaProcess.findUniqueOrThrow({ where: { id: input.processId } });
+    await requireModelRowInScope(context, process.assessmentId, input.assessmentId);
+    output = await prisma.lcaProcessOutput.create({ data: { ...data, processId: input.processId } });
+  }
 
   await recordAuditEvent({
     assessmentId: input.assessmentId,
@@ -193,8 +223,9 @@ export async function upsertProcessOutput(input: UpsertProcessOutputInput) {
   return output;
 }
 
-export async function deleteProcessOutput(outputId: string, assessmentId: string, actorUserId: string) {
-  const output = await prisma.lcaProcessOutput.findUniqueOrThrow({ where: { id: outputId } });
+export async function deleteProcessOutput(context: OrganisationContext, outputId: string, assessmentId: string, actorUserId: string) {
+  const output = await prisma.lcaProcessOutput.findUniqueOrThrow({ where: { id: outputId }, include: { process: true } });
+  await requireModelRowInScope(context, output.process.assessmentId, assessmentId);
   await prisma.lcaProcessOutput.delete({ where: { id: outputId } });
   await recordAuditEvent({
     assessmentId,
@@ -252,7 +283,7 @@ export interface UpsertInventoryItemInput {
   actorUserId: string;
 }
 
-export async function upsertInventoryItem(input: UpsertInventoryItemInput) {
+export async function upsertInventoryItem(context: OrganisationContext, input: UpsertInventoryItemInput) {
   const data = {
     processId: input.processId,
     itemType: input.itemType,
@@ -293,6 +324,7 @@ export async function upsertInventoryItem(input: UpsertInventoryItemInput) {
 
   if (input.id) {
     const before = await prisma.lcaInventoryItem.findUniqueOrThrow({ where: { id: input.id } });
+    await requireModelRowInScope(context, before.assessmentId, input.assessmentId);
     const updated = await prisma.lcaInventoryItem.update({ where: { id: input.id }, data });
 
     const quantityChanged = !before.quantity.equals(updated.quantity) || before.unit !== updated.unit;
@@ -328,6 +360,15 @@ export async function upsertInventoryItem(input: UpsertInventoryItemInput) {
     return updated;
   }
 
+  await requireModelRowInScope(context, input.assessmentId);
+  const process = await prisma.lcaProcess.findUniqueOrThrow({ where: { id: input.processId } });
+  if (process.assessmentId !== input.assessmentId) throw new TenantOwnershipError();
+  if (input.supplierId) {
+    const ctx = toTenantRepositoryContext(context);
+    const supplier = await prisma.supplier.findFirst({ where: { id: input.supplierId, organisationId: ctx.organisationId } });
+    if (!supplier) throw new TenantOwnershipError();
+  }
+
   const lastOrder = await prisma.lcaInventoryItem.aggregate({
     where: { assessmentId: input.assessmentId },
     _max: { sortOrder: true },
@@ -355,8 +396,9 @@ export async function upsertInventoryItem(input: UpsertInventoryItemInput) {
   return created;
 }
 
-export async function deleteInventoryItem(itemId: string, actorUserId: string) {
+export async function deleteInventoryItem(context: OrganisationContext, itemId: string, actorUserId: string) {
   const item = await prisma.lcaInventoryItem.findUniqueOrThrow({ where: { id: itemId } });
+  await requireModelRowInScope(context, item.assessmentId);
 
   // Result rows from historical runs reference this item; keep the runs intact
   // by unlinking rather than cascading a delete through the audit trail.
@@ -401,11 +443,23 @@ export interface AssignFactorInput {
   actorUserId: string;
 }
 
-export async function assignFactor(input: AssignFactorInput) {
+export async function assignFactor(context: OrganisationContext, input: AssignFactorInput) {
   const before = await prisma.lcaInventoryItem.findUniqueOrThrow({
     where: { id: input.inventoryItemId },
     include: { emissionFactor: { include: { factorSet: true } }, supplierPcf: { include: { supplier: true } } },
   });
+  await requireModelRowInScope(context, before.assessmentId, input.assessmentId);
+
+  // EmissionFactor/EmissionFactorSet stay platform-shared reference data (no
+  // tenant check needed), but a supplier PCF is tenant-owned — spec T17
+  // acceptance: "shared/global factors are explicitly distinguished from
+  // tenant-owned supplier factors". A foreign-tenant supplier PCF must never
+  // be resolved into this item's factor selection.
+  if (input.mode === LcaFactorSelectionMode.SUPPLIER_PCF && input.supplierPcfId) {
+    const ctx = toTenantRepositoryContext(context);
+    const pcf = await findTenantSupplierPcf(ctx, input.supplierPcfId);
+    if (!pcf) throw new TenantOwnershipError();
+  }
 
   const updated = await prisma.lcaInventoryItem.update({
     where: { id: input.inventoryItemId },
@@ -484,7 +538,7 @@ export interface UpsertTransportLegInput {
   actorUserId: string;
 }
 
-export async function upsertTransportLeg(input: UpsertTransportLegInput) {
+export async function upsertTransportLeg(context: OrganisationContext, input: UpsertTransportLegInput) {
   const data = {
     sequence: input.sequence,
     mode: input.mode,
@@ -505,9 +559,16 @@ export async function upsertTransportLeg(input: UpsertTransportLegInput) {
     notes: input.notes || null,
   };
 
-  const leg = input.id
-    ? await prisma.lcaTransportLeg.update({ where: { id: input.id }, data })
-    : await prisma.lcaTransportLeg.create({ data: { ...data, inventoryItemId: input.inventoryItemId } });
+  let leg;
+  if (input.id) {
+    const existing = await prisma.lcaTransportLeg.findUniqueOrThrow({ where: { id: input.id }, include: { inventoryItem: true } });
+    await requireModelRowInScope(context, existing.inventoryItem.assessmentId, input.assessmentId);
+    leg = await prisma.lcaTransportLeg.update({ where: { id: input.id }, data });
+  } else {
+    const item = await prisma.lcaInventoryItem.findUniqueOrThrow({ where: { id: input.inventoryItemId } });
+    await requireModelRowInScope(context, item.assessmentId, input.assessmentId);
+    leg = await prisma.lcaTransportLeg.create({ data: { ...data, inventoryItemId: input.inventoryItemId } });
+  }
 
   await recordAuditEvent({
     assessmentId: input.assessmentId,
@@ -522,8 +583,9 @@ export async function upsertTransportLeg(input: UpsertTransportLegInput) {
   return leg;
 }
 
-export async function deleteTransportLeg(legId: string, assessmentId: string, actorUserId: string) {
-  const leg = await prisma.lcaTransportLeg.findUniqueOrThrow({ where: { id: legId } });
+export async function deleteTransportLeg(context: OrganisationContext, legId: string, assessmentId: string, actorUserId: string) {
+  const leg = await prisma.lcaTransportLeg.findUniqueOrThrow({ where: { id: legId }, include: { inventoryItem: true } });
+  await requireModelRowInScope(context, leg.inventoryItem.assessmentId, assessmentId);
   await prisma.$transaction(async (tx) => {
     await tx.lcaCalculationResult.updateMany({ where: { transportLegId: legId }, data: { transportLegId: null } });
     await tx.lcaTransportLeg.delete({ where: { id: legId } });
@@ -563,7 +625,7 @@ export interface UpsertEndOfLifeRouteInput {
   actorUserId: string;
 }
 
-export async function upsertEndOfLifeRoute(input: UpsertEndOfLifeRouteInput) {
+export async function upsertEndOfLifeRoute(context: OrganisationContext, input: UpsertEndOfLifeRouteInput) {
   const data = {
     route: input.route,
     routeDescription: input.routeDescription || null,
@@ -580,9 +642,16 @@ export async function upsertEndOfLifeRoute(input: UpsertEndOfLifeRouteInput) {
     notes: input.notes || null,
   };
 
-  const route = input.id
-    ? await prisma.lcaEndOfLifeRoute.update({ where: { id: input.id }, data })
-    : await prisma.lcaEndOfLifeRoute.create({ data: { ...data, inventoryItemId: input.inventoryItemId } });
+  let route;
+  if (input.id) {
+    const existing = await prisma.lcaEndOfLifeRoute.findUniqueOrThrow({ where: { id: input.id }, include: { inventoryItem: true } });
+    await requireModelRowInScope(context, existing.inventoryItem.assessmentId, input.assessmentId);
+    route = await prisma.lcaEndOfLifeRoute.update({ where: { id: input.id }, data });
+  } else {
+    const item = await prisma.lcaInventoryItem.findUniqueOrThrow({ where: { id: input.inventoryItemId } });
+    await requireModelRowInScope(context, item.assessmentId, input.assessmentId);
+    route = await prisma.lcaEndOfLifeRoute.create({ data: { ...data, inventoryItemId: input.inventoryItemId } });
+  }
 
   await recordAuditEvent({
     assessmentId: input.assessmentId,
@@ -597,8 +666,9 @@ export async function upsertEndOfLifeRoute(input: UpsertEndOfLifeRouteInput) {
   return route;
 }
 
-export async function deleteEndOfLifeRoute(routeId: string, assessmentId: string, actorUserId: string) {
-  const route = await prisma.lcaEndOfLifeRoute.findUniqueOrThrow({ where: { id: routeId } });
+export async function deleteEndOfLifeRoute(context: OrganisationContext, routeId: string, assessmentId: string, actorUserId: string) {
+  const route = await prisma.lcaEndOfLifeRoute.findUniqueOrThrow({ where: { id: routeId }, include: { inventoryItem: true } });
+  await requireModelRowInScope(context, route.inventoryItem.assessmentId, assessmentId);
   await prisma.$transaction(async (tx) => {
     await tx.lcaCalculationResult.updateMany({ where: { endOfLifeRouteId: routeId }, data: { endOfLifeRouteId: null } });
     await tx.lcaEndOfLifeRoute.delete({ where: { id: routeId } });
@@ -632,7 +702,10 @@ export async function loadModel(assessmentId: string) {
   return prisma.lcaAssessment.findUnique({ where: { id: assessmentId }, include: modelInclude });
 }
 
-export async function getInventoryItem(itemId: string) {
+export async function getInventoryItem(context: OrganisationContext, itemId: string, expectedAssessmentId?: string) {
+  const item = await prisma.lcaInventoryItem.findUnique({ where: { id: itemId }, select: { assessmentId: true } });
+  if (!item) return null;
+  await requireModelRowInScope(context, item.assessmentId, expectedAssessmentId);
   return prisma.lcaInventoryItem.findUnique({
     where: { id: itemId },
     include: {

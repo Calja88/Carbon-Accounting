@@ -2,10 +2,12 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createActivityEntryWithCalculations } from "@/lib/entries-service";
 import { resolvePeriod } from "@/lib/period";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { assertSiteAccess, requirePermission } from "@/lib/rbac/authorize";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
 
 const schema = z.object({
   siteId: z.string().min(1),
@@ -30,9 +32,14 @@ export async function submitEntryAction(
   _prevState: EntryFormState,
   formData: FormData,
 ): Promise<EntryFormState> {
-  const session = await auth();
-  if (!session?.user) {
-    return { error: "You must be signed in.", success: false, flagged: false, flagReason: null, awaitingFactor: false };
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) {
+      return { error: "You must be signed in.", success: false, flagged: false, flagReason: null, awaitingFactor: false };
+    }
+    throw err;
   }
 
   const parsed = schema.safeParse(Object.fromEntries(formData));
@@ -55,7 +62,10 @@ export async function submitEntryAction(
   const { periodStart, periodEnd } = resolvePeriod(dataPoint.frequency, data.periodInput);
 
   try {
-    const { entry, calculations, plausibility } = await createActivityEntryWithCalculations({
+    requirePermission(context, "carbon.entry.create");
+    assertSiteAccess(context, data.siteId);
+
+    const { entry, calculations, plausibility } = await createActivityEntryWithCalculations(toTenantRepositoryContext(context), {
       activityDataPointId: dataPoint.id,
       siteId: data.siteId,
       periodStart,
@@ -64,7 +74,7 @@ export async function submitEntryAction(
       rawUnit: data.rawUnit,
       factorOptionId: data.factorOptionId || null,
       supplierName: data.supplierName || null,
-      enteredByUserId: session.user.id,
+      enteredByUserId: context.userId,
       notes: data.notes || undefined,
     });
 

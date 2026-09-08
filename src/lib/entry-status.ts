@@ -2,6 +2,9 @@ import { prisma } from "@/lib/prisma";
 import { defaultPeriodInputValue, periodInputKindForFrequency, resolvePeriod } from "@/lib/period";
 import { formatPeriodLabel } from "@/lib/prompts";
 import { ActivityDataPoint } from "@prisma/client";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import { requireSiteInScope, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 export type QuantityEntryStatus = "submitted" | "flagged" | "missing" | "log" | "awaiting_factor";
 
@@ -11,7 +14,13 @@ export interface SiteDataPointStatus {
   periodLabel: string;
 }
 
-export async function getSiteQuantityStatus(siteId: string): Promise<SiteDataPointStatus[]> {
+export async function getSiteQuantityStatus(
+  context: OrganisationContext,
+  siteId: string,
+): Promise<SiteDataPointStatus[]> {
+  await requireSiteInScope(context, siteId);
+  const ctx = toTenantRepositoryContext(context);
+
   const dataPoints = await prisma.activityDataPoint.findMany({
     where: { formType: { in: ["QUANTITY", "SURVEY"] } },
     orderBy: { sortOrder: "asc" },
@@ -32,11 +41,11 @@ export async function getSiteQuantityStatus(siteId: string): Promise<SiteDataPoi
     let status: QuantityEntryStatus = "missing";
 
     if (dp.formType === "SURVEY") {
-      const survey = await prisma.commutingSurvey.findFirst({ where: { siteId, periodStart } });
+      const survey = await prisma.commutingSurvey.findFirst({ where: tenantWhere(ctx, { siteId, periodStart }) });
       if (survey) status = "submitted";
     } else {
       const entry = await prisma.activityEntry.findFirst({
-        where: { activityDataPointId: dp.id, siteId, periodStart },
+        where: tenantWhere(ctx, { activityDataPointId: dp.id, siteId, periodStart }),
         orderBy: { enteredAt: "desc" },
       });
       if (entry) {
@@ -54,9 +63,12 @@ export async function getSiteQuantityStatus(siteId: string): Promise<SiteDataPoi
   return results;
 }
 
-export async function getSiteContractStatus(siteId: string) {
+export async function getSiteContractStatus(context: OrganisationContext, siteId: string) {
+  await requireSiteInScope(context, siteId);
+  const ctx = toTenantRepositoryContext(context);
+
   const contract = await prisma.siteEnergyContract.findFirst({
-    where: { siteId, effectiveFrom: { lte: new Date() }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }] },
+    where: tenantWhere(ctx, { siteId, effectiveFrom: { lte: new Date() }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }] }),
     orderBy: { effectiveFrom: "desc" },
   });
   return contract;

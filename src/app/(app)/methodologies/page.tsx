@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { listMethodologyProfiles } from "@/lib/lca/registers-service";
-import { canManageMethodology, getLcaActor } from "@/lib/lca/permissions";
+import { canManageMethodology, getLcaContext } from "@/lib/lca/permissions";
+import { redirect } from "next/navigation";
 import {
   ALLOCATION_LABELS,
   BIOGENIC_LABELS,
@@ -12,18 +13,46 @@ import {
 } from "@/lib/lca/labels";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState, FieldList, Notice, PageHeading, SectionCard } from "@/components/lca/ui";
-import { MethodologyForm } from "./methodology-form";
+import { ArchiveMethodologyForm, MethodologyForm } from "./methodology-form";
 
 export const dynamic = "force-dynamic";
 
 export default async function MethodologiesPage() {
-  const [profiles, entities, actor] = await Promise.all([
-    listMethodologyProfiles(),
-    prisma.entity.findMany({ orderBy: { name: "asc" } }),
-    getLcaActor(),
+  const context = await getLcaContext();
+  if (!context) redirect("/login");
+
+  const [profiles, entities] = await Promise.all([
+    listMethodologyProfiles(context),
+    prisma.entity.findMany({ where: { organisationId: context.organisationId }, orderBy: { name: "asc" } }),
   ]);
 
-  const canEdit = canManageMethodology(actor);
+  const canEdit = canManageMethodology(context);
+
+  // Part B: a profile cited by an ISSUED assessment version has its normative
+  // fields frozen (see `assertMethodologyProfileEditable`). Surface that here
+  // so the state is visible before someone opens the edit form.
+  const issuedByProfile = await prisma.lcaAssessmentVersion.groupBy({
+    by: ["assessmentId"],
+    where: {
+      status: "ISSUED",
+      organisationId: context.organisationId,
+      assessment: { methodologyProfileId: { in: profiles.map((profile) => profile.id) } },
+    },
+    _count: { _all: true },
+  });
+  const issuedAssessmentIds = new Set(issuedByProfile.map((row) => row.assessmentId));
+  const issuedCounts = new Map<string, number>();
+  if (issuedAssessmentIds.size > 0) {
+    const assessments = await prisma.lcaAssessment.findMany({
+      where: { id: { in: [...issuedAssessmentIds] }, organisationId: context.organisationId },
+      select: { id: true, methodologyProfileId: true },
+    });
+    for (const assessment of assessments) {
+      if (!assessment.methodologyProfileId) continue;
+      const count = issuedByProfile.find((row) => row.assessmentId === assessment.id)?._count._all ?? 0;
+      issuedCounts.set(assessment.methodologyProfileId, (issuedCounts.get(assessment.methodologyProfileId) ?? 0) + count);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -55,10 +84,16 @@ export default async function MethodologiesPage() {
             actions={
               <div className="flex items-center gap-2">
                 {profile.isDefault && <Badge tone="success">Default</Badge>}
+                {profile.archivedAt && <Badge tone="neutral">Archived</Badge>}
+                {(issuedCounts.get(profile.id) ?? 0) > 0 && (
+                  <Badge tone="warning">
+                    Methodology frozen · {issuedCounts.get(profile.id)} issued version{issuedCounts.get(profile.id) === 1 ? "" : "s"}
+                  </Badge>
+                )}
                 <Badge tone="neutral">
                   {profile._count.assessments} assessment{profile._count.assessments === 1 ? "" : "s"}
                 </Badge>
-                {canEdit && (
+                {canEdit && !profile.archivedAt && (
                   <MethodologyForm
                     trigger="edit"
                     entities={entities.map((e) => ({ id: e.id, name: e.name }))}
@@ -92,6 +127,9 @@ export default async function MethodologiesPage() {
                       isDefault: profile.isDefault,
                     }}
                   />
+                )}
+                {canEdit && !profile.archivedAt && profile.organisationId === context.organisationId && (
+                  <ArchiveMethodologyForm profileId={profile.id} label={`${profile.name} ${profile.version}`} />
                 )}
               </div>
             }

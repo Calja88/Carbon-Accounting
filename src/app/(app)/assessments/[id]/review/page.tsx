@@ -4,7 +4,10 @@ import { Trash2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { buildReadinessReport, ALLOWED_TRANSITIONS, checkStatusTransition, READINESS_DESCRIPTIONS } from "@/lib/lca/readiness-service";
 import { groupIssuesBySection, SEVERITY_TONES } from "@/lib/lca/validation-service";
-import { canApproveLca, getLcaActor } from "@/lib/lca/permissions";
+import { canApproveLca, getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { ASSURANCE_LABELS, STATUS_LABELS, STATUS_ORDER } from "@/lib/lca/labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,10 +29,18 @@ export const dynamic = "force-dynamic";
 
 export default async function ReviewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [assessment, readiness, actor] = await Promise.all([
+  const context = await getLcaContext();
+  if (!context) notFound();
+  try {
+    await requireAssessmentInScope(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
+
+  const [assessment, readiness] = await Promise.all([
     prisma.lcaAssessment.findUnique({ where: { id } }),
     buildReadinessReport(id),
-    getLcaActor(),
   ]);
   if (!assessment) notFound();
 
@@ -42,7 +53,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ id: str
     prisma.lcaAssessmentVersion.findMany({ where: { assessmentId: id }, orderBy: { version: "desc" } }),
   ]);
 
-  const canApprove = canApproveLca(actor);
+  const canApprove = canApproveLca(context);
   const validation = readiness.validation;
   const grouped = groupIssuesBySection(validation);
 

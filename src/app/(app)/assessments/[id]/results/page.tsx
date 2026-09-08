@@ -5,6 +5,10 @@ import { getLatestRun, loadAssessment, resultsToAnalysisRows, runTotals } from "
 import { analyseContributions, summariseDataQuality } from "@/lib/lca/analysis";
 import { LIFECYCLE_STAGE_ORDER, CLASSIFICATION_LABELS, STAGE_LABELS } from "@/lib/lca/labels";
 import { toMethodologyConfig } from "@/lib/lca/methodology";
+import { getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import {
   CLASSIFICATION_COLORS,
   DATA_TYPE_COLORS,
@@ -22,6 +26,15 @@ export const dynamic = "force-dynamic";
 
 export default async function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const context = await getLcaContext();
+  if (!context) notFound();
+  try {
+    await requireAssessmentInScope(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
+
   const [assessment, run] = await Promise.all([loadAssessment(id), getLatestRun(id)]);
   if (!assessment) notFound();
 

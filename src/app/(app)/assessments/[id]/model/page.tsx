@@ -4,7 +4,10 @@ import { prisma } from "@/lib/prisma";
 import { loadModel } from "@/lib/lca/model-service";
 import { toEngineAssessment, loadAssessmentOrThrow } from "@/lib/lca/calculation-service";
 import { resolveAllocations } from "@/lib/lca/engine/allocation";
-import { checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
+import { checkCanEditAssessment, getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { ALLOCATION_LABELS, LIFECYCLE_STAGE_ORDER, STAGE_DESCRIPTIONS, STAGE_LABELS } from "@/lib/lca/labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,10 +19,19 @@ export const dynamic = "force-dynamic";
 
 export default async function ModelPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [model, actor] = await Promise.all([loadModel(id), getLcaActor()]);
+  const context = await getLcaContext();
+  if (!context) notFound();
+  try {
+    await requireAssessmentInScope(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
+
+  const model = await loadModel(id);
   if (!model) notFound();
 
-  const permission = checkCanEditAssessment(actor, model.status);
+  const permission = checkCanEditAssessment(context, model.status);
   const canEdit = permission.ok;
 
   // The allocation factors shown here are the same ones the engine will use —

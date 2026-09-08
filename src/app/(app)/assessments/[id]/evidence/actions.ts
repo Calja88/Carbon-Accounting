@@ -1,9 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
 import { createEvidence, deleteEvidence, EvidenceError, MAX_EVIDENCE_BYTES } from "@/lib/lca/evidence-service";
-import { checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
+import { checkCanEditAssessment, getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import type { AssessmentFormState } from "@/lib/lca/form-state";
 
 
@@ -12,11 +13,17 @@ export async function uploadEvidenceAction(
   formData: FormData,
 ): Promise<AssessmentFormState> {
   const assessmentId = String(formData.get("assessmentId") ?? "");
-  const actor = await getLcaActor();
-  const assessment = await prisma.lcaAssessment.findUnique({ where: { id: assessmentId } });
-  if (!assessment) return { error: "That assessment no longer exists.", success: false };
+  const context = await getLcaContext();
+  if (!context) return { error: "You must be signed in.", success: false };
+  let assessment;
+  try {
+    assessment = await requireAssessmentInScope(context, assessmentId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return { error: "That assessment no longer exists.", success: false };
+    throw err;
+  }
 
-  const permission = checkCanEditAssessment(actor, assessment.status);
+  const permission = checkCanEditAssessment(context, assessment.status);
   if (!permission.ok) return { error: permission.reason, success: false };
 
   const title = String(formData.get("title") ?? "").trim();
@@ -41,11 +48,11 @@ export async function uploadEvidenceAction(
   }
 
   try {
-    await createEvidence({
+    await createEvidence(context, {
       assessmentId,
       title,
       description: String(formData.get("description") ?? "").trim() || null,
-      actorUserId: actor!.id,
+      actorUserId: context.userId,
       externalUrl: externalUrl || null,
       file: filePayload,
       processId: String(formData.get("processId") ?? "") || null,
@@ -57,6 +64,7 @@ export async function uploadEvidenceAction(
     });
   } catch (error) {
     if (error instanceof EvidenceError) return { error: error.message, success: false };
+    if (error instanceof TenantOwnershipError) return { error: "One of the selected links no longer exists.", success: false };
     throw error;
   }
 
@@ -67,13 +75,19 @@ export async function uploadEvidenceAction(
 export async function deleteEvidenceAction(formData: FormData): Promise<void> {
   const assessmentId = String(formData.get("assessmentId") ?? "");
   const evidenceId = String(formData.get("evidenceId") ?? "");
-  const actor = await getLcaActor();
-  const assessment = await prisma.lcaAssessment.findUnique({ where: { id: assessmentId } });
-  if (!assessment) return;
+  const context = await getLcaContext();
+  if (!context) return;
+  let assessment;
+  try {
+    assessment = await requireAssessmentInScope(context, assessmentId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return;
+    throw err;
+  }
 
-  const permission = checkCanEditAssessment(actor, assessment.status);
+  const permission = checkCanEditAssessment(context, assessment.status);
   if (!permission.ok || !evidenceId) return;
 
-  await deleteEvidence(evidenceId, actor!.id);
+  await deleteEvidence(context, evidenceId, context.userId);
   revalidatePath(`/assessments/${assessmentId}`, "layout");
 }

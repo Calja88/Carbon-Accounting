@@ -16,6 +16,9 @@ import {
   type ColumnRole,
 } from "@/lib/expensein-import";
 import { INITIAL_PREVIEW_STATE, type PreviewState } from "./types";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { assertSiteAccess, requirePermission } from "@/lib/rbac/authorize";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
 
 const TRAVEL_SUBTYPES = ["rail", "flight_domestic", "flight_short_haul", "flight_long_haul", "hotel"] as const;
 
@@ -124,11 +127,23 @@ export async function commitExpenseInAction(
   prevState: PreviewState,
   formData: FormData,
 ): Promise<PreviewState> {
-  const session = await auth();
-  if (!session?.user) return fail(prevState, "You must be signed in.");
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) return fail(prevState, "You must be signed in.");
+    throw err;
+  }
 
   const siteId = formData.get("siteId");
   if (typeof siteId !== "string" || !siteId) return fail(prevState, "Missing site.");
+
+  try {
+    requirePermission(context, "carbon.entry.create");
+    assertSiteAccess(context, siteId);
+  } catch {
+    return fail(prevState, "You do not have access to that site.");
+  }
 
   const payloadRaw = formData.get("rowsJson");
   if (typeof payloadRaw !== "string" || !payloadRaw) return fail(prevState, "Nothing to import — run a preview first.");
@@ -159,7 +174,7 @@ export async function commitExpenseInAction(
     if (Number.isNaN(periodStart.getTime())) return fail(prevState, "A previewed row had an unreadable period.");
     const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
 
-    const { entry, calculations } = await createActivityEntryWithCalculations({
+    const { entry, calculations } = await createActivityEntryWithCalculations(toTenantRepositoryContext(context), {
       activityDataPointId: dataPoint.id,
       siteId,
       periodStart,
@@ -167,7 +182,7 @@ export async function commitExpenseInAction(
       rawValue: row.value,
       rawUnit: TRAVEL_SUBTYPE_UNITS[row.subtype],
       factorOptionId: option.id,
-      enteredByUserId: session.user.id,
+      enteredByUserId: context.userId,
       notes: `Imported from ExpenseIn — ${row.rowCount} expense line${row.rowCount === 1 ? "" : "s"} aggregated for ${monthLabel(periodStart)}.`,
     });
 

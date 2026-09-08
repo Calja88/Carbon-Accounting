@@ -7,7 +7,8 @@ import { getLatestRun } from "@/lib/lca/calculation-service";
 import { searchFactors, factorLabel, factorSummary } from "@/lib/lca/factor-library";
 import { supplierPcfsForItem, pcfPerUnit } from "@/lib/lca/supplier-service";
 import { corporateEntriesForLinking } from "@/lib/lca/registers-service";
-import { checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
+import { checkCanEditAssessment, getLcaContext } from "@/lib/lca/permissions";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import { allowsAvoidedBurden, toMethodologyConfig } from "@/lib/lca/methodology";
 import {
   CLASSIFICATION_LABELS,
@@ -40,27 +41,40 @@ export const dynamic = "force-dynamic";
 
 export default async function InventoryItemPage({ params }: { params: Promise<{ id: string; itemId: string }> }) {
   const { id, itemId } = await params;
-  const [item, actor] = await Promise.all([getInventoryItem(itemId), getLcaActor()]);
+  const context = await getLcaContext();
+  if (!context) notFound();
+
+  let item;
+  try {
+    item = await getInventoryItem(context, itemId, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) notFound();
+    throw err;
+  }
   if (!item || item.assessmentId !== id) notFound();
 
-  const permission = checkCanEditAssessment(actor, item.assessment.status);
+  const permission = checkCanEditAssessment(context, item.assessment.status);
   const canEdit = permission.ok;
   const methodology = toMethodologyConfig(item.assessment.methodologyProfile);
 
   const [run, factorOptions, recycledOptions, supplierPcfs, processes, suppliers, corporateEntries, sites] = await Promise.all([
     getLatestRun(id),
-    searchFactors({ itemType: item.itemType, compatibleWithUnit: item.unit }),
-    searchFactors({ category: "lca_material_recycled", compatibleWithUnit: item.unit }),
-    supplierPcfsForItem(item.assessment.entityId, item.unit),
+    searchFactors(context.organisationId, { itemType: item.itemType, compatibleWithUnit: item.unit }),
+    searchFactors(context.organisationId, { category: "lca_material_recycled", compatibleWithUnit: item.unit }),
+    supplierPcfsForItem(context, item.assessment.entityId, item.unit),
     prisma.lcaProcess.findMany({ where: { assessmentId: id }, orderBy: [{ sortOrder: "asc" }] }),
     prisma.supplier.findMany({ where: { entityId: item.assessment.entityId }, orderBy: { name: "asc" } }),
-    corporateEntriesForLinking({ take: 60 }),
-    prisma.site.findMany({ include: { entity: true }, orderBy: [{ entity: { name: "asc" } }, { name: "asc" }] }),
+    corporateEntriesForLinking(context, { take: 60 }),
+    prisma.site.findMany({
+      where: { organisationId: context.organisationId },
+      include: { entity: true },
+      orderBy: [{ entity: { name: "asc" } }, { name: "asc" }],
+    }),
   ]);
 
   const [freightFactors, eolFactors] = await Promise.all([
-    searchFactors({ itemType: "TRANSPORT" }),
-    searchFactors({ itemType: "END_OF_LIFE", compatibleWithUnit: item.unit }),
+    searchFactors(context.organisationId, { itemType: "TRANSPORT" }),
+    searchFactors(context.organisationId, { itemType: "END_OF_LIFE", compatibleWithUnit: item.unit }),
   ]);
 
   const results = (run?.results ?? []).filter((r) => r.inventoryItemId === itemId);

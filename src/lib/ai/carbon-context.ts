@@ -16,6 +16,7 @@ import { prisma } from "@/lib/prisma";
 import { buildAnalyticsSnapshot } from "@/lib/analytics-service";
 import { formatRangeLabel } from "@/lib/report-period";
 import { AiActor } from "./authorization";
+import type { OrganisationContext } from "@/lib/organisation/context";
 
 function t(kg: number): string {
   return `${(kg / 1000).toFixed(2)} tCO2e`;
@@ -89,8 +90,17 @@ export interface CarbonContext {
  * it is read by a model, and labelled prose survives truncation far better
  * than a nested object does.
  */
-export async function buildCarbonContext(actor: AiActor, options: CarbonContextOptions): Promise<CarbonContext> {
-  const analytics = await buildAnalyticsSnapshot(options.periodStart, options.periodEnd);
+export async function buildCarbonContext(
+  organisation: OrganisationContext,
+  actor: AiActor,
+  options: CarbonContextOptions,
+): Promise<CarbonContext> {
+  // buildAnalyticsSnapshot (T16) requires an OrganisationContext to scope its
+  // queries, resolved by the caller and passed straight through so this
+  // module stays free of session/auth imports. `actor` (T18) is itself
+  // already resolved within that same Organisation — see authorization.ts —
+  // so the siteIds filtering below is tenant-safe as well as scope-safe.
+  const analytics = await buildAnalyticsSnapshot(organisation, options.periodStart, options.periodEnd);
   const periodLabel = formatRangeLabel(options.periodStart, options.periodEnd);
 
   // Authorization filter — applied to the aggregation output, never left to
@@ -174,6 +184,9 @@ export async function buildCarbonContext(actor: AiActor, options: CarbonContextO
     where: {
       effectiveFrom: { lte: options.periodEnd },
       OR: [{ effectiveTo: null }, { effectiveTo: { gte: options.periodStart } }],
+      // Phase 1 tenancy (T18): platform sets plus this organisation's own —
+      // never another tenant's supplier-specific/customer-created set.
+      AND: [{ OR: [{ visibility: "PLATFORM" }, { visibility: "ORGANISATION", ownerOrganisationId: organisation.organisationId }] }],
     },
     select: { name: true, publisher: true, sourceType: true, vintageYear: true, isPlaceholder: true, sourceUrl: true },
     orderBy: { effectiveFrom: "desc" },

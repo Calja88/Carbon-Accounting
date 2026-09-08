@@ -76,10 +76,13 @@ Other commands: `npm test` (Vitest), `npm run build`, `npm run lint`.
 ### Deploying (e.g. Vercel)
 
 1. Provision a reachable Postgres instance (Vercel Postgres, Neon, Supabase, RDS, etc.) — Vercel does not provide one by default.
-2. Set environment variables in the project settings: `DATABASE_URL`, `NEXTAUTH_SECRET` (a real random value, not the dev placeholder), `NEXTAUTH_URL` (your deployed URL). These must be available at **build** time, not just runtime — see below.
+2. Set `DATABASE_URL` to the pooled runtime connection. For release migrations, set `DIRECT_URL` to a direct connection; Neon’s Vercel integration may provide the equivalent as `DATABASE_URL_UNPOOLED`. `prisma.config.ts` derives the direct Neon hostname when neither override is set. Also set `NEXTAUTH_SECRET` and `NEXTAUTH_URL`.
 3. Make sure the Vercel project's **Production Branch** setting actually matches the branch you're deploying (Settings → Git). Vercel serves the production domain from whatever that setting names, defaulting to `main` — if your work is on a differently-named branch and `main` doesn't exist in the repo, the production domain will serve a stale/unrelated deployment instead of your app.
-4. Deploy. `npm run build` now runs `prisma migrate deploy` before `next build` (and `postinstall` already runs `prisma generate` after `npm install`), so every deploy applies any pending schema migrations automatically — `DATABASE_URL` must be reachable and set at build time for this to succeed.
-5. Seed it once: `npm run db:seed` (idempotent — safe to re-run) from a machine that can reach the database directly. This isn't run automatically on every deploy, since it isn't needed after the first time. Either use the seeded demo accounts below, or copy that pattern to create real accounts and remove/rotate the demo ones before real use.
+4. Run `npm run build` to compile the application. Builds are non-mutating and never apply database migrations.
+5. Run `npm run db:migrate:deploy` once per release from an authorised release job that can reach the direct database endpoint. Do not run concurrent migration jobs or use the pooled runtime URL for this step.
+6. Seed it once: `npm run db:seed` (idempotent — safe to re-run) from a machine that can reach the database directly. This isn't run automatically on every deploy, since it isn't needed after the first time. Either use the seeded demo accounts below, or copy that pattern to create real accounts and remove/rotate the demo ones before real use.
+
+The release migration command only auto-recovers migrations explicitly audited as safe to retry. Any other failed migration remains blocked for manual inspection; never mark an unknown failure rolled back without checking `_prisma_migrations.logs` and the database schema.
 
 `db:seed` also inserts the illustrative placeholder life-cycle factors described under "Product LCA / PCF" below. If you want the product LCA module to work on a database where real assessments will be built — i.e. the methodology profile the engine reads, but no unsourced numbers — run `npm run db:seed:lca-methodology` instead. It is idempotent and inserts no factor values.
 

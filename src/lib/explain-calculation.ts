@@ -14,6 +14,9 @@
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 export interface CalculationExplanation {
   calculationId: string;
@@ -93,9 +96,13 @@ function periodLabel(start: Date, end: Date): string {
  * Builds the full deterministic explanation for one calculation, or null if
  * it doesn't exist. Callers are responsible for authorization before calling.
  */
-export async function explainCalculation(calculationId: string): Promise<CalculationExplanation | null> {
-  const calc = await prisma.calculation.findUnique({
-    where: { id: calculationId },
+export async function explainCalculation(
+  context: OrganisationContext,
+  calculationId: string,
+): Promise<CalculationExplanation | null> {
+  const ctx = toTenantRepositoryContext(context);
+  const calc = await prisma.calculation.findFirst({
+    where: tenantWhere(ctx, { id: calculationId }),
     include: {
       calculatedBy: { select: { name: true } },
       emissionFactor: { include: { factorSet: true } },

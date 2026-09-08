@@ -4,6 +4,7 @@ import { AiUnavailableError, carbonAI, resolveAiActor } from "@/lib/ai";
 import { assertSiteInScope } from "@/lib/ai/authorization";
 import { prisma } from "@/lib/prisma";
 import { explainCalculation } from "@/lib/explain-calculation";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 
 export interface ExplainState {
   error: string | null;
@@ -22,7 +23,15 @@ const initial: ExplainState = { error: null, aiUnavailable: false, text: null, m
  * calculation, so there is nothing for it to get arithmetically wrong.
  */
 export async function explainInPlainEnglishAction(_prev: ExplainState, formData: FormData): Promise<ExplainState> {
-  const actor = await resolveAiActor();
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) return { ...initial, error: "You must be signed in." };
+    throw err;
+  }
+
+  const actor = await resolveAiActor(context);
   if (!actor) return { ...initial, error: "You must be signed in." };
 
   const calculationId = String(formData.get("calculationId") ?? "");
@@ -40,7 +49,7 @@ export async function explainInPlainEnglishAction(_prev: ExplainState, formData:
     return { ...initial, error: "That calculation isn't available to you." };
   }
 
-  const explanation = await explainCalculation(calculationId);
+  const explanation = await explainCalculation(context, calculationId);
   if (!explanation) return { ...initial, error: "That calculation doesn't exist." };
 
   const audience = formData.get("audience") === "internal" ? "internal" : "non-technical";

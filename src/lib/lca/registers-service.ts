@@ -8,9 +8,33 @@
  * assumption is not the person who signs it off.
  */
 
-import { LcaAssuranceType, LcaCorporateLinkType, LcaMateriality } from "@prisma/client";
+import { LcaAssuranceType, LcaCorporateLinkType, LcaMateriality, type Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { recordAuditEvent } from "./audit-service";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { findVisibleMethodologyProfile, requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+
+/**
+ * Verifies a register row's parent assessment belongs to the caller's
+ * Organisation and Entity scope (assumptions/exclusions/verifications/
+ * corporate links carry no organisationId of their own — spec §4: composite
+ * parent link). Throws TenantOwnershipError/PermissionDeniedError for a
+ * foreign-tenant assessment, a genuinely missing row, or (when supplied) an
+ * assessmentId that doesn't match the row's actual parent — the
+ * nested-parent-substitution guard.
+ */
+async function requireRegisterRowInScope(
+  context: OrganisationContext,
+  assessmentId: string,
+  expectedAssessmentId?: string,
+): Promise<void> {
+  if (expectedAssessmentId !== undefined && assessmentId !== expectedAssessmentId) {
+    throw new TenantOwnershipError();
+  }
+  await requireAssessmentInScope(context, assessmentId);
+}
 
 // ---------------------------------------------------------------------------
 // Assumptions
@@ -45,7 +69,7 @@ export const ASSUMPTION_CATEGORIES = [
   "Other",
 ];
 
-export async function upsertAssumption(input: UpsertAssumptionInput) {
+export async function upsertAssumption(context: OrganisationContext, input: UpsertAssumptionInput) {
   const data = {
     assumption: input.assumption,
     category: input.category,
@@ -58,14 +82,20 @@ export async function upsertAssumption(input: UpsertAssumptionInput) {
     inventoryItemId: input.inventoryItemId || null,
   };
 
-  const assumption = input.id
-    ? await prisma.lcaAssumption.update({
-        where: { id: input.id },
-        // Editing an approved assumption withdraws its approval — otherwise a
-        // sign-off could be inherited by wording nobody approved.
-        data: { ...data, approvedAt: null, approvedByUserId: null },
-      })
-    : await prisma.lcaAssumption.create({ data: { ...data, assessmentId: input.assessmentId } });
+  let assumption;
+  if (input.id) {
+    const existing = await prisma.lcaAssumption.findUniqueOrThrow({ where: { id: input.id } });
+    await requireRegisterRowInScope(context, existing.assessmentId, input.assessmentId);
+    assumption = await prisma.lcaAssumption.update({
+      where: { id: input.id },
+      // Editing an approved assumption withdraws its approval — otherwise a
+      // sign-off could be inherited by wording nobody approved.
+      data: { ...data, approvedAt: null, approvedByUserId: null },
+    });
+  } else {
+    await requireRegisterRowInScope(context, input.assessmentId);
+    assumption = await prisma.lcaAssumption.create({ data: { ...data, assessmentId: input.assessmentId } });
+  }
 
   await recordAuditEvent({
     assessmentId: input.assessmentId,
@@ -82,7 +112,9 @@ export async function upsertAssumption(input: UpsertAssumptionInput) {
   return assumption;
 }
 
-export async function approveAssumption(assumptionId: string, actorUserId: string) {
+export async function approveAssumption(context: OrganisationContext, assumptionId: string, actorUserId: string) {
+  const existing = await prisma.lcaAssumption.findUniqueOrThrow({ where: { id: assumptionId } });
+  await requireRegisterRowInScope(context, existing.assessmentId);
   const assumption = await prisma.lcaAssumption.update({
     where: { id: assumptionId },
     data: { approvedByUserId: actorUserId, approvedAt: new Date() },
@@ -101,8 +133,9 @@ export async function approveAssumption(assumptionId: string, actorUserId: strin
   return assumption;
 }
 
-export async function deleteAssumption(assumptionId: string, actorUserId: string) {
+export async function deleteAssumption(context: OrganisationContext, assumptionId: string, actorUserId: string) {
   const assumption = await prisma.lcaAssumption.findUniqueOrThrow({ where: { id: assumptionId } });
+  await requireRegisterRowInScope(context, assumption.assessmentId);
   await prisma.$transaction(async (tx) => {
     await tx.lcaEvidence.updateMany({ where: { assumptionId }, data: { assumptionId: null } });
     await tx.lcaAssumption.delete({ where: { id: assumptionId } });
@@ -150,7 +183,7 @@ export interface UpsertExclusionInput {
   actorUserId: string;
 }
 
-export async function upsertExclusion(input: UpsertExclusionInput) {
+export async function upsertExclusion(context: OrganisationContext, input: UpsertExclusionInput) {
   const data = {
     excludedItem: input.excludedItem,
     rationale: input.rationale,
@@ -160,12 +193,18 @@ export async function upsertExclusion(input: UpsertExclusionInput) {
     processId: input.processId || null,
   };
 
-  const exclusion = input.id
-    ? await prisma.lcaExclusion.update({
-        where: { id: input.id },
-        data: { ...data, approvedAt: null, approvedByUserId: null },
-      })
-    : await prisma.lcaExclusion.create({ data: { ...data, assessmentId: input.assessmentId } });
+  let exclusion;
+  if (input.id) {
+    const existing = await prisma.lcaExclusion.findUniqueOrThrow({ where: { id: input.id } });
+    await requireRegisterRowInScope(context, existing.assessmentId, input.assessmentId);
+    exclusion = await prisma.lcaExclusion.update({
+      where: { id: input.id },
+      data: { ...data, approvedAt: null, approvedByUserId: null },
+    });
+  } else {
+    await requireRegisterRowInScope(context, input.assessmentId);
+    exclusion = await prisma.lcaExclusion.create({ data: { ...data, assessmentId: input.assessmentId } });
+  }
 
   await recordAuditEvent({
     assessmentId: input.assessmentId,
@@ -182,7 +221,9 @@ export async function upsertExclusion(input: UpsertExclusionInput) {
   return exclusion;
 }
 
-export async function approveExclusion(exclusionId: string, actorUserId: string) {
+export async function approveExclusion(context: OrganisationContext, exclusionId: string, actorUserId: string) {
+  const existing = await prisma.lcaExclusion.findUniqueOrThrow({ where: { id: exclusionId } });
+  await requireRegisterRowInScope(context, existing.assessmentId);
   const exclusion = await prisma.lcaExclusion.update({
     where: { id: exclusionId },
     data: { approvedByUserId: actorUserId, approvedAt: new Date() },
@@ -201,8 +242,9 @@ export async function approveExclusion(exclusionId: string, actorUserId: string)
   return exclusion;
 }
 
-export async function deleteExclusion(exclusionId: string, actorUserId: string) {
+export async function deleteExclusion(context: OrganisationContext, exclusionId: string, actorUserId: string) {
   const exclusion = await prisma.lcaExclusion.findUniqueOrThrow({ where: { id: exclusionId } });
+  await requireRegisterRowInScope(context, exclusion.assessmentId);
   await prisma.$transaction(async (tx) => {
     await tx.lcaEvidence.updateMany({ where: { exclusionId }, data: { exclusionId: null } });
     await tx.lcaExclusion.delete({ where: { id: exclusionId } });
@@ -255,7 +297,8 @@ export interface RecordVerificationInput {
  * Records what an external verifier said. The platform never generates or
  * infers this: it stores a third party's statement, attributed to them.
  */
-export async function recordVerification(input: RecordVerificationInput) {
+export async function recordVerification(context: OrganisationContext, input: RecordVerificationInput) {
+  await requireRegisterRowInScope(context, input.assessmentId);
   const verification = await prisma.lcaVerification.create({
     data: {
       assessmentId: input.assessmentId,
@@ -300,8 +343,9 @@ export async function listVerifications(assessmentId: string) {
   });
 }
 
-export async function deleteVerification(verificationId: string, actorUserId: string) {
+export async function deleteVerification(context: OrganisationContext, verificationId: string, actorUserId: string) {
   const verification = await prisma.lcaVerification.findUniqueOrThrow({ where: { id: verificationId } });
+  await requireRegisterRowInScope(context, verification.assessmentId);
   await prisma.$transaction(async (tx) => {
     await tx.lcaEvidence.updateMany({ where: { verificationId }, data: { verificationId: null } });
     await tx.lcaVerification.delete({ where: { id: verificationId } });
@@ -343,16 +387,28 @@ export interface CreateCorporateLinkInput {
  * link is what stops the same underlying meter reading being described two
  * different ways in two different reports with no way to tell.
  */
-export async function createCorporateLink(input: CreateCorporateLinkInput) {
-  const [item, activityEntry] = await Promise.all([
-    prisma.lcaInventoryItem.findUniqueOrThrow({ where: { id: input.inventoryItemId } }),
-    input.activityEntryId
-      ? prisma.activityEntry.findUnique({
-          where: { id: input.activityEntryId },
-          include: { activityDataPoint: true, site: true },
-        })
-      : Promise.resolve(null),
-  ]);
+export async function createCorporateLink(context: OrganisationContext, input: CreateCorporateLinkInput) {
+  const item = await prisma.lcaInventoryItem.findUniqueOrThrow({ where: { id: input.inventoryItemId } });
+  await requireRegisterRowInScope(context, item.assessmentId, input.assessmentId);
+
+  // A corporate citation is only ever a reference (spec T17 acceptance:
+  // "corporate citations cannot link across organisations") — the
+  // ActivityEntry/Site being cited must belong to the same Organisation as
+  // the product assessment doing the citing, checked in the query itself,
+  // not after the fact.
+  const carbonCtx = toTenantRepositoryContext(context);
+  const activityEntry = input.activityEntryId
+    ? await prisma.activityEntry.findFirst({
+        where: tenantWhere(carbonCtx, { id: input.activityEntryId }),
+        include: { activityDataPoint: true, site: true },
+      })
+    : null;
+  if (input.activityEntryId && !activityEntry) throw new TenantOwnershipError();
+
+  if (input.siteId) {
+    const site = await prisma.site.findFirst({ where: tenantWhere(carbonCtx, { id: input.siteId }) });
+    if (!site) throw new TenantOwnershipError();
+  }
 
   const link = await prisma.lcaCorporateDataLink.create({
     data: {
@@ -385,11 +441,12 @@ export async function createCorporateLink(input: CreateCorporateLinkInput) {
   return link;
 }
 
-export async function deleteCorporateLink(linkId: string, assessmentId: string, actorUserId: string) {
+export async function deleteCorporateLink(context: OrganisationContext, linkId: string, assessmentId: string, actorUserId: string) {
   const link = await prisma.lcaCorporateDataLink.findUniqueOrThrow({
     where: { id: linkId },
-    include: { inventoryItem: { select: { name: true } } },
+    include: { inventoryItem: { select: { name: true, assessmentId: true } } },
   });
+  await requireRegisterRowInScope(context, link.inventoryItem.assessmentId, assessmentId);
   await prisma.lcaCorporateDataLink.delete({ where: { id: linkId } });
   await recordAuditEvent({
     assessmentId,
@@ -407,20 +464,24 @@ export async function deleteCorporateLink(linkId: string, assessmentId: string, 
  * facility energy, fuel and Scope 3 records already held for the sites this
  * product is made at.
  */
-export async function corporateEntriesForLinking(options: {
-  siteIds?: string[];
-  periodStart?: Date | null;
-  periodEnd?: Date | null;
-  take?: number;
-}) {
+export async function corporateEntriesForLinking(
+  context: OrganisationContext,
+  options: {
+    siteIds?: string[];
+    periodStart?: Date | null;
+    periodEnd?: Date | null;
+    take?: number;
+  },
+) {
+  const carbonCtx = toTenantRepositoryContext(context);
   return prisma.activityEntry.findMany({
-    where: {
+    where: tenantWhere<Prisma.ActivityEntryWhereInput>(carbonCtx, {
       ...(options.siteIds && options.siteIds.length > 0 ? { siteId: { in: options.siteIds } } : {}),
       ...(options.periodStart && options.periodEnd
         ? { periodStart: { gte: options.periodStart }, periodEnd: { lte: options.periodEnd } }
         : {}),
       status: { not: "REJECTED" },
-    },
+    }),
     include: {
       activityDataPoint: true,
       site: { include: { entity: true } },
@@ -433,7 +494,8 @@ export async function corporateEntriesForLinking(options: {
 
 export type CorporateEntryOption = Awaited<ReturnType<typeof corporateEntriesForLinking>>[number];
 
-export async function listCorporateLinks(assessmentId: string) {
+export async function listCorporateLinks(context: OrganisationContext, assessmentId: string) {
+  await requireRegisterRowInScope(context, assessmentId);
   return prisma.lcaCorporateDataLink.findMany({
     where: { inventoryItem: { assessmentId } },
     include: {
@@ -449,15 +511,28 @@ export async function listCorporateLinks(assessmentId: string) {
 // Methodology profiles
 // ---------------------------------------------------------------------------
 
-export async function listMethodologyProfiles(entityId?: string) {
+/**
+ * Visible methodology profiles: the caller's own Organisation's profiles,
+ * plus any platform-shared (null organisationId) profile — never another
+ * tenant's (spec §11: platform-global reference data is explicit).
+ */
+export async function listMethodologyProfiles(context: OrganisationContext, entityId?: string) {
   return prisma.lcaMethodologyProfile.findMany({
-    where: entityId ? { OR: [{ entityId }, { entityId: null }] } : {},
+    where: {
+      AND: [
+        { OR: [{ organisationId: context.organisationId }, { organisationId: null }] },
+        entityId ? { OR: [{ entityId }, { entityId: null }] } : {},
+      ],
+    },
     include: { entity: true, _count: { select: { assessments: true } } },
     orderBy: [{ isDefault: "desc" }, { name: "asc" }, { version: "desc" }],
   });
 }
 
-export async function getMethodologyProfile(profileId: string) {
+export async function getMethodologyProfile(context: OrganisationContext, profileId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const visible = await findVisibleMethodologyProfile(ctx, profileId);
+  if (!visible) return null;
   return prisma.lcaMethodologyProfile.findUnique({
     where: { id: profileId },
     include: {

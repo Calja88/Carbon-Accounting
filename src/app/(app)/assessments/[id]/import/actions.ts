@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/prisma";
 import {
   parseInventoryFile,
   validateInventoryRows,
@@ -9,17 +8,25 @@ import {
   type PreparedInventoryRow,
 } from "@/lib/lca/import/inventory-import";
 import { buildImportContext, commitInventoryImport } from "@/lib/lca/import/inventory-import-service";
-import { checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
+import { checkCanEditAssessment, getLcaContext, type OrganisationContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import { emptyImportState, type ImportState } from "@/lib/lca/form-state";
 
 
-async function guard(assessmentId: string) {
-  const actor = await getLcaActor();
-  const assessment = await prisma.lcaAssessment.findUnique({ where: { id: assessmentId } });
-  if (!assessment) return { error: "That assessment no longer exists.", actor: null };
-  const permission = checkCanEditAssessment(actor, assessment.status);
-  if (!permission.ok) return { error: permission.reason, actor: null };
-  return { error: null, actor: actor! };
+async function guard(assessmentId: string): Promise<{ error: string; orgContext: null } | { error: null; orgContext: OrganisationContext }> {
+  const orgContext = await getLcaContext();
+  if (!orgContext) return { error: "You must be signed in.", orgContext: null };
+  let assessment;
+  try {
+    assessment = await requireAssessmentInScope(orgContext, assessmentId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) return { error: "That assessment no longer exists.", orgContext: null };
+    throw err;
+  }
+  const permission = checkCanEditAssessment(orgContext, assessment.status);
+  if (!permission.ok) return { error: permission.reason, orgContext: null };
+  return { error: null, orgContext };
 }
 
 /**
@@ -79,11 +86,11 @@ export async function commitImportAction(_prev: ImportState, formData: FormData)
     return { ...emptyImportState, error: "There are no importable rows to write." };
   }
 
-  const outcome = await commitInventoryImport({
+  const outcome = await commitInventoryImport(check.orgContext!, {
     assessmentId,
     rows,
     duplicateStrategy,
-    actorUserId: check.actor!.id,
+    actorUserId: check.orgContext!.userId,
     fileName,
   });
 

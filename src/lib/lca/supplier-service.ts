@@ -20,14 +20,19 @@ import { D, toNumber } from "./decimal";
 import { areUnitsCompatible } from "./units";
 import { recordAuditEvent } from "./audit-service";
 import { fromPactFootprint, type PactImportResult } from "./pact/adapter";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import { assertEntityAccess } from "@/lib/rbac/authorize";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { findTenantSupplierPcf, requireSupplierInScope } from "@/lib/repositories/lca-repository";
+import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 
 // ---------------------------------------------------------------------------
 // Suppliers
 // ---------------------------------------------------------------------------
 
-export async function listSuppliers(entityId?: string) {
+export async function listSuppliers(context: OrganisationContext, entityId?: string) {
   return prisma.supplier.findMany({
-    where: entityId ? { entityId } : {},
+    where: { organisationId: context.organisationId, ...(entityId ? { entityId } : {}) },
     include: {
       entity: true,
       _count: { select: { productPcfs: true, inventoryItems: true } },
@@ -36,7 +41,8 @@ export async function listSuppliers(entityId?: string) {
   });
 }
 
-export async function getSupplier(supplierId: string) {
+export async function getSupplier(context: OrganisationContext, supplierId: string) {
+  await requireSupplierInScope(context, supplierId);
   return prisma.supplier.findUnique({
     where: { id: supplierId },
     include: {
@@ -59,10 +65,16 @@ export interface CreateSupplierInput {
   actorUserId: string;
 }
 
-export async function createSupplier(input: CreateSupplierInput) {
+export async function createSupplier(context: OrganisationContext, input: CreateSupplierInput) {
+  assertEntityAccess(context, input.entityId);
+  const ctx = toTenantRepositoryContext(context);
+  const entity = await prisma.entity.findFirst({ where: tenantWhere(ctx, { id: input.entityId }) });
+  if (!entity) throw new TenantOwnershipError();
+
   const supplier = await prisma.supplier.create({
     data: {
       entityId: input.entityId,
+      organisationId: context.organisationId,
       name: input.name,
       identifier: input.identifier ?? null,
       country: input.country ?? null,
@@ -89,13 +101,20 @@ export async function createSupplier(input: CreateSupplierInput) {
  * matches one of those, so the two views of the same counterparty can be seen
  * together without merging any figures.
  */
-export async function corporateRecordsForSupplier(supplierName: string) {
+export async function corporateRecordsForSupplier(context: OrganisationContext, supplierName: string) {
+  const carbonCtx = toTenantRepositoryContext(context);
   const [factorSets, entryCount] = await Promise.all([
+    // EmissionFactorSet remains platform-global reference data at this phase
+    // (visibility/ownership is T18's job) — safe to read across tenants.
     prisma.emissionFactorSet.findMany({
       where: { sourceType: "SUPPLIER_SPECIFIC", supplierName: { equals: supplierName, mode: "insensitive" } },
       select: { id: true, name: true, vintageYear: true, _count: { select: { factors: true } } },
     }),
-    prisma.activityEntry.count({ where: { supplierName: { equals: supplierName, mode: "insensitive" } } }),
+    // ActivityEntry is tenant-owned (T16) — a bare count here must not reveal
+    // another organisation's activity via this supplier name.
+    prisma.activityEntry.count({
+      where: tenantWhere<Prisma.ActivityEntryWhereInput>(carbonCtx, { supplierName: { equals: supplierName, mode: "insensitive" } }),
+    }),
   ]);
   return { factorSets, corporateActivityEntryCount: entryCount };
 }
@@ -139,12 +158,14 @@ export interface CreateSupplierPcfInput {
   actorUserId: string;
 }
 
-export async function createSupplierPcf(input: CreateSupplierPcfInput) {
-  const supplier = await prisma.supplier.findUniqueOrThrow({ where: { id: input.supplierId } });
+export async function createSupplierPcf(context: OrganisationContext, input: CreateSupplierPcfInput) {
+  const supplier = await requireSupplierInScope(context, input.supplierId);
+  if (supplier.entityId !== input.entityId) throw new TenantOwnershipError();
 
   const pcf = await prisma.lcaSupplierPcf.create({
     data: {
       entityId: input.entityId,
+      organisationId: context.organisationId,
       supplierId: input.supplierId,
       productName: input.productName,
       productIdentifier: input.productIdentifier ?? null,
@@ -197,15 +218,18 @@ export async function createSupplierPcf(input: CreateSupplierPcfInput) {
   return pcf;
 }
 
-export async function listSupplierPcfs(entityId?: string) {
+export async function listSupplierPcfs(context: OrganisationContext, entityId?: string) {
   return prisma.lcaSupplierPcf.findMany({
-    where: entityId ? { entityId } : {},
+    where: { organisationId: context.organisationId, ...(entityId ? { entityId } : {}) },
     include: { supplier: true, _count: { select: { inventoryItems: true, evidence: true } } },
     orderBy: [{ supplier: { name: "asc" } }, { productName: "asc" }],
   });
 }
 
-export async function getSupplierPcf(pcfId: string) {
+export async function getSupplierPcf(context: OrganisationContext, pcfId: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const scoped = await findTenantSupplierPcf(ctx, pcfId);
+  if (!scoped) return null;
   return prisma.lcaSupplierPcf.findUnique({
     where: { id: pcfId },
     include: {
@@ -223,9 +247,9 @@ export async function getSupplierPcf(pcfId: string) {
  * Supplier PCFs a given inventory item could legitimately use: same entity,
  * and a declared unit the item's own quantity can be converted into.
  */
-export async function supplierPcfsForItem(entityId: string, itemUnit: string) {
+export async function supplierPcfsForItem(context: OrganisationContext, entityId: string, itemUnit: string) {
   const candidates = await prisma.lcaSupplierPcf.findMany({
-    where: { entityId },
+    where: { organisationId: context.organisationId, entityId },
     include: { supplier: true },
     orderBy: [{ supplier: { name: "asc" } }, { productName: "asc" }],
   });
@@ -245,17 +269,26 @@ export function pcfPerUnit(pcf: { pcfValue: Prisma.Decimal; declaredUnitQuantity
  * data-quality coverage breakdown reflects the improvement automatically.
  */
 export async function applySupplierPcfToItem(
+  context: OrganisationContext,
   inventoryItemId: string,
   supplierPcfId: string,
   actorUserId: string,
 ) {
-  const [item, pcf] = await Promise.all([
+  const ctx = toTenantRepositoryContext(context);
+  const [item, pcfRow] = await Promise.all([
     prisma.lcaInventoryItem.findUniqueOrThrow({
       where: { id: inventoryItemId },
-      include: { emissionFactor: { include: { factorSet: true } } },
+      include: { emissionFactor: { include: { factorSet: true } }, assessment: { select: { organisationId: true } } },
     }),
-    prisma.lcaSupplierPcf.findUniqueOrThrow({ where: { id: supplierPcfId }, include: { supplier: true } }),
+    findTenantSupplierPcf(ctx, supplierPcfId),
   ]);
+  if (item.assessment.organisationId !== context.organisationId) throw new TenantOwnershipError();
+  // The critical cross-tenant guard: a foreign-tenant supplier PCF must
+  // never be resolved into this item's factor selection (T17 acceptance:
+  // "shared/global factors are explicitly distinguished from tenant-owned
+  // supplier factors").
+  if (!pcfRow) throw new TenantOwnershipError();
+  const pcf = await prisma.lcaSupplierPcf.findUniqueOrThrow({ where: { id: supplierPcfId }, include: { supplier: true } });
 
   if (!areUnitsCompatible(pcf.declaredUnitUnit, item.unit)) {
     throw new Error(
@@ -314,21 +347,23 @@ export interface ImportPactOutcome extends PactImportResult {
  * kept on the record so a reviewer can always see what the supplier actually
  * sent.
  */
-export async function importPactDocument(input: ImportPactDocumentInput): Promise<ImportPactOutcome> {
+export async function importPactDocument(context: OrganisationContext, input: ImportPactDocumentInput): Promise<ImportPactOutcome> {
   const result = fromPactFootprint(input.document);
   if (!result.ok || !result.pcf) {
     return { ...result, supplierPcfId: null, supplierId: null };
   }
 
   let supplierId = input.supplierId;
-  if (!supplierId) {
+  if (supplierId) {
+    await requireSupplierInScope(context, supplierId);
+  } else {
     const existing = await prisma.supplier.findFirst({
-      where: { entityId: input.entityId, name: { equals: result.pcf.companyName, mode: "insensitive" } },
+      where: { organisationId: context.organisationId, entityId: input.entityId, name: { equals: result.pcf.companyName, mode: "insensitive" } },
     });
     if (existing) {
       supplierId = existing.id;
     } else {
-      const created = await createSupplier({
+      const created = await createSupplier(context, {
         entityId: input.entityId,
         name: result.pcf.companyName,
         notes: "Created automatically from an imported product footprint document.",
@@ -338,7 +373,7 @@ export async function importPactDocument(input: ImportPactDocumentInput): Promis
     }
   }
 
-  const pcf = await createSupplierPcf({
+  const pcf = await createSupplierPcf(context, {
     entityId: input.entityId,
     supplierId,
     productName: result.pcf.productName,
@@ -376,3 +411,93 @@ export async function importPactDocument(input: ImportPactDocumentInput): Promis
 }
 
 export type SupplierPcfWithSupplier = Prisma.LcaSupplierPcfGetPayload<{ include: { supplier: true } }>;
+
+export class SupplierLifecycleError extends Error {}
+
+/**
+ * Archives a supplier.
+ *
+ * A supplier is never deleted: its PCF register is resolved into inventory
+ * items and frozen into issued assessment versions, so removing the row
+ * would orphan factor provenance behind a reported figure.
+ * `Supplier.archivedAt` takes it out of selection for new records while
+ * every existing reference keeps resolving. Archiving a supplier archives
+ * its PCFs with it — a PCF that can no longer be sourced must not stay
+ * selectable on its own.
+ */
+export async function archiveSupplier(
+  context: OrganisationContext,
+  input: { supplierId: string; reason: string; actorUserId: string },
+) {
+  const supplier = await requireSupplierInScope(context, input.supplierId);
+  if (supplier.archivedAt) throw new SupplierLifecycleError("This supplier is already archived.");
+  if (!input.reason.trim()) throw new SupplierLifecycleError("Record why the supplier is being archived.");
+
+  const archivedAt = new Date();
+  const [updated, archivedPcfs] = await prisma.$transaction([
+    prisma.supplier.update({ where: { id: supplier.id }, data: { archivedAt } }),
+    prisma.lcaSupplierPcf.updateMany({
+      where: { supplierId: supplier.id, organisationId: context.organisationId, archivedAt: null },
+      data: { archivedAt },
+    }),
+  ]);
+
+  await recordAuditEvent({
+    entityType: "supplier",
+    entityId: updated.id,
+    action: "archived",
+    actorUserId: input.actorUserId,
+    summary: `Supplier "${updated.name}" archived: ${input.reason.trim()}. `
+      + `${archivedPcfs.count} supplier PCF(s) archived with it; existing inventory items and issued versions are unchanged.`,
+    before: { archivedAt: null },
+    after: { archivedAt: updated.archivedAt, archivedPcfCount: archivedPcfs.count },
+  });
+
+  return updated;
+}
+
+/**
+ * Archives one supplier PCF, withdrawing it from further factor selection.
+ *
+ * Never deleted for the same reason: `LcaInventoryItem` rows already
+ * resolved against it, and issued assessment versions carry its value in a
+ * frozen factor snapshot. Refused while inventory items still reference it,
+ * so archiving cannot silently invalidate a draft assessment's factor.
+ */
+export async function archiveSupplierPcf(
+  context: OrganisationContext,
+  input: { supplierPcfId: string; reason: string; actorUserId: string },
+) {
+  const ctx = toTenantRepositoryContext(context);
+  const pcf = await findTenantSupplierPcf(ctx, input.supplierPcfId);
+  if (!pcf) throw new TenantOwnershipError();
+  await requireSupplierInScope(context, pcf.supplierId);
+  if (pcf.archivedAt) throw new SupplierLifecycleError("This supplier PCF is already archived.");
+  if (!input.reason.trim()) throw new SupplierLifecycleError("Record why the supplier PCF is being archived.");
+
+  // LcaInventoryItem has no organisationId column of its own; the PCF is
+  // already proven in-tenant above, so anything referencing it is in-tenant.
+  const inUse = await prisma.lcaInventoryItem.count({ where: { supplierPcfId: pcf.id } });
+  if (inUse > 0) {
+    throw new SupplierLifecycleError(
+      `${inUse} inventory item(s) still resolve their factor from this PCF. Reassign them before archiving it.`,
+    );
+  }
+
+  const updated = await prisma.lcaSupplierPcf.update({
+    where: { id: pcf.id },
+    data: { archivedAt: new Date() },
+  });
+
+  await recordAuditEvent({
+    entityType: "supplier_pcf",
+    entityId: updated.id,
+    action: "archived",
+    actorUserId: input.actorUserId,
+    summary: `Supplier PCF "${updated.productName}" archived: ${input.reason.trim()}.`,
+    before: { archivedAt: null },
+    after: { archivedAt: updated.archivedAt },
+  });
+
+  return updated;
+}

@@ -1,9 +1,12 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getAssessmentHeader } from "@/lib/lca/assessment-service";
 import { isCalculationStale, runTotals } from "@/lib/lca/calculation-service";
 import { runValidation } from "@/lib/lca/validation-service";
+import { getLcaContext } from "@/lib/lca/permissions";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { formatKgPrecise } from "@/components/charts/palette";
 import { Badge } from "@/components/ui/badge";
 import { BackLink, Notice, StatusBadge } from "@/components/lca/ui";
@@ -21,7 +24,16 @@ export default async function AssessmentLayout({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const assessment = await getAssessmentHeader(id);
+  const context = await getLcaContext();
+  if (!context) redirect("/login");
+
+  let assessment;
+  try {
+    assessment = await getAssessmentHeader(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
   if (!assessment) notFound();
 
   const [staleness, validation, counts, run] = await Promise.all([

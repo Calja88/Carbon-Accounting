@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { resolveAiActor } from "@/lib/ai";
 import { AiAuthorizationError, assertDocumentInScope } from "@/lib/ai/authorization";
 import { getDocumentContent } from "@/lib/documents-service";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 
 /**
  * Serves an uploaded evidence document back to the review screen.
@@ -14,7 +15,15 @@ import { getDocumentContent } from "@/lib/documents-service";
  * crafted upload name can't inject a header.
  */
 export async function GET(_request: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const actor = await resolveAiActor();
+  let orgContext;
+  try {
+    orgContext = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) return new NextResponse("Sign in first.", { status: 401 });
+    throw err;
+  }
+
+  const actor = await resolveAiActor(orgContext);
   if (!actor) return new NextResponse("Sign in first.", { status: 401 });
 
   const { id } = await context.params;
@@ -26,7 +35,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
     throw err;
   }
 
-  const document = await getDocumentContent(id);
+  const document = await getDocumentContent(orgContext, id);
   if (!document) return new NextResponse("Not found.", { status: 404 });
 
   const safeFilename = document.filename.replace(/["\\\r\n]/g, "_");

@@ -12,6 +12,7 @@ import {
   rejectExtraction,
   uploadDocument,
 } from "@/lib/documents-service";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 
 /**
  * Server actions for the evidence-document workflow.
@@ -36,7 +37,15 @@ export async function uploadDocumentAction(
   _prev: UploadDocumentState,
   formData: FormData,
 ): Promise<UploadDocumentState> {
-  const actor = await resolveAiActor();
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) return { error: "You must be signed in.", documentId: null };
+    throw err;
+  }
+
+  const actor = await resolveAiActor(context);
   if (!actor) return { error: "You must be signed in.", documentId: null };
 
   const parsed = uploadSchema.safeParse(Object.fromEntries(formData));
@@ -51,13 +60,13 @@ export async function uploadDocumentAction(
   try {
     if (siteId) assertSiteInScope(actor, siteId);
 
-    const config = await getAiConfig();
+    const config = await getAiConfig(context.organisationId);
     const kind =
       parsed.data.kind && (Object.values(SourceDocumentKind) as string[]).includes(parsed.data.kind)
         ? (parsed.data.kind as SourceDocumentKind)
         : SourceDocumentKind.UNKNOWN;
 
-    const document = await uploadDocument({
+    const document = await uploadDocument(context, {
       filename: file.name,
       mimeType: file.type,
       bytes: await file.arrayBuffer(),
@@ -86,7 +95,13 @@ export interface ExtractState {
 
 /** Runs (or re-runs) AI extraction. Failure is reported, never thrown at the user. */
 export async function extractDocumentAction(_prev: ExtractState, formData: FormData): Promise<ExtractState> {
-  const actor = await resolveAiActor();
+  const context = await requireOrganisationContext().catch((err) => {
+    if (err instanceof OrganisationAccessError) return null;
+    throw err;
+  });
+  if (!context) return { error: "You must be signed in.", aiUnavailable: false, extractionId: null };
+
+  const actor = await resolveAiActor(context);
   if (!actor) return { error: "You must be signed in.", aiUnavailable: false, extractionId: null };
 
   const documentId = String(formData.get("documentId") ?? "");
@@ -140,7 +155,17 @@ export async function acceptExtractionAction(
   _prev: AcceptExtractionState,
   formData: FormData,
 ): Promise<AcceptExtractionState> {
-  const actor = await resolveAiActor();
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) {
+      return { error: "You must be signed in.", success: false, flagged: false, awaitingFactor: false };
+    }
+    throw err;
+  }
+
+  const actor = await resolveAiActor(context);
   if (!actor) return { error: "You must be signed in.", success: false, flagged: false, awaitingFactor: false };
 
   const parsed = acceptSchema.safeParse(Object.fromEntries(formData));
@@ -158,7 +183,7 @@ export async function acceptExtractionAction(
     await assertDocumentInScope(actor, data.documentId);
     assertSiteInScope(actor, data.siteId);
 
-    const created = await acceptExtractionAsEntry({
+    const created = await acceptExtractionAsEntry(context, {
       extractionId: data.extractionId,
       dataPointCode: data.dataPointCode,
       siteId: data.siteId,
@@ -189,7 +214,13 @@ export async function acceptExtractionAction(
 }
 
 export async function rejectExtractionAction(formData: FormData): Promise<void> {
-  const actor = await resolveAiActor();
+  const context = await requireOrganisationContext().catch((err) => {
+    if (err instanceof OrganisationAccessError) return null;
+    throw err;
+  });
+  if (!context) return;
+
+  const actor = await resolveAiActor(context);
   if (!actor) return;
 
   const documentId = String(formData.get("documentId") ?? "");
@@ -197,18 +228,24 @@ export async function rejectExtractionAction(formData: FormData): Promise<void> 
   if (!documentId || !extractionId) return;
 
   await assertDocumentInScope(actor, documentId);
-  await rejectExtraction(extractionId, actor.userId);
+  await rejectExtraction(context, extractionId, actor.userId);
   revalidatePath(`/documents/${documentId}`);
 }
 
 export async function markDocumentAcceptedAction(formData: FormData): Promise<void> {
-  const actor = await resolveAiActor();
+  const context = await requireOrganisationContext().catch((err) => {
+    if (err instanceof OrganisationAccessError) return null;
+    throw err;
+  });
+  if (!context) return;
+
+  const actor = await resolveAiActor(context);
   if (!actor) return;
 
   const documentId = String(formData.get("documentId") ?? "");
   if (!documentId) return;
 
   await assertDocumentInScope(actor, documentId);
-  await markDocumentAccepted(documentId);
+  await markDocumentAccepted(context, documentId);
   revalidatePath(`/documents/${documentId}`);
 }

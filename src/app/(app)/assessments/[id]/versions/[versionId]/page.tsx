@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getVersion } from "@/lib/lca/assessment-service";
+import { getLcaContext } from "@/lib/lca/permissions";
 import { BOUNDARY_LABELS, STAGE_LABELS } from "@/lib/lca/labels";
 import { formatKgPrecise } from "@/components/charts/palette";
 import { Badge } from "@/components/ui/badge";
@@ -63,7 +64,9 @@ export default async function VersionDetailPage({
   params: Promise<{ id: string; versionId: string }>;
 }) {
   const { id, versionId } = await params;
-  const version = await getVersion(versionId);
+  const context = await getLcaContext();
+  if (!context) notFound();
+  const version = await getVersion(context, versionId, id);
   if (!version || version.assessmentId !== id) notFound();
 
   const payload = version.payload as unknown as FrozenPayload;
