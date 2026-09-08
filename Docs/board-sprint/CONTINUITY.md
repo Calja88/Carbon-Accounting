@@ -4,9 +4,9 @@ Keep this to ~1-2 pages. Update at the end of every package.
 
 ## Current state
 
-- **Package completed:** BD01 (foundations)
+- **Package completed:** BD04 (shell/navigation). BD01 also complete.
 - **Branch:** `board/foundations-2026-09-22` (created from `origin/claude/paragon-id-uk-carbon-mvp-1h1uvb` @ `c9487554b058087736e031b06a672f2f61fcfbcb`)
-- **Head:** see PR #63 for current head; BD01 merge commit is `7dba8a6` (EMS/tenancy lineage merged into H00 baseline), docs commit `a343203`, package-manager decision record commit below.
+- **Head:** see PR #63 for current head; BD01 merge commit is `7dba8a6` (EMS/tenancy lineage merged into H00 baseline), docs commit `a343203`, package-manager decision record commit `292355b`, BD04 commit below.
 - **PR:** [#63](https://github.com/Calja88/Carbon-Accounting/pull/63) (draft), branch `board/foundations-2026-09-22` against `claude/paragon-id-uk-carbon-mvp-1h1uvb`.
 - Build pack extracted (outside the repo) at `/home/user/carbon-overhaul/build-pack`; dossier at `/home/user/carbon-overhaul/Carbon_Ledger_Product_Transformation_Implementation_Dossier.docx`. Both are on ephemeral container storage — not guaranteed to survive to a future session; re-upload if a future session can't find them.
 
@@ -48,11 +48,29 @@ pnpm test                                       # PASS — 118 files, 1826 tests
 ```
 No `prisma migrate`, no seed, no build (`next build`) run — not yet safe/scoped per BD02.
 
+## BD04 — premium shell, navigation (complete)
+
+Copied verbatim from the Build Pack (`FILES/src/styles/board.css`, `src/components/board/{primitives,data-table,app-shell,connected-shell,scope-bar}.tsx`, `src/lib/board/{contracts,metrics,navigation}.ts`) and applied `PATCHES/BD04-css-import.patch` to `src/app/layout.tsx`. No Astra file was rewritten.
+
+Live wiring (new, not Astra-supplied — this is Claude's integration responsibility per `INTEGRATION/LIVE_BINDINGS.md` §1):
+- **`src/lib/board/live-nav.ts`** — server-side `resolveBoardNav(context)`. Filters `BOARD_NAV` by real permission grants (`carbon.view`/`lca.view`/`ems.view`/the existing platform-admin gate), matching the granularity the old `nav-links.tsx` used. Drops `overview`/`attention` entirely (BD05-owned, routes don't exist — no disabled placeholder). Overrides two candidate hrefs that don't exist yet to the real route already in that item's own `matches` list: `evidence` → `/ems/evidence` (not `/evidence`, BD06-owned), `packs` → `/ems/management-reviews` (not `/management-packs`, BD08-owned).
+- **`src/app/(app)/layout.tsx`** rewritten to wrap children in `ConnectedShell`, unchanged auth/organisation-context/AI-availability logic preserved verbatim. `account` slot reuses the existing avatar/role/`SignOutButton`. `scopeBar` renders `ScopeBar` in `periodMode="operational"` (org name only, no date/site form) — layouts can't reliably read a page's searchParams (`LIVE_BINDINGS.md` §1's documented gap), so the real carbon-period picker stays exactly where it already lived, on `/carbon` itself, rather than fabricating a stale shell-level date. `synthetic` left `false` — BD02 hasn't built the guarded/verified synthetic-environment check yet, so the demo banner isn't shown rather than shown falsely. One new read-only query (`prisma.organisation.findUnique` for `name`) — `OrganisationContext` only carries the slug.
+- **Home route**: `src/app/(app)/page.tsx` (the working emissions dashboard) moved to `src/app/(app)/carbon/page.tsx` (its own `PeriodSelector` action and relative import updated); `/` is now a genuine `redirect("/carbon")` — no fabricated Overview data at `/`, per the explicit instruction. BD05 owns building the real Overview there.
+- **Removed** `src/app/(app)/nav-links.tsx` and its test — fully superseded by `ConnectedShell`'s sidebar, not unrelated work.
+- Added `src/lib/board/__tests__/live-nav.test.ts` (7 cases: permission filtering per item, overview/attention exclusion, href overrides, no-context → empty nav).
+
+Genuine compatibility fix: dropped `import "server-only"` from `live-nav.ts` — that package isn't a dependency of this repo (not in `package.json`/lockfile/`node_modules`), so it broke Vitest module resolution. Documented in-file why it's safe without the guard (pure permission-Set check, no Prisma/auth import, only ever called from a server component).
+
+Deferred / not done in BD04 (by design, not oversight):
+- No organisation-switcher UI — none existed before BD04 either; `ScopeBar`'s optional `organisationSwitcher` slot is left unset (shows the org name only).
+- `/documents` (carbon's own evidence store), `/methodologies`, `/help/lca` have no direct sidebar entry — reachable only contextually (as before this package, they weren't in the old top nav's EMS-routes-only reshuffle either); BOARD_NAV is a curated top-level set by design.
+- No live/browser/visual verification (1366×768, 1440×900, 375px, 200% zoom) — no guarded runtime exists yet (BD02 dependency); running `next dev` needs a real database connection this session doesn't have and BD02 hasn't yet separated. **NOT RUN — deferred until BD02 establishes the guarded build/runtime path.**
+
 ## Blockers / risks
 
-- No live/browser check run (no guarded runtime exists yet — correct per BD01 scope; BD02 provisions it).
-- `src/app/(app)/page.tsx` (current carbon homepage) still queries Prisma directly, unscoped by organisation/site — flagged for BD02/BD03, not fixed in BD01 (out of BD01 scope).
+- No live/browser check run (BD02 dependency, see above).
+- `src/app/(app)/carbon/page.tsx` still queries Prisma directly, unscoped by organisation/site — flagged for BD02/BD03, not fixed here (out of BD04 scope).
 
 ## Next package
 
-**BD04** (shell/navigation) — do not start automatically; wait for explicit instruction.
+**BD02** — do not start automatically; wait for explicit instruction.
