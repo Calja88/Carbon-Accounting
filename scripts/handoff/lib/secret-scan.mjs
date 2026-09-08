@@ -29,38 +29,47 @@ function looksLikePlaceholder(matchedText) {
 
 const RULES = [
   {
+    id: "connection-string",
     category: "PostgreSQL / Neon connection string with embedded credentials",
     pattern: /postgres(?:ql)?:\/\/[^\s'"`]+:[^\s'"`]+@[^\s'"`]+/gi,
   },
   {
+    id: "neon-host",
     category: "Neon-hosted database host with embedded credentials",
     pattern: /[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+@[A-Za-z0-9.-]*\.neon\.tech[^\s'"`]*/gi,
   },
   {
+    id: "aws-access-key",
     category: "AWS access key ID",
     pattern: /\bAKIA[0-9A-Z]{16}\b/g,
   },
   {
+    id: "openrouter-key",
     category: "OpenRouter API key",
     pattern: /\bsk-or-[A-Za-z0-9-]{10,}\b/g,
   },
   {
+    id: "openai-style-key",
     category: "Generic OpenAI-style API key",
     pattern: /\bsk-[A-Za-z0-9]{20,}\b/g,
   },
   {
+    id: "jwt",
     category: "JWT",
     pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
   },
   {
+    id: "private-key-block",
     category: "Private key block",
     pattern: /-----BEGIN\s?(RSA|EC|OPENSSH|DSA|PGP)?\s?PRIVATE KEY-----/g,
   },
   {
+    id: "bearer-token",
     category: "Bearer token",
     pattern: /\bBearer\s+[A-Za-z0-9\-_.]{20,}\b/g,
   },
   {
+    id: "credential-assignment",
     category: "Credential-like assignment (api key / secret / token / password)",
     pattern: /[a-z0-9_]*(api[_-]?key|secret|token|passwd|password)[a-z0-9_]*\s*[:=]\s*['"]?[A-Za-z0-9+/_-]{16,}['"]?/gi,
   },
@@ -76,17 +85,42 @@ const RULES = [
  * value later added to it, still fails the scan.
  */
 export function scanContentForSecrets(content, relPath) {
-  for (const { category, pattern } of RULES) {
+  for (const { id, category, pattern } of RULES) {
     pattern.lastIndex = 0;
     let match;
     while ((match = pattern.exec(content)) !== null) {
       if (!looksLikePlaceholder(match[0]) && !isReviewedSafeCredentialMatch(relPath, match[0])) {
         const line = content.slice(0, match.index).split("\n").length;
-        return { category, line };
+        return { category, line, ruleId: id };
       }
     }
   }
   return null;
+}
+
+/**
+ * Diagnostic-only counterpart to `scanContentForSecrets`: collects EVERY
+ * match across every rule (not just the first), including ones on the
+ * reviewed-safe allowlist, each tagged `allowlisted: true/false`. Used only
+ * by the audit tool (scripts/handoff/secret-audit.mjs) to build a full
+ * findings report in one pass — never by normal handoff generation, which
+ * must keep failing fast on the first unreviewed finding via
+ * `scanContentForSecrets` above. Placeholder-marker matches (already
+ * judged safe, e.g. `localhost`, `replace-with-...`) are not included
+ * here either, for the same reason they're skipped there.
+ */
+export function collectAllSecretFindings(content, relPath) {
+  const findings = [];
+  for (const { id, category, pattern } of RULES) {
+    pattern.lastIndex = 0;
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+      if (looksLikePlaceholder(match[0])) continue;
+      const line = content.slice(0, match.index).split("\n").length;
+      findings.push({ category, ruleId: id, line, allowlisted: isReviewedSafeCredentialMatch(relPath, match[0]) });
+    }
+  }
+  return findings;
 }
 
 const BINARY_EXTENSIONS = new Set([

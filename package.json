@@ -18,7 +18,8 @@
     "migrate:contract-preflight": "tsx scripts/contract-migration-preflight.ts",
     "test": "vitest run",
     "handoff:full": "node scripts/handoff/full-handoff.mjs",
-    "handoff:review": "node scripts/handoff/review-handoff.mjs"
+    "handoff:review": "node scripts/handoff/review-handoff.mjs",
+    "handoff:secret-audit": "node scripts/handoff/secret-audit.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",

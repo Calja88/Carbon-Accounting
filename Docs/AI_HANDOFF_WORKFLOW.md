@@ -88,6 +88,28 @@ generated `MANIFEST.md` only claims what actually happened: which files were
 included, which exclusion rules fired, and that the scan passed — not a
 broader security assurance.
 
+## Secret-scan audit mode (diagnostic only, no ZIP)
+
+```
+npm run handoff:secret-audit -- --task T00
+```
+
+`npm run handoff:review` fails fast: it aborts at the *first* suspected
+secret across the candidate file set, so clearing several unrelated false
+positives means fix-one/rerun/repeat. `handoff:secret-audit` instead scans
+the exact same candidate file set (same base ref, same exclusions, same
+rules) but does not stop at the first match and does not package anything
+— it collects every finding in one pass and prints a report, tagging each
+match as already reviewed-allowlisted or unreviewed. It never creates a
+ZIP, never copies a file, and never prints a matched secret value (only
+the file path, finding category, rule id, and a line number derived from
+counting newlines before the match — never from the matched text). It
+exits `0` only when there are zero unreviewed findings, non-zero
+otherwise. Use it to see everything that needs attention before running
+the real `handoff:review`/`handoff:full`, which remain exactly as
+fail-fast/fail-closed as before — this tool changes neither of them and
+is not imported by either.
+
 ## What is never included
 
 `.env*` (except `.env.example`), Neon/DATABASE_URL/DIRECT_URL credentials,
