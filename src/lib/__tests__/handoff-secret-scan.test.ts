@@ -67,3 +67,44 @@ describe("handoff secret scanner", () => {
     expect(finding).toBeNull();
   });
 });
+
+// Checkpoint A: the narrow, exact-match allowlist for
+// scripts/rls-spike/setup-test-db.sh's two reviewed synthetic/local-only
+// RLS-spike credential defaults — see secret-scan.mjs's
+// REVIEWED_SAFE_CREDENTIAL_MATCHES for the full review rationale. Built
+// from parts for the same reason as the fixtures above: this test file's
+// own source text must never contain the literal matched string.
+describe("reviewed exact-match credential allowlist (scripts/rls-spike/setup-test-db.sh)", () => {
+  const ownerMatch = join("RLS_SPIKE_OWNER_PASSWORD:-rls_spike_owner_local", "_only");
+  const appMatch = join("RLS_SPIKE_APP_PASSWORD:-rls_spike_app_local", "_only");
+  const rlsSpikePath = join("scripts/rls-spike/", "setup-test-db.sh");
+
+  it("allows the exact reviewed synthetic RLS-spike credential defaults in their file", () => {
+    const fixture = [`OWNER_PASSWORD="\${${ownerMatch}}"`, `APP_PASSWORD="\${${appMatch}}"`].join("\n");
+    expect(scanContentForSecrets(fixture, rlsSpikePath)).toBeNull();
+  });
+
+  it("still fails a different/new credential-like value added to the same file", () => {
+    const fixture = `OWNER_PASSWORD="\${RLS_SPIKE_OWNER_PASSWORD:-${join("some-other-real-look", "ing-secret-value")}}"`;
+    const finding = scanContentForSecrets(fixture, rlsSpikePath);
+    expect(finding).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    const fixture = `OWNER_PASSWORD="\${${ownerMatch}}"`;
+    const finding = scanContentForSecrets(fixture, join("scripts/rls-spike/", "some-other-script.sh"));
+    expect(finding).not.toBeNull();
+  });
+
+  it("still fails the same content when no relPath is given at all", () => {
+    const fixture = `OWNER_PASSWORD="\${${ownerMatch}}"`;
+    expect(scanContentForSecrets(fixture)).not.toBeNull();
+  });
+
+  it("never includes the matched text even for the one case it does still flag here", () => {
+    const secretValue = join("some-other-real-look", "ing-secret-value");
+    const fixture = `OWNER_PASSWORD="\${RLS_SPIKE_OWNER_PASSWORD:-${secretValue}}"`;
+    const finding = scanContentForSecrets(fixture, rlsSpikePath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});

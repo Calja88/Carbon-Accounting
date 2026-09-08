@@ -130,6 +130,10 @@ New tests: `src/lib/__tests__/entries-service-idempotency.test.ts` (first call c
 
 **DB-backed tests:** BLOCKED — disposable Neon (`cool-cake-20837205`) exists (see BD02 above) but this sandbox still has no Postgres network egress. Concurrent/duplicate-run and dual-basis-atomicity proof against real Postgres, and browser drilldown checks, remain deferred to a session with network access — not weakened, not faked. The equivalent logic is proven by the new mocked-Prisma regression tests above instead.
 
+## Checkpoint A handoff generation — one narrow H00 tooling exception
+
+`pnpm run handoff:review` initially aborted (correct fail-closed behaviour) on `scripts/rls-spike/setup-test-db.sh`'s two hardcoded local-only synthetic default passwords (`rls_spike_owner_local_only`, `rls_spike_app_local_only`, pre-existing content from the BD01 EMS merge). Verified genuinely synthetic (targets `localhost:5432` only, script's own header says "never be pointed at a production connection string", full file re-read, no other credential-like content) and fixed with the narrowest possible exception: `scripts/handoff/lib/secret-scan.mjs` gained `REVIEWED_SAFE_CREDENTIAL_MATCHES`, an exact-file/exact-matched-text allowlist (not a whole-file or directory exclusion) — only those two specific matched strings in that one file are suppressed; any other or new credential-like value in the same file, or the same value in a different file, still fails the scan. 5 new tests in `src/lib/__tests__/handoff-secret-scan.test.ts` prove the allow/still-fail/no-leak behaviour.
+
 ## Next package
 
 **Checkpoint A** (BD01 + BD04 + BD02 + BD03 cumulative Astra review) — do not contact Astra or generate the H00 review bundle automatically; wait for explicit instruction. Do not merge PR #63 before Checkpoint A. Whoever next has real network access to Neon (a local machine, CI, or a differently-configured session) can run `pnpm run db:migrate:deploy` against `cool-cake-20837205` immediately — no further provisioning needed.

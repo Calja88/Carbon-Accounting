@@ -38,7 +38,7 @@ export function collectSafeEntries(repoRoot, relPaths, arcPrefix = "") {
 
     if (!isLikelyBinary(relPath) && !isAllowlistedForSecretScan(relPath)) {
       const content = readFileSync(absPath, "utf8");
-      const finding = scanContentForSecrets(content);
+      const finding = scanContentForSecrets(content, relPath);
       if (finding) {
         throw new SecretScanAbort(relPath, finding.category, finding.line);
       }

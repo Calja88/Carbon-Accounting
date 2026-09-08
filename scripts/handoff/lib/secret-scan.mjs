@@ -69,13 +69,18 @@ const RULES = [
 /**
  * Scans text content and returns the first suspected-secret finding, or
  * `null` if the content is clean. Never includes the matched text.
+ *
+ * `relPath`, when given, additionally suppresses a match whose exact text
+ * is on this file's reviewed-safe-credential-match allowlist (see below) —
+ * every other match in the same file, and any different credential-like
+ * value later added to it, still fails the scan.
  */
-export function scanContentForSecrets(content) {
+export function scanContentForSecrets(content, relPath) {
   for (const { category, pattern } of RULES) {
     pattern.lastIndex = 0;
     let match;
     while ((match = pattern.exec(content)) !== null) {
-      if (!looksLikePlaceholder(match[0])) {
+      if (!looksLikePlaceholder(match[0]) && !isReviewedSafeCredentialMatch(relPath, match[0])) {
         const line = content.slice(0, match.index).split("\n").length;
         return { category, line };
       }
@@ -108,6 +113,41 @@ const REVIEWED_SAFE_FIXTURE_FILES = new Set([
 
 export function isAllowlistedForSecretScan(relPath) {
   return REVIEWED_SAFE_FIXTURE_FILES.has(relPath);
+}
+
+/**
+ * Narrower than `REVIEWED_SAFE_FIXTURE_FILES` above: this suppresses one
+ * exact, previously-reviewed matched string in one exact file, rather than
+ * skipping the file's content entirely. Every other match in the same file
+ * — and any different or new credential-like value later added to it —
+ * still fails the scan and aborts handoff generation. Add an entry only
+ * after reading the whole file and confirming the exact matched text is a
+ * fixed synthetic/local-only value, never a real or live-sourced credential.
+ *
+ * scripts/rls-spike/setup-test-db.sh (Checkpoint A, board demo sprint):
+ * provisions a throwaway LOCAL Postgres database/roles for the T1B RLS
+ * spike (Docs/T1B_RLS_SPIKE_FINDINGS.md). Its `OWNER_PASSWORD`/
+ * `APP_PASSWORD` bash defaults use the scanner's `${VAR:-default}` syntax,
+ * which the credential-assignment rule matches as `VAR:-default` (the `:`
+ * from `:-` reads as the rule's `[:=]` operator) — these two matches are
+ * the fixed literal strings "rls_spike_owner_local_only" and
+ * "rls_spike_app_local_only", used only against `localhost:5432` per the
+ * script's own header comment ("This is a local, synthetic, disposable
+ * database. It is not Neon... must never be pointed at a production
+ * connection string"), confirmed by reading the entire 51-line file: no
+ * other credential-like, connection-string, key, token, or private-key
+ * material appears anywhere in it.
+ */
+const REVIEWED_SAFE_CREDENTIAL_MATCHES = new Map([
+  [
+    "scripts/rls-spike/setup-test-db.sh",
+    new Set(["RLS_SPIKE_OWNER_PASSWORD:-rls_spike_owner_local_only", "RLS_SPIKE_APP_PASSWORD:-rls_spike_app_local_only"]),
+  ],
+]);
+
+function isReviewedSafeCredentialMatch(relPath, matchedText) {
+  if (!relPath) return false;
+  return REVIEWED_SAFE_CREDENTIAL_MATCHES.get(relPath)?.has(matchedText) ?? false;
 }
 
 export function isLikelyBinary(relPath) {
