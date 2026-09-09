@@ -369,3 +369,35 @@ describe("reviewed exact-match credential allowlist (src/lib/organisation/invita
     expect(JSON.stringify(finding)).not.toContain(secretValue);
   });
 });
+
+// Checkpoint A: the CA06 disposable-PostgreSQL CI gate workflow's two
+// fixed synthetic literal passwords for its ephemeral postgres:16 service
+// container (POSTGRES_PASSWORD, PGPASSWORD) — both the same literal value,
+// never a real credential, never used outside that one job's disposable
+// database. Built from parts for the same self-scanning reason as above.
+describe("reviewed exact-match credential allowlist (.github/workflows/checkpoint-a-postgres.yml)", () => {
+  const workflowPath = join(".github/workflows/", "checkpoint-a-postgres.yml");
+  const postgresPasswordMatch = join("POSTGRES_PASSWORD", ": ca_disposable_only");
+  const pgpasswordMatch = join("PGPASSWORD", ": ca_disposable_only");
+
+  it("allows the reviewed synthetic disposable-database passwords in their file", () => {
+    const fixture = [postgresPasswordMatch, pgpasswordMatch].join("\n");
+    expect(scanContentForSecrets(fixture, workflowPath)).toBeNull();
+  });
+
+  it("still fails a different/new credential-like value added to the same file", () => {
+    const fixture = `${join("SOME_OTHER", "_PASSWORD")}: ${join("a-real-look", "ing-secret-value")}`;
+    expect(scanContentForSecrets(fixture, workflowPath)).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    const finding = scanContentForSecrets(postgresPasswordMatch, join(".github/workflows/", "other.yml"));
+    expect(finding).not.toBeNull();
+  });
+
+  it("never echoes the matched text for a case it still flags", () => {
+    const secretValue = join("a-real-look", "ing-secret-value");
+    const finding = scanContentForSecrets(`${join("SOME_OTHER", "_PASSWORD")}: ${secretValue}`, workflowPath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});

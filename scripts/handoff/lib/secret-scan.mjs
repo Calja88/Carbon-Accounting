@@ -233,6 +233,19 @@ export function isAllowlistedForSecretScan(relPath) {
  * file: no hardcoded token, salt, pepper, or any other credential anywhere
  * in it; comparison is constant-time (`timingSafeEqual`); the plaintext
  * token is documented as never persisted or logged.
+ *
+ * .github/workflows/checkpoint-a-postgres.yml (Checkpoint A, board demo
+ * sprint): the CA06 disposable-PostgreSQL CI gate. `POSTGRES_PASSWORD` and
+ * `PGPASSWORD` are both the fixed literal `ca_disposable_only`, the
+ * password for a `postgres:16` GitHub Actions service container created
+ * fresh and destroyed with the runner on every job — never a real
+ * credential, never used outside this one ephemeral database. Confirmed by
+ * reading the entire file: every other value is either this same literal,
+ * the synthetic role password `rls_spike_app_ci_disposable_only` (space-
+ * separated in its SQL statement, so it does not match the rule's `[:=]`
+ * operator and needs no allowlist entry), or a `127.0.0.1`-addressed
+ * connection string already suppressed by the placeholder-marker check —
+ * no real host, key, token, or other secret appears anywhere in it.
  */
 // Built from parts rather than written as literal contiguous strings, same
 // reason as src/lib/__tests__/handoff-secret-scan.test.ts's fixtures: this
@@ -266,8 +279,12 @@ const PRISMA_EP_DIRECT_URL_MATCH = ["postgresql://synthetic:", PRISMA_EP_DIRECT_
 const EXPORT_SERVICE_FIXTURE_MATCH = ["inviteTokenHash", ": \"super-secret-hash\""].join("");
 const COOKIE_TEST_SECRET_MATCH = ["NEXTAUTH_SECRET", ' = "test-secret-value-not-a-real-credential"'].join("");
 
+const CA06_POSTGRES_PASSWORD_MATCH = ["POSTGRES_PASSWORD", ": ca_disposable_only"].join("");
+const CA06_PGPASSWORD_MATCH = ["PGPASSWORD", ": ca_disposable_only"].join("");
+
 const REVIEWED_SAFE_CREDENTIAL_MATCHES = new Map([
   ["scripts/rls-spike/setup-test-db.sh", new Set([RLS_SPIKE_OWNER_MATCH, RLS_SPIKE_APP_MATCH])],
+  [".github/workflows/checkpoint-a-postgres.yml", new Set([CA06_POSTGRES_PASSWORD_MATCH, CA06_PGPASSWORD_MATCH])],
   ["src/app/invite/[token]/actions.ts", new Set([INVITE_TOKEN_HASH_ASSIGNMENT_MATCH])],
   ["src/app/invite/[token]/page.tsx", new Set([INVITE_TOKEN_HASH_ASSIGNMENT_MATCH])],
   [
