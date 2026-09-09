@@ -359,6 +359,10 @@ function VersionCard({
               <a href={`/ems/legal/applicability#assessment-${version.applicabilityAssessmentId}`} className="text-blue-700 underline">
                 source assessment
               </a>
+              {" · "}
+              <a href={`/ems/legal/obligations?record=${version.id}#obligation-version-${version.id}`} className="text-blue-700 underline">
+                View connected chain
+              </a>
             </p>
           </div>
           <Badge tone={statusTone(version.status)}>{version.status}</Badge>

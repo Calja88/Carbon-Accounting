@@ -198,7 +198,7 @@ function AspectCard({ aspect, processes, canEdit }: { aspect: AspectRow; process
     <Card>
       <CardContent id={`aspect-${aspect.id}`} className="scroll-mt-24 space-y-4 py-5">
         <div>
-          <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">{aspect.name}</h3><span className="rounded bg-slate-100 px-2 py-0.5 text-xs">{aspect.effect.toLowerCase()}</span><span className="rounded bg-slate-100 px-2 py-0.5 text-xs">{aspect.controlRelationship === "DIRECT_CONTROL" ? "direct control" : "influence"}</span></div>
+          <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">{aspect.name}</h3><span className="rounded bg-slate-100 px-2 py-0.5 text-xs">{aspect.effect.toLowerCase()}</span><span className="rounded bg-slate-100 px-2 py-0.5 text-xs">{aspect.controlRelationship === "DIRECT_CONTROL" ? "direct control" : "influence"}</span><a href={`/ems/aspects?record=${aspect.id}#aspect-${aspect.id}`} className="text-xs font-medium text-blue-700 underline">View connected chain</a></div>
           <p className="mt-1 text-sm text-slate-600">{aspect.processName} · {aspect.operatingCondition.replaceAll("_", " ").toLowerCase()}{aspect.lifecycleStage ? ` · ${aspect.lifecycleStage.replaceAll("_", " ").toLowerCase()}` : ""}</p>
           {aspect.description && <p className="mt-2 text-sm text-slate-600">{aspect.description}</p>}
           {aspect.existingControls && <p className="mt-2 text-sm text-slate-600"><strong>Existing controls:</strong> {aspect.existingControls}</p>}
