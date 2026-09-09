@@ -76,14 +76,21 @@ const MAX_CANDIDATES = 25;
 
 /**
  * Retrieves candidate factors from our own catalogue. This is a plain
- * database query — the shortlist is ours, not the model's.
+ * database query — the shortlist is ours, not the model's. Phase 1 tenancy
+ * (T18): restricted to platform sets plus this Organisation's own —
+ * never another tenant's supplier-specific/customer-created set
+ * (PHASE1_ADVERSARIAL_TEST_MATRIX.md §7).
  */
-export async function findFactorCandidates(input: FactorSuggestionInput): Promise<FactorCandidate[]> {
+export async function findFactorCandidates(
+  organisationId: string,
+  input: FactorSuggestionInput,
+): Promise<FactorCandidate[]> {
   const asOf = input.asOfDate ?? new Date();
 
   const setFilter: Prisma.EmissionFactorSetWhereInput = {
     effectiveFrom: { lte: asOf },
     OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOf } }],
+    AND: [{ OR: [{ visibility: "PLATFORM" }, { visibility: "ORGANISATION", ownerOrganisationId: organisationId }] }],
   };
 
   const where: Prisma.EmissionFactorWhereInput = { factorSet: setFilter };
@@ -161,7 +168,7 @@ export async function suggestEmissionFactor(
   actor: AiActor,
   input: FactorSuggestionInput,
 ): Promise<FactorSuggestionOutcome> {
-  const candidates = await findFactorCandidates(input);
+  const candidates = await findFactorCandidates(actor.organisationId, input);
 
   if (candidates.length === 0) {
     return {
@@ -215,6 +222,7 @@ export async function suggestEmissionFactor(
     ],
     audit: {
       userId: actor.userId,
+      organisationId: actor.organisationId,
       siteId: input.siteId ?? null,
       relatedType: "FACTOR_SUGGESTION",
       relatedId: null,

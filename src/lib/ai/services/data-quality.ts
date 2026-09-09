@@ -64,6 +64,7 @@ export async function analyseCarbonData(
     ],
     audit: {
       userId: actor.userId,
+      organisationId: actor.organisationId,
       siteId: siteId ?? null,
       relatedType: "DATA_QUALITY_SCAN",
       relatedId: null,

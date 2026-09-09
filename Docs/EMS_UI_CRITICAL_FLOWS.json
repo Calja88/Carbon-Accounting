@@ -1,0 +1,115 @@
+{
+  "_meta": {
+    "task": "UI14",
+    "purpose": "Machine-readable critical EMS UI flow inventory for the final browser-smoke/accessibility/readiness gate. Route/permission data is derived from src/lib/ems/navigation/registry.ts (EMS_MODULES) and src/lib/rbac/role-templates.ts (SYSTEM_ROLE_TEMPLATES) — those two files remain the single source of truth; this file records which critical flows they compose into and how each was verified, not a second copy of the route list.",
+    "personas": {
+      "sustainabilityLead": { "roleTemplate": "SUSTAINABILITY_LEAD", "membership": "ACTIVE", "accessMode": "ORGANISATION_WIDE" },
+      "orgAdmin": { "roleTemplate": "ORGANISATION_ADMINISTRATOR", "membership": "ACTIVE", "accessMode": "ORGANISATION_WIDE" },
+      "contributor": { "roleTemplate": "EMS_CONTRIBUTOR", "membership": "ACTIVE", "accessMode": "ORGANISATION_WIDE" },
+      "readOnly": { "roleTemplate": "FINANCE_READ_ONLY", "membership": "ACTIVE", "accessMode": "ORGANISATION_WIDE" },
+      "restrictedSite": { "roleTemplate": "SITE_MANAGER", "membership": "ACTIVE", "accessMode": "RESTRICTED", "scope": "Paragon ID / Hull Site only" },
+      "suspended": { "roleTemplate": "EMS_CONTRIBUTOR", "membership": "SUSPENDED", "accessMode": "ORGANISATION_WIDE" }
+    },
+    "seedScript": "prisma/seed/ems-demo.ts (pnpm run db:seed:ems-demo) — synthetic data only, never real environmental figures",
+    "checkTypes": {
+      "routeDiscovery": "Route resolves for an authorised persona and is linked from /ems or its own module list, per EMS_MODULES.",
+      "notBlank": "Page renders a real heading/content for an authorised persona with synthetic data, not an empty body or error boundary.",
+      "emptyState": "A zero-row list renders an explicit 'no records' message rather than a blank container.",
+      "a11yAutomated": "axe-core scan (wcag2a/wcag2aa/wcag22aa) has zero critical/serious violations.",
+      "keyboard": "Critical-flow nav/controls are reachable by Tab and show a visible focus indicator.",
+      "responsive": "No horizontal overflow at a 375px mobile viewport; nav 'More' menu remains usable.",
+      "rbacBoundary": "A persona without a module's permission gets redirected on direct URL access, never a 500 or blank render.",
+      "tenantScope": "RESTRICTED-access-mode persona only sees data scoped to its own Entity/Site."
+    }
+  },
+  "criticalFlows": [
+    {
+      "id": "dashboard-overview",
+      "description": "EMS dashboard/home — leadership overview, status/overdue counts, report/export entry points.",
+      "routes": ["/ems", "/ems/dashboard"],
+      "rolesExpected": ["sustainabilityLead", "orgAdmin", "contributor", "readOnly", "restrictedSite"],
+      "checks": ["routeDiscovery", "notBlank", "a11yAutomated", "keyboard", "responsive"]
+    },
+    {
+      "id": "programme-foundation",
+      "description": "Programme status, scope boundary, context, interested parties, planned changes.",
+      "routes": ["/ems/programme"],
+      "rolesExpected": ["sustainabilityLead", "orgAdmin", "contributor"],
+      "checks": ["routeDiscovery", "notBlank", "a11yAutomated", "emptyState"]
+    },
+    {
+      "id": "documents-evidence",
+      "description": "Controlled documents register and evidence hub, including SharePoint connection status where configured.",
+      "routes": ["/ems/documents", "/ems/evidence"],
+      "rolesExpected": ["sustainabilityLead", "orgAdmin", "contributor", "readOnly"],
+      "checks": ["routeDiscovery", "notBlank", "a11yAutomated", "emptyState"]
+    },
+    {
+      "id": "notifications-work-queue",
+      "description": "Personal work queue: due/overdue reminders and delivery status.",
+      "routes": ["/ems/notifications"],
+      "rolesExpected": ["sustainabilityLead", "orgAdmin", "contributor", "readOnly", "restrictedSite"],
+      "checks": ["routeDiscovery", "notBlank", "a11yAutomated", "emptyState"]
+    },
+    {
+      "id": "aspects-operations",
+      "description": "Aspect register -> significance assessment -> operational control linkage, plus monitoring, providers, communications, emergency preparedness.",
+      "routes": ["/ems/processes", "/ems/aspects", "/ems/controls", "/ems/monitoring", "/ems/providers", "/ems/communications", "/ems/emergency"],
+      "rolesExpected": ["sustainabilityLead", "contributor", "restrictedSite"],
+      "checks": ["routeDiscovery", "notBlank", "a11yAutomated", "emptyState", "tenantScope"]
+    },
+    {
+      "id": "legal-compliance",
+      "description": "Legal candidate -> applicability -> obligation approval -> compliance evaluation chain.",
+      "routes": ["/ems/legal/provider-health", "/ems/legal/applicability", "/ems/legal/obligations", "/ems/legal/evaluations", "/ems/legal/other-requirements"],
+      "rolesExpected": ["sustainabilityLead", "contributor"],
+      "checks": ["routeDiscovery", "notBlank", "a11yAutomated", "emptyState", "rbacBoundary"],
+      "notes": "/ems/legal/provider-health requires ems.legal_source.manage — Sustainability Lead only among seeded personas; used as the primary rbacBoundary probe for contributor/readOnly/restrictedSite."
+    },
+    {
+      "id": "objectives-actions",
+      "description": "Objective/metric definition -> progress -> linked action programmes.",
+      "routes": ["/ems/objectives", "/ems/actions"],
+      "rolesExpected": ["sustainabilityLead", "contributor"],
+      "checks": ["routeDiscovery", "notBlank", "a11yAutomated", "emptyState"]
+    },
+    {
+      "id": "audit-nc-capa",
+      "description": "Audit programme/execution -> finding -> nonconformity -> root cause -> corrective action -> effectiveness review chain.",
+      "routes": ["/ems/audits", "/ems/audits/[id]", "/ems/incidents", "/ems/incidents/[id]", "/ems/nonconformities", "/ems/nonconformities/[id]"],
+      "rolesExpected": ["sustainabilityLead", "contributor"],
+      "checks": ["routeDiscovery", "notBlank", "a11yAutomated", "emptyState"],
+      "notes": "Previously the audits module (audit-forms.tsx, audit-detail-forms.tsx) had no empty-state message for zero programmes/audits/findings — fixed in this task."
+    },
+    {
+      "id": "competence-evidence-expiry",
+      "description": "Competence requirements/people/assignments -> evidence submission/verification -> expiry tracking. Explicitly the pair (with management-review pack/minutes) that previously blocked T82.",
+      "routes": ["/ems/competence/requirements", "/ems/competence/people", "/ems/competence/people/[id]", "/ems/competence/assignments", "/ems/competence/assignments/[id]", "/ems/competence/gaps", "/ems/competence/expiry"],
+      "rolesExpected": ["sustainabilityLead", "orgAdmin", "contributor"],
+      "checks": ["routeDiscovery", "notBlank", "a11yAutomated", "emptyState", "rbacBoundary"],
+      "notes": "Seeded with one active assignment + verified evidence and one assignment/evidence pair expiring within 30 days, per prisma/seed/ems-demo.ts."
+    },
+    {
+      "id": "management-review-pack-minutes",
+      "description": "Review cycle/agenda -> deterministic pack generation/issue -> minutes -> decisions -> action links -> closure. The other flow that previously blocked T82.",
+      "routes": ["/ems/management-reviews", "/ems/management-reviews/[id]", "/ems/management-reviews/agenda-templates"],
+      "rolesExpected": ["sustainabilityLead", "orgAdmin"],
+      "checks": ["routeDiscovery", "notBlank", "a11yAutomated", "emptyState"],
+      "notes": "Seeded with one held/complete review with an issued pack, approved minutes, and one decision, per prisma/seed/ems-demo.ts."
+    },
+    {
+      "id": "reporting-export",
+      "description": "Reporting/export entry points reachable from the EMS dashboard.",
+      "routes": ["/ems/dashboard"],
+      "rolesExpected": ["sustainabilityLead", "orgAdmin", "readOnly"],
+      "checks": ["routeDiscovery", "notBlank", "a11yAutomated"]
+    },
+    {
+      "id": "rbac-tenancy-boundary",
+      "description": "Cross-cutting: denied-module direct access, suspended membership, and restricted-access-mode scoping — not a single module, exercised across the registry.",
+      "routes": ["*"],
+      "rolesExpected": ["contributor", "readOnly", "restrictedSite", "suspended"],
+      "checks": ["rbacBoundary", "tenantScope"]
+    }
+  ]
+}

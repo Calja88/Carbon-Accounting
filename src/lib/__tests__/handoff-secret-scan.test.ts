@@ -67,3 +67,367 @@ describe("handoff secret scanner", () => {
     expect(finding).toBeNull();
   });
 });
+
+// Checkpoint A: the narrow, exact-match allowlist for
+// scripts/rls-spike/setup-test-db.sh's two reviewed synthetic/local-only
+// RLS-spike credential defaults — see secret-scan.mjs's
+// REVIEWED_SAFE_CREDENTIAL_MATCHES for the full review rationale. Built
+// from parts for the same reason as the fixtures above: this test file's
+// own source text must never contain the literal matched string.
+describe("reviewed exact-match credential allowlist (scripts/rls-spike/setup-test-db.sh)", () => {
+  // Split before the ":" (the rule's operator) — splitting only within the
+  // value leaves the first fragment alone still keyword+operator+16 chars,
+  // which matches on its own.
+  const ownerMatch = join("RLS_SPIKE_OWNER_PASSWORD", ":-rls_spike_owner_local_only");
+  const appMatch = join("RLS_SPIKE_APP_PASSWORD", ":-rls_spike_app_local_only");
+  const rlsSpikePath = join("scripts/rls-spike/", "setup-test-db.sh");
+
+  it("allows the exact reviewed synthetic RLS-spike credential defaults in their file", () => {
+    const fixture = [`OWNER_PASSWORD="\${${ownerMatch}}"`, `APP_PASSWORD="\${${appMatch}}"`].join("\n");
+    expect(scanContentForSecrets(fixture, rlsSpikePath)).toBeNull();
+  });
+
+  it("still fails a different/new credential-like value added to the same file", () => {
+    const fixture = `OWNER_PASSWORD="\${RLS_SPIKE_OWNER_PASSWORD:-${join("some-other-real-look", "ing-secret-value")}}"`;
+    const finding = scanContentForSecrets(fixture, rlsSpikePath);
+    expect(finding).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    const fixture = `OWNER_PASSWORD="\${${ownerMatch}}"`;
+    const finding = scanContentForSecrets(fixture, join("scripts/rls-spike/", "some-other-script.sh"));
+    expect(finding).not.toBeNull();
+  });
+
+  it("still fails the same content when no relPath is given at all", () => {
+    const fixture = `OWNER_PASSWORD="\${${ownerMatch}}"`;
+    expect(scanContentForSecrets(fixture)).not.toBeNull();
+  });
+
+  it("never includes the matched text even for the one case it does still flag here", () => {
+    const secretValue = join("some-other-real-look", "ing-secret-value");
+    const fixture = `OWNER_PASSWORD="\${RLS_SPIKE_OWNER_PASSWORD:-${secretValue}}"`;
+    const finding = scanContentForSecrets(fixture, rlsSpikePath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
+
+// Checkpoint A: the narrow, exact-match allowlist for
+// src/app/invite/[token]/actions.ts's benign `tokenHash =
+// hashInvitationToken(...)` assignment (calls the local SHA-256 helper on
+// the visitor's own submitted token; no embedded secret). Built from parts
+// for the same self-scanning reason as above.
+describe("reviewed exact-match credential allowlist (src/app/invite/[token]/actions.ts)", () => {
+  // Split before the "=" (the rule's operator), same reasoning as the
+  // RLS-spike fixtures above.
+  const tokenHashMatch = join("tokenHash ", "= hashInvitationToken");
+  const invitePath = join("src/app/invite/[token]/", "actions.ts");
+
+  it("allows the exact reviewed benign hashInvitationToken assignment in its file", () => {
+    const fixture = `  const ${tokenHashMatch}(parsed.data.token);`;
+    expect(scanContentForSecrets(fixture, invitePath)).toBeNull();
+  });
+
+  it("still fails a literal token/hash/password assignment in the same file", () => {
+    for (const fixture of [
+      `tokenHash = "${join("actual-secret-value-that", "-is-long-enough")}"`,
+      `token = "${join("some-long-secret-value", "-here-too")}"`,
+      `apiToken = "${join("another-long-secret", "-value-here")}"`,
+      `password = "${join("yet-another-long-secret", "-value")}"`,
+    ]) {
+      expect(scanContentForSecrets(fixture, invitePath)).not.toBeNull();
+    }
+  });
+
+  it("still fails a different token-related assignment in the same file unless separately allowlisted", () => {
+    const fixture = `otherTokenHash ${join("= hashSomethingElse", "AndDifferent")}(value);`;
+    expect(scanContentForSecrets(fixture, invitePath)).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    const fixture = `const ${tokenHashMatch}(parsed.data.token);`;
+    expect(scanContentForSecrets(fixture, join("src/app/invite/[token]/", "other-file.ts"))).not.toBeNull();
+  });
+
+  it("the reviewed RLS-spike exception is unaffected by this second exception", () => {
+    const ownerMatch = join("RLS_SPIKE_OWNER_PASSWORD", ":-rls_spike_owner_local_only");
+    const fixture = `OWNER_PASSWORD="\${${ownerMatch}}"`;
+    expect(scanContentForSecrets(fixture, join("scripts/rls-spike/", "setup-test-db.sh"))).toBeNull();
+  });
+
+  it("never includes the matched text for the cases it still flags here", () => {
+    const secretValue = join("actual-secret-value-that", "-is-long-enough");
+    const fixture = `tokenHash = "${secretValue}"`;
+    const finding = scanContentForSecrets(fixture, invitePath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
+
+// Checkpoint A: the identical reviewed benign hashInvitationToken
+// assignment also appears in the sibling page component. Same exact-match
+// allowlist mechanism, scoped to this specific file.
+describe("reviewed exact-match credential allowlist (src/app/invite/[token]/page.tsx)", () => {
+  const tokenHashMatch = join("tokenHash ", "= hashInvitationToken");
+  const pagePath = join("src/app/invite/[token]/", "page.tsx");
+
+  it("allows the reviewed benign helper-call assignment in page.tsx", () => {
+    const fixture = `  const ${tokenHashMatch}(token);`;
+    expect(scanContentForSecrets(fixture, pagePath)).toBeNull();
+  });
+
+  it("still fails a literal token assignment in page.tsx", () => {
+    const fixture = `token = "${join("some-long-literal-token", "-value-here")}"`;
+    expect(scanContentForSecrets(fixture, pagePath)).not.toBeNull();
+  });
+
+  it("still fails a literal password/API token assignment in page.tsx", () => {
+    for (const fixture of [
+      `password = "${join("a-long-literal-password", "-value-here")}"`,
+      `apiToken = "${join("a-long-literal-api-token", "-value-here")}"`,
+    ]) {
+      expect(scanContentForSecrets(fixture, pagePath)).not.toBeNull();
+    }
+  });
+
+  it("still fails a different, non-allowlisted token assignment in page.tsx", () => {
+    const fixture = `sessionToken ${join("= readFromSomewhereElse", "Unrelated")}(value);`;
+    expect(scanContentForSecrets(fixture, pagePath)).not.toBeNull();
+  });
+
+  it("the actions.ts exception still works alongside this one", () => {
+    const fixture = `  const ${tokenHashMatch}(parsed.data.token);`;
+    expect(scanContentForSecrets(fixture, join("src/app/invite/[token]/", "actions.ts"))).toBeNull();
+  });
+
+  it("the RLS-spike exception still works alongside this one", () => {
+    const ownerMatch = join("RLS_SPIKE_OWNER_PASSWORD", ":-rls_spike_owner_local_only");
+    const fixture = `OWNER_PASSWORD="\${${ownerMatch}}"`;
+    expect(scanContentForSecrets(fixture, join("scripts/rls-spike/", "setup-test-db.sh"))).toBeNull();
+  });
+
+  it("never echoes secret values for the cases it still flags in page.tsx", () => {
+    const secretValue = join("some-long-literal-token", "-value-here");
+    const finding = scanContentForSecrets(`token = "${secretValue}"`, pagePath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
+
+// Checkpoint A: three synthetic Prisma URL-derivation fixtures in
+// src/lib/__tests__/prisma-config.test.ts, each matching both the
+// connection-string and neon-host rules. Split before the "@" (not just
+// after "postgres://"), since neon-host needs no scheme prefix at all.
+describe("reviewed exact-match credential allowlist (src/lib/__tests__/prisma-config.test.ts)", () => {
+  const prismaConfigPath = join("src/lib/__tests__/", "prisma-config.test.ts");
+  const fixtures = [
+    { hostFragment: join("synthetic@fake-pooler.example", ".neon.tech/example") },
+    { hostFragment: join("synthetic@ep-example-pooler.eu-west-2.aws", ".neon.tech/example") },
+    { hostFragment: join("synthetic@ep-example.eu-west-2.aws", ".neon.tech/example") },
+  ];
+
+  it.each(fixtures)("allows the reviewed synthetic fixture $hostFragment for both overlapping rules", ({ hostFragment }) => {
+    const hostMatch = join("synthetic:", hostFragment);
+    const urlMatch = join("postgresql://synthetic:", hostFragment);
+    expect(scanContentForSecrets(`const pooled = "${urlMatch}";`, prismaConfigPath)).toBeNull();
+    expect(scanContentForSecrets(hostMatch, prismaConfigPath)).toBeNull();
+  });
+
+  it("still fails a different synthetic-looking host in the same file", () => {
+    const url = join("postgresql://synthetic:", "synthetic@ep-different-fixture-not-reviewed.eu-west-2.aws.neon.tech/example");
+    expect(scanContentForSecrets(`const pooled = "${url}";`, prismaConfigPath)).not.toBeNull();
+  });
+
+  it("still fails a different username/password on an otherwise-reviewed host", () => {
+    const url = join("postgresql://realuser:", "realpass20261234567890@fake-pooler.example.neon.tech/example");
+    expect(scanContentForSecrets(`const pooled = "${url}";`, prismaConfigPath)).not.toBeNull();
+  });
+
+  it("still fails a literal generic credential assignment in the same file", () => {
+    const fixture = `const apiSecret = "${join("th1s-l00ks-like-a-real", "-secret-value")}";`;
+    expect(scanContentForSecrets(fixture, prismaConfigPath)).not.toBeNull();
+  });
+
+  it("does not allow the same reviewed fixture text in a different, non-reviewed file", () => {
+    const urlMatch = join("postgresql://synthetic:", fixtures[0].hostFragment);
+    expect(scanContentForSecrets(`const pooled = "${urlMatch}";`, join("src/lib/__tests__/", "other.test.ts"))).not.toBeNull();
+  });
+
+  it("other reviewed exceptions (RLS-spike, invite actions/page) are unaffected", () => {
+    const ownerMatch = join("RLS_SPIKE_OWNER_PASSWORD", ":-rls_spike_owner_local_only");
+    expect(scanContentForSecrets(`OWNER_PASSWORD="\${${ownerMatch}}"`, join("scripts/rls-spike/", "setup-test-db.sh"))).toBeNull();
+    const tokenHashMatch = join("tokenHash ", "= hashInvitationToken");
+    expect(scanContentForSecrets(`const ${tokenHashMatch}(token);`, join("src/app/invite/[token]/", "actions.ts"))).toBeNull();
+  });
+
+  it("never echoes the matched fixture text for a case it still flags", () => {
+    const secretValue = join("th1s-l00ks-like-a-real", "-secret-value");
+    const finding = scanContentForSecrets(`const apiSecret = "${secretValue}";`, prismaConfigPath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
+
+// Checkpoint A: the synthetic export-service redaction-test fixture in
+// src/lib/exports/__tests__/organisation-export-service.test.ts.
+describe("reviewed exact-match credential allowlist (src/lib/exports/__tests__/organisation-export-service.test.ts)", () => {
+  const exportServicePath = join("src/lib/exports/__tests__/", "organisation-export-service.test.ts");
+  const fixtureMatch = join("inviteTokenHash", join(": ", '"super-secret-hash"'));
+
+  it("allows the reviewed synthetic redaction-test fixture", () => {
+    expect(scanContentForSecrets(`inviteTokenHash: "${join("super-secret", "-hash")}"`, exportServicePath)).toBeNull();
+  });
+
+  it("still fails a different fixture value assigned to the same field", () => {
+    const fixture = `inviteTokenHash: "${join("some-other-fixture", "-value-here-too")}"`;
+    expect(scanContentForSecrets(fixture, exportServicePath)).not.toBeNull();
+  });
+
+  it("still fails an unrelated literal token/password assignment in the same file", () => {
+    const fixture = `password = "${join("a-literal-password", "-value-here")}"`;
+    expect(scanContentForSecrets(fixture, exportServicePath)).not.toBeNull();
+  });
+
+  it("does not allow the same fixture text in a different, non-reviewed file", () => {
+    expect(scanContentForSecrets(fixtureMatch, join("src/lib/exports/__tests__/", "other.test.ts"))).not.toBeNull();
+  });
+
+  it("never echoes the fixture text for a case it still flags", () => {
+    const secretValue = join("some-other-fixture", "-value-here-too");
+    const finding = scanContentForSecrets(`inviteTokenHash: "${secretValue}"`, exportServicePath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
+
+// Checkpoint A: the synthetic cookie test fixture in
+// src/lib/organisation/__tests__/cookie.test.ts.
+describe("reviewed exact-match credential allowlist (src/lib/organisation/__tests__/cookie.test.ts)", () => {
+  const cookieTestPath = join("src/lib/organisation/__tests__/", "cookie.test.ts");
+
+  it("allows the reviewed synthetic NEXTAUTH_SECRET test fixture", () => {
+    const fixture = `process.env.NEXTAUTH_SECRET = "${join("test-secret-value-not", "-a-real-credential")}";`;
+    expect(scanContentForSecrets(fixture, cookieTestPath)).toBeNull();
+  });
+
+  it("still fails a different value assigned to NEXTAUTH_SECRET in the same file", () => {
+    const fixture = `process.env.NEXTAUTH_SECRET = "${join("some-other-real-look", "ing-secret-value")}";`;
+    expect(scanContentForSecrets(fixture, cookieTestPath)).not.toBeNull();
+  });
+
+  it("still fails an unrelated literal token assignment in the same file", () => {
+    const fixture = `apiToken = "${join("a-literal-api-token", "-value-here")}"`;
+    expect(scanContentForSecrets(fixture, cookieTestPath)).not.toBeNull();
+  });
+
+  it("does not allow the same fixture text in a different, non-reviewed file", () => {
+    const fixture = `process.env.NEXTAUTH_SECRET = "${join("test-secret-value-not", "-a-real-credential")}";`;
+    expect(scanContentForSecrets(fixture, join("src/lib/organisation/__tests__/", "other.test.ts"))).not.toBeNull();
+  });
+
+  it("never echoes the fixture text for a case it still flags", () => {
+    const secretValue = join("some-other-real-look", "ing-secret-value");
+    const finding = scanContentForSecrets(`process.env.NEXTAUTH_SECRET = "${secretValue}";`, cookieTestPath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
+
+// Checkpoint A: the runtime token-hash property assignment in the
+// production application file src/lib/organisation/invitation-service.ts
+// — reviewed with extra scrutiny as production source, not test code.
+// Distinct matched text from the actions.ts/page.tsx exception above
+// (object-literal `tokenHash: ...` vs. `const tokenHash = ...`).
+describe("reviewed exact-match credential allowlist (src/lib/organisation/invitation-service.ts)", () => {
+  const invitationServicePath = join("src/lib/organisation/", "invitation-service.ts");
+  const propertyMatch = join("tokenHash", ": hashInvitationToken");
+
+  it("allows the reviewed runtime hash-assignment property in its file", () => {
+    const fixture = `  return {\n    token,\n    ${propertyMatch}(token),\n    expiresAt,\n  };`;
+    expect(scanContentForSecrets(fixture, invitationServicePath)).toBeNull();
+  });
+
+  it("still fails a literal token-hash value in the same file", () => {
+    const fixture = `tokenHash: "${join("a-hardcoded-literal", "-hash-value-here")}"`;
+    expect(scanContentForSecrets(fixture, invitationServicePath)).not.toBeNull();
+  });
+
+  it("still fails a different, non-allowlisted token-related property in the same file", () => {
+    const fixture = `sessionToken: ${join("computeSomethingElse", "Entirely")}(value)`;
+    expect(scanContentForSecrets(fixture, invitationServicePath)).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    expect(scanContentForSecrets(`${propertyMatch}(token)`, join("src/lib/organisation/", "other-service.ts"))).not.toBeNull();
+  });
+
+  it("is a distinct exception from the actions.ts/page.tsx assignment-form match", () => {
+    // The object-literal colon form is allowlisted for this file; the
+    // const-assignment equals form (reviewed for a different file) is not.
+    const assignmentMatch = join("tokenHash ", "= hashInvitationToken");
+    expect(scanContentForSecrets(`const ${assignmentMatch}(token);`, invitationServicePath)).not.toBeNull();
+  });
+
+  it("never echoes the matched text for a case it still flags", () => {
+    const secretValue = join("a-hardcoded-literal", "-hash-value-here");
+    const finding = scanContentForSecrets(`tokenHash: "${secretValue}"`, invitationServicePath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
+
+// Checkpoint A: the CA06 disposable-PostgreSQL CI gate workflow's two
+// fixed synthetic literal passwords for its ephemeral postgres:16 service
+// container (POSTGRES_PASSWORD, PGPASSWORD) — both the same literal value,
+// never a real credential, never used outside that one job's disposable
+// database. Built from parts for the same self-scanning reason as above.
+describe("reviewed exact-match credential allowlist (.github/workflows/checkpoint-a-postgres.yml)", () => {
+  const workflowPath = join(".github/workflows/", "checkpoint-a-postgres.yml");
+  const postgresPasswordMatch = join("POSTGRES_PASSWORD", ": ca_disposable_only");
+  const pgpasswordMatch = join("PGPASSWORD", ": ca_disposable_only");
+
+  it("allows the reviewed synthetic disposable-database passwords in their file", () => {
+    const fixture = [postgresPasswordMatch, pgpasswordMatch].join("\n");
+    expect(scanContentForSecrets(fixture, workflowPath)).toBeNull();
+  });
+
+  it("still fails a different/new credential-like value added to the same file", () => {
+    const fixture = `${join("SOME_OTHER", "_PASSWORD")}: ${join("a-real-look", "ing-secret-value")}`;
+    expect(scanContentForSecrets(fixture, workflowPath)).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    const finding = scanContentForSecrets(postgresPasswordMatch, join(".github/workflows/", "other.yml"));
+    expect(finding).not.toBeNull();
+  });
+
+  it("never echoes the matched text for a case it still flags", () => {
+    const secretValue = join("a-real-look", "ing-secret-value");
+    const finding = scanContentForSecrets(`${join("SOME_OTHER", "_PASSWORD")}: ${secretValue}`, workflowPath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
+
+// Checkpoint A: the CA01-CA06 real-PostgreSQL integration suite's one
+// synthetic test-user fixture, whose required Prisma passwordHash field is
+// the fixed, self-documenting literal "not-a-login-hash" — every user this
+// file creates has an @example.invalid email and is discarded with the
+// disposable database at the end of the CI job.
+describe("reviewed exact-match credential allowlist (tests/checkpoint-a/postgres.test.ts)", () => {
+  const postgresTestPath = join("tests/checkpoint-a/", "postgres.test.ts");
+  const passwordHashMatch = join("passwordHash", ': "not-a-login-hash"');
+
+  it("allows the reviewed synthetic test-user fixture in its file", () => {
+    expect(scanContentForSecrets(passwordHashMatch, postgresTestPath)).toBeNull();
+  });
+
+  it("still fails a different/new credential-like value added to the same file", () => {
+    const fixture = `passwordHash: "${join("a-real-look", "ing-secret-value")}"`;
+    expect(scanContentForSecrets(fixture, postgresTestPath)).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    const finding = scanContentForSecrets(passwordHashMatch, join("tests/checkpoint-a/", "other.test.ts"));
+    expect(finding).not.toBeNull();
+  });
+
+  it("never echoes the matched text for a case it still flags", () => {
+    const secretValue = join("a-real-look", "ing-secret-value");
+    const finding = scanContentForSecrets(`passwordHash: "${secretValue}"`, postgresTestPath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});

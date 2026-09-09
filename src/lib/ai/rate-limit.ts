@@ -16,7 +16,12 @@
  * duplicates, not to be a security control.
  *
  * All limits are configurable (`AI_RATE_LIMIT_PER_MINUTE`,
- * `AI_RATE_LIMIT_PER_DAY`, or the admin settings page).
+ * `AI_RATE_LIMIT_PER_DAY`, or the admin settings page) and, per Phase 1
+ * tenancy (T18), scoped to one user *within* one Organisation: the same
+ * person acting in two different organisations gets two independent quotas,
+ * matching each Organisation's own `requestsPerMinute`/`requestsPerDay`
+ * settings rather than a single limit shared across every tenant they belong
+ * to.
  */
 
 import { createHash } from "crypto";
@@ -31,15 +36,19 @@ export interface RateLimitVerdict {
 
 const ALLOWED: RateLimitVerdict = { allowed: true, reason: null, retryAfterSeconds: null };
 
-export async function checkAiRateLimit(userId: string, config: AiRuntimeConfig): Promise<RateLimitVerdict> {
+export async function checkAiRateLimit(
+  userId: string,
+  organisationId: string,
+  config: AiRuntimeConfig,
+): Promise<RateLimitVerdict> {
   const now = Date.now();
   const minuteAgo = new Date(now - 60_000);
   const dayAgo = new Date(now - 24 * 60 * 60 * 1000);
 
   try {
     const [lastMinute, lastDay] = await Promise.all([
-      prisma.aiInteraction.count({ where: { userId, createdAt: { gte: minuteAgo } } }),
-      prisma.aiInteraction.count({ where: { userId, createdAt: { gte: dayAgo } } }),
+      prisma.aiInteraction.count({ where: { userId, organisationId, createdAt: { gte: minuteAgo } } }),
+      prisma.aiInteraction.count({ where: { userId, organisationId, createdAt: { gte: dayAgo } } }),
     ]);
 
     if (lastMinute >= config.requestsPerMinute) {

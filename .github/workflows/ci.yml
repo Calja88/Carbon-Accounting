@@ -1,0 +1,43 @@
+name: CI
+
+# Mandatory gate (T80, Docs/PHASE8_HARDENING_READINESS_SPEC.md §3: "suite is
+# mandatory in CI"). Runs on every push/PR so the cross-tenant adversarial
+# suite under src/lib/__tests__/tenant-adversarial/**,
+# src/lib/repositories/__tests__/** and src/lib/security/__tests__/** can
+# never be skipped before merge. No live database or real environmental
+# data is used — every test here mocks Prisma with synthetic fixtures.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck, lint, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Test (includes the T80 cross-tenant adversarial suite)
+        run: pnpm test

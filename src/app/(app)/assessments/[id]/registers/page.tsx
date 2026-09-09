@@ -2,7 +2,10 @@ import { notFound } from "next/navigation";
 import { Check, Trash2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { listAssumptions, listExclusions } from "@/lib/lca/registers-service";
-import { canApproveLca, checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
+import { canApproveLca, checkCanEditAssessment, getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { MATERIALITY_LABELS } from "@/lib/lca/labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,20 +22,34 @@ export const dynamic = "force-dynamic";
 
 export default async function RegistersPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [assessment, assumptions, exclusions, users, processes, items, actor] = await Promise.all([
+  const context = await getLcaContext();
+  if (!context) notFound();
+  try {
+    await requireAssessmentInScope(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
+
+  const [assessment, assumptions, exclusions, users, processes, items] = await Promise.all([
     prisma.lcaAssessment.findUnique({ where: { id } }),
     listAssumptions(id),
     listExclusions(id),
-    prisma.user.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    // User is a global identity — candidate owners are limited to this
+    // Organisation's active members, not every user on the platform.
+    prisma.user.findMany({
+      where: { memberships: { some: { organisationId: context.organisationId, status: "ACTIVE" } } },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
     prisma.lcaProcess.findMany({ where: { assessmentId: id }, orderBy: [{ sortOrder: "asc" }], select: { id: true, name: true } }),
     prisma.lcaInventoryItem.findMany({ where: { assessmentId: id }, orderBy: [{ sortOrder: "asc" }], select: { id: true, name: true } }),
-    getLcaActor(),
   ]);
   if (!assessment) notFound();
 
-  const permission = checkCanEditAssessment(actor, assessment.status);
+  const permission = checkCanEditAssessment(context, assessment.status);
   const canEdit = permission.ok;
-  const canApprove = canApproveLca(actor);
+  const canApprove = canApproveLca(context);
 
   const excludedInventoryLines = await prisma.lcaInventoryItem.findMany({
     where: { assessmentId: id, isExcluded: true },

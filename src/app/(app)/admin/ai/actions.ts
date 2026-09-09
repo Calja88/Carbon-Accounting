@@ -4,18 +4,37 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { AiLoggingLevel, AiTaskType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { requireAdminSession } from "@/lib/admin";
-import { AI_SETTINGS_SINGLETON_ID, AI_TASK_TYPES, ensureAiSettingsRow, invalidateAiConfigCache } from "@/lib/ai/config";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
+import { AI_TASK_TYPES, ensureAiSettingsRow, invalidateAiConfigCache } from "@/lib/ai/config";
 import { refreshModelCatalog } from "@/lib/ai/catalog-store";
 
 /**
  * Admin actions for the AI layer.
  *
+ * Phase 1 tenancy (T18): every action here operates on the calling
+ * Organisation's own `AiSettings` row only — resolved from the caller's
+ * `OrganisationContext`, gated by `ai.settings.manage`, never a legacy
+ * ADMIN-role check. An organisation administrator's grants apply to their
+ * own tenant only; nothing here can read or write another Organisation's
+ * settings ("admin status does not imply platform-global access").
+ *
  * Note what these deliberately cannot do: there is no field, anywhere, for an
  * API key. The key lives only in the server environment
  * (`OPENROUTER_API_KEY`); it is never written to, or read from, the database,
- * and no endpoint returns it.
+ * and no endpoint returns it. The model catalogue itself (`refreshModelCatalog`)
+ * is platform-global, shared by every tenant — refreshing it is still gated by
+ * this Organisation's own `ai.settings.manage` grant, same as the rest of this
+ * page, per the file map's note that a platform-wide refresh should be kept
+ * behind an ordinary organisation-scoped permission unless/until a separate
+ * platform-operator control plane exists.
  */
+
+async function requireAiSettingsContext() {
+  const context = await requireOrganisationContext();
+  requirePermission(context, "ai.settings.manage");
+  return context;
+}
 
 export interface AiSettingsState {
   error: string | null;
@@ -40,8 +59,14 @@ function checkbox(formData: FormData, name: string): boolean {
 }
 
 export async function saveAiSettingsAction(_prev: AiSettingsState, formData: FormData): Promise<AiSettingsState> {
-  const session = await requireAdminSession();
-  if (!session) return { error: "Admins only.", saved: false };
+  let context;
+  try {
+    context = await requireAiSettingsContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) return { error: "You must be signed in.", saved: false };
+    if (err instanceof PermissionDeniedError) return { error: "You don't have permission to manage AI settings.", saved: false };
+    throw err;
+  }
 
   const parsed = settingsSchema.safeParse({
     aiEnabled: checkbox(formData, "aiEnabled"),
@@ -59,7 +84,7 @@ export async function saveAiSettingsAction(_prev: AiSettingsState, formData: For
     return { error: parsed.error.issues[0]?.message ?? "Check the values and try again.", saved: false };
   }
 
-  await ensureAiSettingsRow();
+  const settings = await ensureAiSettingsRow(context.organisationId);
 
   const taskModels = AI_TASK_TYPES.map((task) => ({
     task,
@@ -74,7 +99,7 @@ export async function saveAiSettingsAction(_prev: AiSettingsState, formData: For
 
   await prisma.$transaction([
     prisma.aiSettings.update({
-      where: { id: AI_SETTINGS_SINGLETON_ID },
+      where: { id: settings.id },
       data: {
         aiEnabled: parsed.data.aiEnabled,
         openRouterEnabled: parsed.data.openRouterEnabled,
@@ -85,15 +110,15 @@ export async function saveAiSettingsAction(_prev: AiSettingsState, formData: For
         loggingLevel: parsed.data.loggingLevel as AiLoggingLevel,
         requestsPerMinute: parsed.data.requestsPerMinute,
         requestsPerDay: parsed.data.requestsPerDay,
-        updatedByUserId: session.user.id,
+        updatedByUserId: context.userId,
       },
     }),
     ...taskModels.map((tm) =>
       prisma.aiTaskModel.upsert({
-        where: { settingsId_task: { settingsId: AI_SETTINGS_SINGLETON_ID, task: tm.task as AiTaskType } },
+        where: { settingsId_task: { settingsId: settings.id, task: tm.task as AiTaskType } },
         update: { modelId: tm.modelId, fallbackModelId: tm.fallbackModelId },
         create: {
-          settingsId: AI_SETTINGS_SINGLETON_ID,
+          settingsId: settings.id,
           task: tm.task as AiTaskType,
           modelId: tm.modelId,
           fallbackModelId: tm.fallbackModelId,
@@ -102,7 +127,7 @@ export async function saveAiSettingsAction(_prev: AiSettingsState, formData: For
     ),
   ]);
 
-  invalidateAiConfigCache();
+  invalidateAiConfigCache(context.organisationId);
   revalidatePath("/admin/ai");
 
   return { error: null, saved: true };
@@ -115,14 +140,20 @@ export interface CatalogRefreshState {
 
 /**
  * Pulls OpenRouter's live model list. Admin-triggered only — a request path
- * must never be able to set off an outbound catalogue fetch.
+ * must never be able to set off an outbound catalogue fetch. The catalogue
+ * itself is platform-global (see catalog-store.ts), but triggering a refresh
+ * still requires this Organisation's own `ai.settings.manage` grant.
  */
 export async function refreshCatalogAction(): Promise<CatalogRefreshState> {
-  const session = await requireAdminSession();
-  if (!session) return { error: "Admins only.", message: null };
+  try {
+    await requireAiSettingsContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) return { error: "You must be signed in.", message: null };
+    if (err instanceof PermissionDeniedError) return { error: "You don't have permission to manage AI settings.", message: null };
+    throw err;
+  }
 
   try {
-    await ensureAiSettingsRow();
     const result = await refreshModelCatalog();
     revalidatePath("/admin/ai");
     return {

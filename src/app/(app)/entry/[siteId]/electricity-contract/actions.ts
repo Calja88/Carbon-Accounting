@@ -2,8 +2,10 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { auth } from "@/auth";
 import { upsertSiteEnergyContract } from "@/lib/entries-service";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { assertSiteAccess, requirePermission } from "@/lib/rbac/authorize";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
 
 const schema = z.object({
   siteId: z.string().min(1),
@@ -22,8 +24,13 @@ export async function submitContractAction(
   _prevState: ContractFormState,
   formData: FormData,
 ): Promise<ContractFormState> {
-  const session = await auth();
-  if (!session?.user) return { error: "You must be signed in.", success: false };
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) return { error: "You must be signed in.", success: false };
+    throw err;
+  }
 
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -32,14 +39,17 @@ export async function submitContractAction(
   const data = parsed.data;
 
   try {
-    await upsertSiteEnergyContract({
+    requirePermission(context, "carbon.contract.manage");
+    assertSiteAccess(context, data.siteId);
+
+    await upsertSiteEnergyContract(toTenantRepositoryContext(context), {
       siteId: data.siteId,
       effectiveFrom: new Date(),
       supplierName: data.supplierName,
       tariffType: data.tariffType,
       regoBacked: data.regoBacked === "yes",
       regoVolumeKwh: data.regoVolumeKwh === "" || data.regoVolumeKwh === undefined ? null : data.regoVolumeKwh,
-      enteredByUserId: session.user.id,
+      enteredByUserId: context.userId,
     });
 
     revalidatePath(`/entry/${data.siteId}`);

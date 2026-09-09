@@ -1,10 +1,13 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, Factory, Upload, Zap, ShoppingBag } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getSiteContractStatus, getSiteQuantityStatus } from "@/lib/entry-status";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { requireSiteInScope } from "@/lib/repositories/carbon-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 
 const STATUS_BADGE: Record<string, { label: string; tone: "success" | "warning" | "neutral" | "danger" }> = {
   submitted: { label: "Submitted", tone: "success" },
@@ -25,10 +28,29 @@ const SECTIONS: Record<string, { label: string; icon: React.ComponentType<{ clas
 
 export default async function SiteEntryPage({ params }: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await params;
-  const site = await prisma.site.findUnique({ where: { id: siteId }, include: { entity: true } });
-  if (!site) notFound();
 
-  const [statuses, contract] = await Promise.all([getSiteQuantityStatus(siteId), getSiteContractStatus(siteId)]);
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
+
+  let site;
+  try {
+    site = await requireSiteInScope(context, siteId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) notFound();
+    throw err;
+  }
+  const entity = await prisma.entity.findUnique({ where: { id: site.entityId } });
+  if (!entity) notFound();
+
+  const [statuses, contract] = await Promise.all([
+    getSiteQuantityStatus(context, siteId),
+    getSiteContractStatus(context, siteId),
+  ]);
 
   const bySection = statuses.reduce<Record<string, typeof statuses>>((acc, s) => {
     (acc[s.dataPoint.scope] ??= []).push(s);
@@ -43,7 +65,7 @@ export default async function SiteEntryPage({ params }: { params: Promise<{ site
           All sites
         </Link>
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{site.name}</h1>
-        <p className="text-sm text-slate-500">{site.entity.name}</p>
+        <p className="text-sm text-slate-500">{entity.name}</p>
       </div>
 
       {Object.entries(bySection).map(([scope, items]) => {

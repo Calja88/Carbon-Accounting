@@ -1,11 +1,29 @@
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
+import { requireFrozenReportAccess } from "@/lib/rbac/carbon-access";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { FileText, ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GenerateReportForm } from "./generate-report-form";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 export default async function ReportsPage() {
+  let context;
+  try {
+    context = await requireOrganisationContext();
+    requireFrozenReportAccess(context);
+  } catch (err) {
+    if (err instanceof PermissionDeniedError) redirect("/");
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
+  const ctx = toTenantRepositoryContext(context);
+
   const reports = await prisma.reportSnapshot.findMany({
+    where: tenantWhere(ctx, {}),
     include: { generatedBy: true },
     orderBy: { generatedAt: "desc" },
   });

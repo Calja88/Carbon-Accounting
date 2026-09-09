@@ -2,7 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { listVersions } from "@/lib/lca/assessment-service";
-import { canApproveLca, getLcaActor } from "@/lib/lca/permissions";
+import { canApproveLca, getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { formatKgPrecise } from "@/components/charts/palette";
 import { Badge } from "@/components/ui/badge";
 import { DataTable, EmptyState, Notice, PageHeading, SectionCard, Td } from "@/components/lca/ui";
@@ -18,21 +21,29 @@ interface FrozenPayloadSummary {
 
 export default async function VersionsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [assessment, versions, revisions, actor] = await Promise.all([
+  const context = await getLcaContext();
+  if (!context) notFound();
+  try {
+    await requireAssessmentInScope(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
+
+  const [assessment, versions, revisions] = await Promise.all([
     prisma.lcaAssessment.findUnique({
       where: { id },
       include: { supersededBy: true, parentAssessment: true, revisions: true },
     }),
-    listVersions(id),
+    listVersions(context, id),
     prisma.lcaAssessment.findMany({
       where: { parentAssessmentId: id },
       select: { id: true, reference: true, title: true, status: true, version: true },
     }),
-    getLcaActor(),
   ]);
   if (!assessment) notFound();
 
-  const canApprove = canApproveLca(actor);
+  const canApprove = canApproveLca(context);
   const suggestedReference = `${assessment.reference.replace(/-R\d+$/, "")}-R${assessment.version + 1}`;
 
   return (

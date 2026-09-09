@@ -3,10 +3,12 @@ import { notFound } from "next/navigation";
 import { Factory, Trash2 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getProduct } from "@/lib/lca/assessment-service";
-import { canEditLcaData, getLcaActor } from "@/lib/lca/permissions";
+import { canEditLcaData, getLcaContext } from "@/lib/lca/permissions";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { Button } from "@/components/ui/button";
 import { BackLink, DataTable, EmptyState, PageHeading, SectionCard, StatusBadge, Td } from "@/components/lca/ui";
-import { AddLocationForm, AddVersionForm, EditProductForm } from "../product-forms";
+import { AddLocationForm, AddVersionForm, EditProductForm, RetireVersionForm } from "../product-forms";
 import { deleteManufacturingLocationAction } from "../actions";
 import { NewAssessmentForm } from "../../assessments/new-assessment-form";
 
@@ -14,13 +16,31 @@ export const dynamic = "force-dynamic";
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ productId: string }> }) {
   const { productId } = await params;
-  const [product, actor] = await Promise.all([getProduct(productId), getLcaActor()]);
+  const context = await getLcaContext();
+  if (!context) notFound();
+
+  let product;
+  try {
+    product = await getProduct(context, productId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
   if (!product) notFound();
 
-  const canEdit = canEditLcaData(actor);
+  const canEdit = canEditLcaData(context);
   const [sites, methodologies] = await Promise.all([
-    prisma.site.findMany({ where: { isActive: true }, include: { entity: true }, orderBy: [{ entity: { name: "asc" } }, { name: "asc" }] }),
-    prisma.lcaMethodologyProfile.findMany({ orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
+    prisma.site.findMany({
+      where: { isActive: true, organisationId: context.organisationId },
+      include: { entity: true },
+      orderBy: [{ entity: { name: "asc" } }, { name: "asc" }],
+    }),
+    prisma.lcaMethodologyProfile.findMany({
+      // Archived profiles stay resolvable for assessments that already use
+      // them, but must not be offered for a new selection.
+      where: { archivedAt: null, OR: [{ organisationId: context.organisationId }, { organisationId: null }] },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    }),
   ]);
 
   const allAssessments = product.versions.flatMap((v) => v.assessments.map((a) => ({ ...a, versionLabel: v.versionLabel })));
@@ -86,13 +106,24 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         description="A new version is the right home for a design change. Assessments already issued against an earlier version keep saying what they said."
         actions={canEdit ? <AddVersionForm productId={product.id} /> : null}
       >
-        <DataTable headers={["Version", "What changed", "Effective from", { label: "Assessments", align: "right" }]}>
+        <DataTable headers={["Version", "What changed", "Effective from", { label: "Assessments", align: "right" }, "Lifecycle"]}>
           {product.versions.map((version) => (
             <tr key={version.id}>
               <Td className="font-medium text-slate-900">{version.versionLabel}</Td>
               <Td>{version.description ?? <span className="text-slate-400">—</span>}</Td>
               <Td>{version.effectiveFrom ? version.effectiveFrom.toISOString().slice(0, 10) : <span className="text-slate-400">—</span>}</Td>
               <Td align="right">{version.assessments.length}</Td>
+              <Td>
+                {version.isActive
+                  ? canEdit && (
+                      <RetireVersionForm
+                        productId={product.id}
+                        productVersionId={version.id}
+                        versionLabel={version.versionLabel}
+                      />
+                    )
+                  : <span className="text-xs text-slate-500">Retired</span>}
+              </Td>
             </tr>
           ))}
         </DataTable>

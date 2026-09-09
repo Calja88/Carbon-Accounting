@@ -1,31 +1,28 @@
 /**
  * Authorisation for the product LCA module.
  *
- * The platform's existing model is role-based across a single consolidated
- * group (Role on User; every signed-in user sees all three operating
- * entities). This module keeps that model rather than inventing a second
- * tenancy scheme: products, suppliers and assessments are *scoped* to an
- * Entity for organisation and reporting, and access is decided by role.
+ * Phase 1 tenancy (T17): this module used to decide access from the
+ * signed-in user's single global `Role` claim. It now delegates every grant
+ * decision to the Phase 1 permission service (T14) against the caller's
+ * resolved `OrganisationContext` (T13) — never the legacy JWT role — per
+ * PHASE1_FILE_REFACTOR_MAP.md's Batch A row for this file: "Delegate to
+ * permission service and organisation scope; preserve locked-status logic."
  *
- * Two rules matter beyond role membership, and both are enforced here rather
- * than in each server action:
+ * Two rules matter beyond permission grants, and both are enforced here
+ * rather than in each server action, unchanged from before:
  *
  *  - an assessment that has been issued or verified is closed to edits, so a
  *    figure a reviewer has seen can never change under them; and
  *  - recording verification is separated from doing the assessment work.
  */
 
-import { LcaAssessmentStatus, Role } from "@prisma/client";
-import { auth } from "@/auth";
+import { LcaAssessmentStatus } from "@prisma/client";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import { OrganisationAccessError, requireOrganisationContext } from "@/lib/organisation/session";
+import { hasPermission } from "@/lib/rbac/authorize";
 
-export interface LcaActor {
-  id: string;
-  name: string;
-  role: Role | string;
-}
-
-const EDITORS: string[] = [Role.DATA_OWNER, Role.SUSTAINABILITY_LEAD, Role.ADMIN];
-const APPROVERS: string[] = [Role.SUSTAINABILITY_LEAD, Role.ADMIN];
+export { OrganisationAccessError };
+export type { OrganisationContext };
 
 /** Statuses in which the assessment's data may still be changed. */
 const OPEN_STATUSES: LcaAssessmentStatus[] = [
@@ -39,33 +36,48 @@ export function isAssessmentOpenForEditing(status: LcaAssessmentStatus): boolean
   return OPEN_STATUSES.includes(status);
 }
 
-/** Anyone signed in can read product assessments. */
-export function canViewLca(actor: LcaActor | null | undefined): boolean {
-  return Boolean(actor);
+export function canViewLca(context: OrganisationContext | null | undefined): boolean {
+  return Boolean(context) && hasPermission(context as OrganisationContext, "lca.view");
 }
 
-export function canEditLcaData(actor: LcaActor | null | undefined): boolean {
-  return Boolean(actor) && EDITORS.includes(String(actor?.role));
+export function canEditLcaData(context: OrganisationContext | null | undefined): boolean {
+  return Boolean(context) && hasPermission(context as OrganisationContext, "lca.assessment.edit");
 }
 
-export function canApproveLca(actor: LcaActor | null | undefined): boolean {
-  return Boolean(actor) && APPROVERS.includes(String(actor?.role));
+export function canCalculateLca(context: OrganisationContext | null | undefined): boolean {
+  return Boolean(context) && hasPermission(context as OrganisationContext, "lca.assessment.calculate");
 }
 
-export function canManageMethodology(actor: LcaActor | null | undefined): boolean {
-  return canApproveLca(actor);
+export function canApproveLca(context: OrganisationContext | null | undefined): boolean {
+  return Boolean(context) && hasPermission(context as OrganisationContext, "lca.assessment.approve");
 }
 
-export function canRecordVerification(actor: LcaActor | null | undefined): boolean {
-  return canApproveLca(actor);
+export function canManageProducts(context: OrganisationContext | null | undefined): boolean {
+  return Boolean(context) && hasPermission(context as OrganisationContext, "lca.product.manage");
 }
 
-export function canIssueVersion(actor: LcaActor | null | undefined): boolean {
-  return canApproveLca(actor);
+export function canManageMethodology(context: OrganisationContext | null | undefined): boolean {
+  return Boolean(context) && hasPermission(context as OrganisationContext, "lca.methodology.manage");
 }
 
-export function canManageSuppliers(actor: LcaActor | null | undefined): boolean {
-  return canEditLcaData(actor);
+export function canRecordVerification(context: OrganisationContext | null | undefined): boolean {
+  return Boolean(context) && hasPermission(context as OrganisationContext, "lca.verification.record");
+}
+
+export function canIssueVersion(context: OrganisationContext | null | undefined): boolean {
+  return Boolean(context) && hasPermission(context as OrganisationContext, "lca.version.issue");
+}
+
+export function canManageSuppliers(context: OrganisationContext | null | undefined): boolean {
+  return Boolean(context) && hasPermission(context as OrganisationContext, "lca.supplier.manage");
+}
+
+export function canManageEvidence(context: OrganisationContext | null | undefined): boolean {
+  return Boolean(context) && hasPermission(context as OrganisationContext, "lca.evidence.manage");
+}
+
+export function canExportLca(context: OrganisationContext | null | undefined): boolean {
+  return Boolean(context) && hasPermission(context as OrganisationContext, "lca.export");
 }
 
 export type PermissionResult = { ok: true } | { ok: false; reason: string };
@@ -73,16 +85,17 @@ export type PermissionResult = { ok: true } | { ok: false; reason: string };
 const OK: PermissionResult = { ok: true };
 
 /**
- * The check every mutating server action in this module runs first: right
- * role, and an assessment that is still open.
+ * The check every mutating server action in this module runs first: the
+ * caller's Organisation grants `lca.assessment.edit`, and the assessment is
+ * still open.
  */
 export function checkCanEditAssessment(
-  actor: LcaActor | null | undefined,
+  context: OrganisationContext | null | undefined,
   status: LcaAssessmentStatus,
 ): PermissionResult {
-  if (!actor) return { ok: false, reason: "You must be signed in." };
-  if (!canEditLcaData(actor)) {
-    return { ok: false, reason: "Your role does not allow changes to product assessments." };
+  if (!context) return { ok: false, reason: "You must be signed in." };
+  if (!canEditLcaData(context)) {
+    return { ok: false, reason: "Your permissions do not allow changes to product assessments." };
   }
   if (!isAssessmentOpenForEditing(status)) {
     return {
@@ -96,28 +109,30 @@ export function checkCanEditAssessment(
   return OK;
 }
 
-export function checkCanApprove(actor: LcaActor | null | undefined): PermissionResult {
-  if (!actor) return { ok: false, reason: "You must be signed in." };
-  if (!canApproveLca(actor)) {
-    return { ok: false, reason: "Only a sustainability lead or an administrator can do this." };
+export function checkCanApprove(context: OrganisationContext | null | undefined): PermissionResult {
+  if (!context) return { ok: false, reason: "You must be signed in." };
+  if (!canApproveLca(context)) {
+    return { ok: false, reason: "Your permissions do not allow approving product assessments." };
   }
   return OK;
 }
 
-/** Session -> actor, or null when signed out. */
-export async function getLcaActor(): Promise<LcaActor | null> {
-  const session = await auth();
-  if (!session?.user?.id) return null;
-  return {
-    id: session.user.id,
-    name: session.user.name ?? "Unknown user",
-    role: session.user.role,
-  };
+/** Resolved Organisation context, or null when signed out / no accessible organisation — the LCA-module equivalent of the old session-based `getLcaActor`. */
+export async function getLcaContext(): Promise<OrganisationContext | null> {
+  try {
+    return await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) return null;
+    throw err;
+  }
 }
 
-export const ROLE_CAPABILITY_SUMMARY: { role: Role; can: string[] }[] = [
-  { role: Role.DATA_OWNER, can: ["Create and edit products, assessments, inventory and evidence", "Run calculations", "Record assumptions and exclusions"] },
-  { role: Role.SUSTAINABILITY_LEAD, can: ["Everything a data owner can do", "Approve register entries", "Move an assessment through its status workflow", "Issue versions", "Record verification"] },
-  { role: Role.FINANCE, can: ["Read assessments, results and reports"] },
-  { role: Role.ADMIN, can: ["Everything, plus emission factor library administration"] },
+export const ROLE_CAPABILITY_SUMMARY: { permission: string; can: string[] }[] = [
+  { permission: "lca.assessment.edit", can: ["Create and edit products, assessments, inventory and evidence", "Record assumptions and exclusions"] },
+  { permission: "lca.assessment.calculate", can: ["Run LCA calculations"] },
+  { permission: "lca.assessment.approve", can: ["Approve register entries", "Move an assessment through its status workflow"] },
+  { permission: "lca.version.issue", can: ["Issue an immutable assessment version"] },
+  { permission: "lca.verification.record", can: ["Record third-party verification of a result"] },
+  { permission: "lca.view", can: ["Read assessments, results and reports"] },
+  { permission: "lca.export", can: ["Export LCA results and reports"] },
 ];

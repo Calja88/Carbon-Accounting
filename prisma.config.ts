@@ -28,13 +28,14 @@ const pooledUrl = process.env.DATABASE_URL ?? "";
  * Neon exposes the same database on a direct (non-pooled) endpoint at the
  * same hostname minus the `-pooler` suffix, so the direct URL is derived
  * from DATABASE_URL rather than requiring a second secret to be kept in
- * sync. `DIRECT_DATABASE_URL` overrides it if a different host is ever
- * needed.
+ * sync. `DIRECT_URL` is the repository's explicit override;
+ * `DATABASE_URL_UNPOOLED` is accepted from Neon's Vercel integration, and
+ * `DIRECT_DATABASE_URL` remains a temporary backwards-compatible alias.
  *
  * Only the schema engine uses this. The application keeps using the pooled
  * URL at runtime, which is what a serverless deployment wants.
  */
-function deriveDirectUrl(url: string): string {
+export function deriveDirectUrl(url: string): string {
   if (!url) return "";
   try {
     const parsed = new URL(url);
@@ -48,7 +49,11 @@ function deriveDirectUrl(url: string): string {
   }
 }
 
-const directUrl = process.env.DIRECT_DATABASE_URL || deriveDirectUrl(pooledUrl);
+export function resolveDirectUrl(env: Record<string, string | undefined>): string {
+  return env.DIRECT_URL || env.DATABASE_URL_UNPOOLED || env.DIRECT_DATABASE_URL || deriveDirectUrl(env.DATABASE_URL ?? "");
+}
+
+const directUrl = resolveDirectUrl(process.env);
 
 export default defineConfig({
   schema: "prisma/schema.prisma",

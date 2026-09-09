@@ -1,5 +1,10 @@
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
+import { requireFrozenReportAccess } from "@/lib/rbac/carbon-access";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 function csvEscape(value: string): string {
   if (/[",\n]/.test(value)) {
@@ -15,8 +20,23 @@ function row(values: (string | number)[]): string {
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const snapshot = await prisma.reportSnapshot.findUnique({
-    where: { id },
+  let context;
+  try {
+    context = await requireOrganisationContext();
+    requireFrozenReportAccess(context, true);
+  } catch (err) {
+    if (err instanceof PermissionDeniedError) return new NextResponse("Report not found", { status: 404 });
+    if (err instanceof OrganisationAccessError) return new NextResponse("Sign in first.", { status: 401 });
+    throw err;
+  }
+  const ctx = toTenantRepositoryContext(context);
+
+  // Tenant-scoped at the initial lookup, and every linked Calculation is
+  // filtered by the same organisationId again below — a snapshot can never
+  // carry a foreign-tenant calculation into this export (spec §4: "No
+  // report snapshot ... may combine more than one Organisation").
+  const snapshot = await prisma.reportSnapshot.findFirst({
+    where: tenantWhere(ctx, { id }),
     include: {
       calculationLinks: {
         include: {
@@ -33,7 +53,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     },
   });
 
-  if (!snapshot) {
+  if (!snapshot || snapshot.calculationLinks.some(link => link.calculation.organisationId !== context.organisationId || link.calculation.activityEntry.organisationId !== context.organisationId)) {
     return new NextResponse("Report not found", { status: 404 });
   }
 

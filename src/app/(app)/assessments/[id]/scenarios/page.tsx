@@ -5,7 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { getLatestRun, resultsToAnalysisRows, runTotals } from "@/lib/lca/calculation-service";
 import { compareScenario } from "@/lib/lca/analysis";
 import { D } from "@/lib/lca/decimal";
-import { canEditLcaData, getLcaActor } from "@/lib/lca/permissions";
+import { canEditLcaData, getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { formatKgPrecise } from "@/components/charts/palette";
 import { ContributionBarChart } from "@/components/charts/contribution-bar-chart";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +21,16 @@ export const dynamic = "force-dynamic";
 
 export default async function ScenariosPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [assessment, baselineRun, scenarios, actor] = await Promise.all([
+  const context = await getLcaContext();
+  if (!context) notFound();
+  try {
+    await requireAssessmentInScope(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
+
+  const [assessment, baselineRun, scenarios] = await Promise.all([
     prisma.lcaAssessment.findUnique({ where: { id } }),
     getLatestRun(id),
     prisma.lcaAssessment.findMany({
@@ -26,11 +38,10 @@ export default async function ScenariosPage({ params }: { params: Promise<{ id: 
       include: { owner: true, _count: { select: { inventoryItems: true } } },
       orderBy: { createdAt: "asc" },
     }),
-    getLcaActor(),
   ]);
   if (!assessment) notFound();
 
-  const canEdit = canEditLcaData(actor);
+  const canEdit = canEditLcaData(context);
   const baselineRows = baselineRun ? resultsToAnalysisRows(baselineRun.results) : [];
   const baselineTotals = baselineRun ? runTotals(baselineRun) : null;
 

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <id>https://www.legislation.gov.uk/uksi/2020/1/data.feed</id>
+  <title>The Example (Amendment) Regulations 2020</title>
+  <updated>2020-01-15T00:00:00Z</updated>
+  <entry>
+    <id>https://www.legislation.gov.uk/id/uksi/2020/1</id>
+    <title>The Example (Amendment) Regulations 2020</title>
+    <updated>2020-01-15T00:00:00Z</updated>
+    <published>2020-01-10T00:00:00Z</published>
+    <link rel="alternate" href="https://www.legislation.gov.uk/uksi/2020/1"/>
+    <dc:type>UnitedKingdomStatutoryInstrument</dc:type>
+    <dc:identifier>https://www.legislation.gov.uk/id/uksi/2020/1</dc:identifier>
+  </entry>
+</feed>

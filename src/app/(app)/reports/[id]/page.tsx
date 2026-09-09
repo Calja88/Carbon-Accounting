@@ -1,8 +1,13 @@
-import { notFound } from "next/navigation";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
+import { requireFrozenReportAccess } from "@/lib/rbac/carbon-access";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Download } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { ReportPayload } from "@/lib/report-service";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
 import { buildDelta } from "@/lib/analytics-service";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -33,7 +38,22 @@ function longDate(d: string | Date) {
 
 export default async function ReportDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const snapshot = await prisma.reportSnapshot.findUnique({ where: { id }, include: { generatedBy: true } });
+
+  let context;
+  try {
+    context = await requireOrganisationContext();
+    requireFrozenReportAccess(context);
+  } catch (err) {
+    if (err instanceof PermissionDeniedError) redirect("/");
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
+  const ctx = toTenantRepositoryContext(context);
+
+  const snapshot = await prisma.reportSnapshot.findFirst({
+    where: tenantWhere(ctx, { id }),
+    include: { generatedBy: true },
+  });
   if (!snapshot) notFound();
 
   const rawPayload = snapshot.payload as unknown as ReportPayload;

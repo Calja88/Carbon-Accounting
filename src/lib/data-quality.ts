@@ -14,6 +14,9 @@
 
 import { prisma } from "@/lib/prisma";
 import { buildAnalyticsSnapshot } from "@/lib/analytics-service";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import { accessibleActivityEntryFilter, accessibleSiteFilter, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 export type DataIssueKind = "MISSING_DATA" | "FLAGGED" | "AWAITING_FACTOR" | "DATA_QUALITY" | "ANOMALY" | "CONFIGURATION";
 export type DataIssueSeverity = "INFO" | "LOW" | "MEDIUM" | "HIGH";
@@ -60,15 +63,16 @@ function monthsBetween(start: Date, end: Date): { year: number; month: number; l
 }
 
 export async function scanDataQuality(
+  context: OrganisationContext,
   periodStart: Date,
   periodEnd: Date,
-  allowedSiteIds: string[],
 ): Promise<DataQualityScan> {
   const issues: DataIssue[] = [];
+  const ctx = toTenantRepositoryContext(context);
 
   const [sites, monthlyDataPoints, entries, analytics] = await Promise.all([
     prisma.site.findMany({
-      where: { isActive: true, id: { in: allowedSiteIds } },
+      where: tenantWhere(ctx, { isActive: true, ...accessibleSiteFilter(context) }),
       include: { entity: true },
       orderBy: { name: "asc" },
     }),
@@ -77,10 +81,10 @@ export async function scanDataQuality(
       orderBy: { sortOrder: "asc" },
     }),
     prisma.activityEntry.findMany({
-      where: { siteId: { in: allowedSiteIds }, periodStart: { gte: periodStart, lte: periodEnd } },
+      where: tenantWhere(ctx, { periodStart: { gte: periodStart, lte: periodEnd }, ...accessibleActivityEntryFilter(context) }),
       include: { activityDataPoint: true, site: true },
     }),
-    buildAnalyticsSnapshot(periodStart, periodEnd),
+    buildAnalyticsSnapshot(context, periodStart, periodEnd),
   ]);
 
   const months = monthsBetween(periodStart, periodEnd);
@@ -166,11 +170,11 @@ export async function scanDataQuality(
 
   // --- Configuration gaps -------------------------------------------------
   const contracts = await prisma.siteEnergyContract.findMany({
-    where: {
-      siteId: { in: allowedSiteIds },
+    where: tenantWhere(ctx, {
+      siteId: { in: sites.map((s) => s.id) },
       effectiveFrom: { lte: periodEnd },
       OR: [{ effectiveTo: null }, { effectiveTo: { gte: periodStart } }],
-    },
+    }),
     select: { siteId: true },
   });
   const sitesWithContract = new Set(contracts.map((c) => c.siteId));

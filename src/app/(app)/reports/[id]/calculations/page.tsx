@@ -1,10 +1,14 @@
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
+import { requireFrozenReportAccess } from "@/lib/rbac/carbon-access";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
-import { resolveAiActor } from "@/lib/ai";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 /**
  * Every calculation that went into one report snapshot, each linking to its
@@ -14,11 +18,20 @@ import { Badge } from "@/components/ui/badge";
 export default async function ReportCalculationsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const actor = await resolveAiActor();
-  if (!actor) redirect("/login");
+  let context;
+  try {
+    context = await requireOrganisationContext();
+    requireFrozenReportAccess(context);
+  } catch (err) {
+    if (err instanceof PermissionDeniedError) redirect("/");
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
 
-  const snapshot = await prisma.reportSnapshot.findUnique({
-    where: { id },
+  const ctx = toTenantRepositoryContext(context);
+
+  const snapshot = await prisma.reportSnapshot.findFirst({
+    where: tenantWhere(ctx, { id }),
     select: { id: true, periodStart: true, periodEnd: true },
   });
   if (!snapshot) notFound();
@@ -26,9 +39,7 @@ export default async function ReportCalculationsPage({ params }: { params: Promi
   const links = await prisma.reportSnapshotCalculation.findMany({
     where: {
       reportSnapshotId: id,
-      // Scope filter applied here, not after — a calculation outside the
-      // caller's scope is never listed, even inside a snapshot they can open.
-      calculation: { activityEntry: { siteId: { in: actor.siteIds } } },
+
     },
     include: {
       calculation: {
@@ -41,6 +52,8 @@ export default async function ReportCalculationsPage({ params }: { params: Promi
     },
   });
 
+  // An issued report is indivisible, including calculations for archived sites.
+  if (links.some(link => link.calculation.organisationId !== context.organisationId || link.calculation.activityEntry.organisationId !== context.organisationId)) notFound();
   const rows = links
     .map((l) => l.calculation)
     .sort((a, b) => Number(b.resultKgCo2e) - Number(a.resultKgCo2e));

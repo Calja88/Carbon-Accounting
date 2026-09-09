@@ -2,6 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Download } from "lucide-react";
 import { buildAssessmentReport } from "@/lib/lca/report-service";
+import { getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { LIFECYCLE_STAGE_ORDER, ALLOCATION_LABELS, ASSURANCE_LABELS, BOUNDARY_LABELS, CLASSIFICATION_LABELS, DATA_TYPE_LABELS, MATERIALITY_LABELS, STAGE_LABELS } from "@/lib/lca/labels";
 import { DATA_TYPE_COLORS, LIFECYCLE_STAGE_COLORS, formatKgPrecise } from "@/components/charts/palette";
 import { ContributionBarChart, ProportionBar } from "@/components/charts/contribution-bar-chart";
@@ -27,6 +31,15 @@ function Section({ number, title, children }: { number: string; title: string; c
 
 export default async function AssessmentReportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const context = await getLcaContext();
+  if (!context) notFound();
+  try {
+    await requireAssessmentInScope(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
+
   let report;
   try {
     report = await buildAssessmentReport(id);

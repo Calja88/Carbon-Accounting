@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/prisma";
+import { lockActivityEntry } from "@/lib/repositories/row-locks";
+import { assertCompletePrimaryCalculations } from "@/lib/calculation-integrity";
 import {
+  Prisma,
   DataQualityTier,
   EmissionFactor,
   EmissionFactorSet,
@@ -14,6 +17,9 @@ import { calculateEmission, calculateScope2Dual, selectMarketBasis, FactorRow } 
 import { checkPlausibility } from "@/lib/plausibility";
 import { computeCommutingMiles } from "@/lib/commuting";
 import { SCOPE3_CAT3_LABEL, wttMappingFor } from "@/lib/scope3-derived";
+import type { TenantRepositoryContext } from "@/lib/repositories/context";
+import { assertOwned, tenantWhere } from "@/lib/repositories/tenant-scope";
+import { systemTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
 
 /** Real activity data with no matching EmissionFactor (yet) — never crashes
  * a save; the entry is stored and surfaced as "awaiting emission factor"
@@ -41,8 +47,9 @@ function toFactorRow(factor: EmissionFactor, factorSet: EmissionFactorSet): Fact
 async function findFactorSet(
   sourceType: Exclude<FactorSourceType, "SUPPLIER_SPECIFIC">,
   asOfDate: Date,
+  db: Prisma.TransactionClient = prisma,
 ): Promise<EmissionFactorSet | null> {
-  return prisma.emissionFactorSet.findFirst({
+  return db.emissionFactorSet.findFirst({
     where: {
       sourceType,
       effectiveFrom: { lte: asOfDate },
@@ -52,8 +59,8 @@ async function findFactorSet(
   });
 }
 
-async function findSupplierFactorSet(supplierName: string, asOfDate: Date): Promise<EmissionFactorSet | null> {
-  return prisma.emissionFactorSet.findFirst({
+async function findSupplierFactorSet(supplierName: string, asOfDate: Date, db: Prisma.TransactionClient = prisma): Promise<EmissionFactorSet | null> {
+  return db.emissionFactorSet.findFirst({
     where: {
       sourceType: FactorSourceType.SUPPLIER_SPECIFIC,
       supplierName,
@@ -69,8 +76,9 @@ async function findFactorInSet(
   category: string,
   subtypeKey: string | null,
   basis: FactorBasis,
+  db: Prisma.TransactionClient = prisma,
 ): Promise<EmissionFactor | null> {
-  return prisma.emissionFactor.findFirst({ where: { factorSetId, category, subtypeKey, basis } });
+  return db.emissionFactor.findFirst({ where: { factorSetId, category, subtypeKey, basis } });
 }
 
 interface ResolvedFactor {
@@ -94,34 +102,35 @@ async function resolveFactorMultiSource(
   basis: FactorBasis,
   asOfDate: Date,
   supplierName?: string | null,
+  db: Prisma.TransactionClient = prisma,
 ): Promise<ResolvedFactor | null> {
   if (supplierName) {
-    const supplierSet = await findSupplierFactorSet(supplierName, asOfDate);
+    const supplierSet = await findSupplierFactorSet(supplierName, asOfDate, db);
     if (supplierSet) {
       const factor =
-        (await findFactorInSet(supplierSet.id, category, subtypeKey, basis)) ??
-        (await findFactorInSet(supplierSet.id, category, null, basis));
+        (await findFactorInSet(supplierSet.id, category, subtypeKey, basis, db)) ??
+        (await findFactorInSet(supplierSet.id, category, null, basis, db));
       if (factor) return { factor, factorSet: supplierSet, tierOverride: DataQualityTier.TIER_1 };
     }
   }
 
-  const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, asOfDate);
+  const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, asOfDate, db);
   if (officialSet) {
-    const factor = await findFactorInSet(officialSet.id, category, subtypeKey, basis);
+    const factor = await findFactorInSet(officialSet.id, category, subtypeKey, basis, db);
     if (factor) return { factor, factorSet: officialSet, tierOverride: null };
   }
 
-  const eeioSet = await findFactorSet(FactorSourceType.EEIO_SPEND_BASED, asOfDate);
+  const eeioSet = await findFactorSet(FactorSourceType.EEIO_SPEND_BASED, asOfDate, db);
   if (eeioSet) {
-    const factor = await findFactorInSet(eeioSet.id, category, subtypeKey, basis);
+    const factor = await findFactorInSet(eeioSet.id, category, subtypeKey, basis, db);
     if (factor) return { factor, factorSet: eeioSet, tierOverride: null };
   }
 
   return null;
 }
 
-async function findActiveEnergyContract(siteId: string, asOfDate: Date) {
-  return prisma.siteEnergyContract.findFirst({
+async function findActiveEnergyContract(siteId: string, asOfDate: Date, db: Prisma.TransactionClient = prisma) {
+  return db.siteEnergyContract.findFirst({
     where: {
       siteId,
       effectiveFrom: { lte: asOfDate },
@@ -146,7 +155,10 @@ export interface CreateEntryInput {
   notes?: string;
 }
 
-export async function createActivityEntryWithCalculations(input: CreateEntryInput) {
+export async function createActivityEntryWithCalculations(ctx: TenantRepositoryContext, input: CreateEntryInput) {
+  const site = await prisma.site.findFirst({ where: tenantWhere(ctx, { id: input.siteId }) });
+  assertOwned(ctx, site);
+
   const dataPoint = await prisma.activityDataPoint.findUniqueOrThrow({
     where: { id: input.activityDataPointId },
     include: { factorOptions: true },
@@ -174,12 +186,12 @@ export async function createActivityEntryWithCalculations(input: CreateEntryInpu
   );
 
   const previous = await prisma.activityEntry.findFirst({
-    where: {
+    where: tenantWhere(ctx, {
       activityDataPointId: dataPoint.id,
       siteId: input.siteId,
       factorOptionId: factorOption?.id ?? null,
       periodStart: { lt: input.periodStart },
-    },
+    }),
     orderBy: { periodStart: "desc" },
   });
 
@@ -187,6 +199,7 @@ export async function createActivityEntryWithCalculations(input: CreateEntryInpu
 
   const entry = await prisma.activityEntry.create({
     data: {
+      organisationId: ctx.organisationId,
       activityDataPointId: dataPoint.id,
       siteId: input.siteId,
       periodStart: input.periodStart,
@@ -206,18 +219,29 @@ export async function createActivityEntryWithCalculations(input: CreateEntryInpu
     },
   });
 
-  const calculations = await runCalculationsForEntry(entry.id);
+  const calculations = await runCalculationsForEntry(ctx, entry.id);
 
   return { entry, calculations, plausibility };
 }
 
-export async function runCalculationsForEntry(entryId: string) {
-  const entry = await prisma.activityEntry.findUniqueOrThrow({
-    where: { id: entryId },
+export async function runCalculationsForEntry(ctx: TenantRepositoryContext, entryId: string) {
+  return prisma.$transaction(async (tx) => {
+  await lockActivityEntry(tx, ctx, entryId);
+  const found = await tx.activityEntry.findFirst({
+    where: tenantWhere(ctx, { id: entryId }),
     include: { activityDataPoint: true, factorOption: true, site: true },
   });
+  const entry = assertOwned(ctx, found);
 
   const dataPoint = entry.activityDataPoint;
+  // The parent lock serializes first writes as well as retries. Derived Cat 3
+  // companions are separate accounting rows and never primary replay results.
+  const existing = await tx.calculation.findMany({
+    where: { organisationId: ctx.organisationId, activityEntryId: entry.id, derivedFromCalculationId: null },
+    orderBy: [{ basis: "asc" }, { id: "asc" }],
+  });
+  assertCompletePrimaryCalculations(existing, dataPoint.scope, dataPoint.factorCategory);
+  if (existing.length) return existing;
   const inputValue = Number(entry.canonicalValue);
   const inputUnit = entry.canonicalUnit;
 
@@ -230,12 +254,12 @@ export async function runCalculationsForEntry(entryId: string) {
 
   try {
     if (dataPoint.scope === Scope.SCOPE_2 && dataPoint.factorCategory === "grid_electricity") {
-      const contract = await findActiveEnergyContract(entry.siteId, entry.periodStart);
-      const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, entry.periodStart);
+      const contract = await findActiveEnergyContract(entry.siteId, entry.periodStart, tx);
+      const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, entry.periodStart, tx);
       if (!officialSet) {
         throw new FactorNotFoundError("No official DEFRA/DESNZ factor set is effective for this period.");
       }
-      const locationFactor = await findFactorInSet(officialSet.id, dataPoint.factorCategory, null, FactorBasis.LOCATION_BASED);
+      const locationFactor = await findFactorInSet(officialSet.id, dataPoint.factorCategory, null, FactorBasis.LOCATION_BASED, tx);
       const marketBasisType = selectMarketBasis(
         contract ? { regoBacked: contract.regoBacked, tariffType: contract.tariffType } : null,
       );
@@ -244,6 +268,7 @@ export async function runCalculationsForEntry(entryId: string) {
         dataPoint.factorCategory,
         null,
         marketBasisType === "MARKET_BASED" ? FactorBasis.MARKET_BASED : FactorBasis.RESIDUAL_MIX,
+        tx,
       );
       if (!locationFactor || !marketFactor) {
         // Scope 2 must always produce both figures side by side — if either
@@ -263,6 +288,7 @@ export async function runCalculationsForEntry(entryId: string) {
         FactorBasis.STANDARD,
         entry.periodStart,
         entry.supplierName,
+        tx,
       );
       if (!resolved) {
         throw new FactorNotFoundError(
@@ -272,7 +298,7 @@ export async function runCalculationsForEntry(entryId: string) {
       const result = calculateEmission(inputValue, inputUnit, toFactorRow(resolved.factor, resolved.factorSet));
       results = [{ basis: FactorBasis.STANDARD, result, tierOverride: resolved.tierOverride }];
     } else {
-      const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, entry.periodStart);
+      const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, entry.periodStart, tx);
       if (!officialSet) {
         throw new FactorNotFoundError("No official DEFRA/DESNZ factor set is effective for this period.");
       }
@@ -281,6 +307,7 @@ export async function runCalculationsForEntry(entryId: string) {
         dataPoint.factorCategory,
         entry.factorOption?.subtypeKey ?? null,
         FactorBasis.STANDARD,
+        tx,
       );
       if (!factor) {
         throw new FactorNotFoundError(`No emission factor found for category="${dataPoint.factorCategory}".`);
@@ -294,61 +321,77 @@ export async function runCalculationsForEntry(entryId: string) {
       // precedence over the "awaiting factor" state, which is otherwise
       // only relevant to SUBMITTED entries.
       if (entry.status === EntryStatus.SUBMITTED) {
-        await prisma.activityEntry.update({ where: { id: entry.id }, data: { status: EntryStatus.AWAITING_FACTOR } });
+        await tx.activityEntry.update({
+          where: { id: entry.id, organisationId: ctx.organisationId },
+          data: { status: EntryStatus.AWAITING_FACTOR },
+        });
       }
       return [];
     }
     throw err;
   }
 
-  const calculations = await Promise.all(
-    results.map(({ basis, result, tierOverride }) =>
-      prisma.calculation.create({
-        data: {
-          activityEntryId: entry.id,
-          emissionFactorId: result.emissionFactorId,
-          scope: dataPoint.scope,
-          basis,
-          scope3Category: dataPoint.scope3Category ?? null,
-          inputValue: result.inputValue,
-          inputUnit: result.inputUnit,
-          factorValueSnapshot: result.factorValueSnapshot,
-          factorUnitSnapshot: result.factorUnitSnapshot,
-          factorSourceSnapshot: result.factorSourceSnapshot,
-          factorVintageSnapshot: result.factorVintageSnapshot,
-          formulaApplied: result.formulaApplied,
-          resultKgCo2e: result.resultKgCo2e,
-          dataQualityTier: tierOverride ?? entry.dataQualityTier,
-          calculatedByUserId: entry.enteredByUserId,
-        },
-      }),
-    ),
-  );
+    const calculations = [];
+    for (const { basis, result, tierOverride } of results) {
+      calculations.push(
+        await tx.calculation.create({
+          data: {
+            organisationId: ctx.organisationId,
+            activityEntryId: entry.id,
+            emissionFactorId: result.emissionFactorId,
+            scope: dataPoint.scope,
+            basis,
+            scope3Category: dataPoint.scope3Category ?? null,
+            inputValue: result.inputValue,
+            inputUnit: result.inputUnit,
+            factorValueSnapshot: result.factorValueSnapshot,
+            factorUnitSnapshot: result.factorUnitSnapshot,
+            factorSourceSnapshot: result.factorSourceSnapshot,
+            factorVintageSnapshot: result.factorVintageSnapshot,
+            formulaApplied: result.formulaApplied,
+            resultKgCo2e: result.resultKgCo2e,
+            dataQualityTier: tierOverride ?? entry.dataQualityTier,
+            calculatedByUserId: entry.enteredByUserId,
+          },
+        }),
+      );
+    }
 
-  if (entry.status === EntryStatus.AWAITING_FACTOR) {
-    await prisma.activityEntry.update({
-      where: { id: entry.id },
-      data: { status: entry.plausibilityFlagged ? EntryStatus.FLAGGED : EntryStatus.SUBMITTED },
-    });
-  }
+    if (entry.status === EntryStatus.AWAITING_FACTOR) {
+      await tx.activityEntry.update({
+        where: { id: entry.id, organisationId: ctx.organisationId },
+        data: { status: entry.plausibilityFlagged ? EntryStatus.FLAGGED : EntryStatus.SUBMITTED },
+      });
+    }
 
-  return calculations;
+    return calculations;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted, timeout: 30_000 });
 }
 
 /**
  * Re-runs calculation for every entry stuck at AWAITING_FACTOR — call this
  * right after a new EmissionFactorSet is imported so any Scope 3 data
  * collected before the factor existed gets its figure the moment it's
- * available, with no separate manual step.
+ * available, with no separate manual step. A newly-imported platform factor
+ * set is global, so this is a controlled platform fan-out (Phase 1 spec:
+ * "background functions require explicit organisation or controlled
+ * platform fan-out") — it builds one audited system context per distinct
+ * organisation among the pending entries rather than updating across
+ * tenants in one unscoped query. An entry not yet backfilled with an
+ * organisationId (T12) is skipped, not guessed at.
  */
 export async function recalculatePendingEntries() {
   const pending = await prisma.activityEntry.findMany({ where: { status: EntryStatus.AWAITING_FACTOR } });
   let recalculated = 0;
+  let checked = 0;
   for (const entry of pending) {
-    const calculations = await runCalculationsForEntry(entry.id);
+    if (!entry.organisationId) continue;
+    checked++;
+    const ctx = systemTenantRepositoryContext(entry.organisationId, "factor-import-recalc");
+    const calculations = await runCalculationsForEntry(ctx, entry.id);
     if (calculations.length > 0) recalculated++;
   }
-  return { checked: pending.length, recalculated };
+  return { checked, recalculated };
 }
 
 /**
@@ -358,14 +401,14 @@ export async function recalculatePendingEntries() {
  * this for the same period never creates duplicate Cat 3 rows, so it's
  * safe to call every time a report is generated.
  */
-export async function deriveCategory3Calculations(periodStart: Date, periodEnd: Date) {
+export async function deriveCategory3Calculations(ctx: TenantRepositoryContext, periodStart: Date, periodEnd: Date) {
   const sourceCalculations = await prisma.calculation.findMany({
-    where: {
+    where: tenantWhere(ctx, {
       activityEntry: { periodStart: { gte: periodStart, lte: periodEnd } },
       scope: { in: [Scope.SCOPE_1, Scope.SCOPE_2] },
       basis: { in: [FactorBasis.STANDARD, FactorBasis.LOCATION_BASED] },
       derivedCategory3Row: { is: null },
-    },
+    }),
     include: { activityEntry: { include: { activityDataPoint: true, factorOption: true } } },
   });
 
@@ -395,6 +438,7 @@ export async function deriveCategory3Calculations(periodStart: Date, periodEnd: 
 
     await prisma.calculation.create({
       data: {
+        organisationId: ctx.organisationId,
         activityEntryId: source.activityEntryId,
         emissionFactorId: result.emissionFactorId,
         scope: Scope.SCOPE_3,
@@ -442,11 +486,15 @@ export interface CreateCommutingSurveyInput {
  * every other entry — the survey header just keeps the raw survey inputs
  * (headcount, %, distance, commuting days) traceable in their own right.
  */
-export async function createCommutingSurvey(input: CreateCommutingSurveyInput) {
+export async function createCommutingSurvey(ctx: TenantRepositoryContext, input: CreateCommutingSurveyInput) {
+  const site = await prisma.site.findFirst({ where: tenantWhere(ctx, { id: input.siteId }) });
+  assertOwned(ctx, site);
+
   const dataPoint = await prisma.activityDataPoint.findUniqueOrThrow({ where: { code: "S3-07" } });
 
   const survey = await prisma.commutingSurvey.create({
     data: {
+      organisationId: ctx.organisationId,
       siteId: input.siteId,
       periodStart: input.periodStart,
       periodEnd: input.periodEnd,
@@ -469,6 +517,7 @@ export async function createCommutingSurvey(input: CreateCommutingSurveyInput) {
 
     const entry = await prisma.activityEntry.create({
       data: {
+        organisationId: ctx.organisationId,
         activityDataPointId: dataPoint.id,
         siteId: input.siteId,
         periodStart: input.periodStart,
@@ -495,7 +544,7 @@ export async function createCommutingSurvey(input: CreateCommutingSurveyInput) {
       },
     });
 
-    await runCalculationsForEntry(entry.id);
+    await runCalculationsForEntry(ctx, entry.id);
     entries.push(entry);
   }
 
@@ -514,9 +563,13 @@ export interface UpsertContractInput {
   enteredByUserId: string;
 }
 
-export async function upsertSiteEnergyContract(input: UpsertContractInput) {
+export async function upsertSiteEnergyContract(ctx: TenantRepositoryContext, input: UpsertContractInput) {
+  const site = await prisma.site.findFirst({ where: tenantWhere(ctx, { id: input.siteId }) });
+  assertOwned(ctx, site);
+
   return prisma.siteEnergyContract.create({
     data: {
+      organisationId: ctx.organisationId,
       siteId: input.siteId,
       effectiveFrom: input.effectiveFrom,
       effectiveTo: input.effectiveTo ?? null,

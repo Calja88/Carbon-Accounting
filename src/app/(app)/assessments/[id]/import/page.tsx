@@ -2,7 +2,10 @@ import { notFound } from "next/navigation";
 import { Download } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { INVENTORY_TEMPLATE_GUIDE } from "@/lib/lca/import/inventory-import";
-import { checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
+import { checkCanEditAssessment, getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable, Notice, PageHeading, SectionCard, Td } from "@/components/lca/ui";
@@ -12,16 +15,23 @@ export const dynamic = "force-dynamic";
 
 export default async function ImportPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [assessment, actor] = await Promise.all([
-    prisma.lcaAssessment.findUnique({
-      where: { id },
-      include: { processes: { orderBy: [{ sortOrder: "asc" }] } },
-    }),
-    getLcaActor(),
-  ]);
+  const context = await getLcaContext();
+  if (!context) notFound();
+
+  try {
+    await requireAssessmentInScope(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
+
+  const assessment = await prisma.lcaAssessment.findUnique({
+    where: { id },
+    include: { processes: { orderBy: [{ sortOrder: "asc" }] } },
+  });
   if (!assessment) notFound();
 
-  const permission = checkCanEditAssessment(actor, assessment.status);
+  const permission = checkCanEditAssessment(context, assessment.status);
 
   return (
     <div className="space-y-6">

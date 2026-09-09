@@ -4,7 +4,10 @@ import { AlertTriangle, Upload } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { listInventory } from "@/lib/lca/model-service";
 import { getLatestRun } from "@/lib/lca/calculation-service";
-import { checkCanEditAssessment, getLcaActor } from "@/lib/lca/permissions";
+import { checkCanEditAssessment, getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { D, percentOf, toNumber, ZERO } from "@/lib/lca/decimal";
 import { DATA_TYPE_SHORT, FACTOR_MODE_LABELS, ITEM_TYPE_LABELS, STAGE_LABELS } from "@/lib/lca/labels";
 import { formatKgPrecise } from "@/components/charts/palette";
@@ -27,14 +30,22 @@ export default async function InventoryPage({
   const { view } = await searchParams;
   const bomView = view === "bom";
 
-  const [assessment, items, run, actor] = await Promise.all([
+  const context = await getLcaContext();
+  if (!context) notFound();
+  try {
+    await requireAssessmentInScope(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
+
+  const [assessment, items, run] = await Promise.all([
     prisma.lcaAssessment.findUnique({
       where: { id },
       include: { processes: { orderBy: [{ sortOrder: "asc" }] }, entity: true },
     }),
     listInventory(id),
     getLatestRun(id),
-    getLcaActor(),
   ]);
   if (!assessment) notFound();
 
@@ -44,7 +55,7 @@ export default async function InventoryPage({
     orderBy: { name: "asc" },
   });
 
-  const permission = checkCanEditAssessment(actor, assessment.status);
+  const permission = checkCanEditAssessment(context, assessment.status);
   const canEdit = permission.ok;
 
   // Calculated emissions per line come from the stored run, so the inventory

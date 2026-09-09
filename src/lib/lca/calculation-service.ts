@@ -30,6 +30,8 @@ import type {
 } from "./engine/types";
 import { recordAuditEvent } from "./audit-service";
 import type { AnalysisRow } from "./analysis";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import { findTenantResult, toTenantRepositoryContext } from "@/lib/repositories/lca-repository";
 
 // ---------------------------------------------------------------------------
 // Loading
@@ -537,7 +539,17 @@ export async function listRuns(assessmentId: string, take = 25) {
   });
 }
 
-export async function getResult(resultId: string) {
+/**
+ * Loads a result row, scoped to the caller's Organisation and (when
+ * `expectedAssessmentId` is supplied, as the results detail page always
+ * does) verified to belong to that exact assessment — the nested-parent-
+ * substitution guard for "Export B run through A assessment route"
+ * (PHASE1_ADVERSARIAL_TEST_MATRIX.md §1).
+ */
+export async function getResult(context: OrganisationContext, resultId: string, expectedAssessmentId?: string) {
+  const ctx = toTenantRepositoryContext(context);
+  const scoped = await findTenantResult(ctx, resultId, expectedAssessmentId);
+  if (!scoped) return null;
   return prisma.lcaCalculationResult.findUnique({
     where: { id: resultId },
     include: {

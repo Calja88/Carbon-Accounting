@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <id>https://www.legislation.gov.uk/new/data.feed</id>
+  <title>New legislation</title>
+  <updated>2026-01-05T00:00:00Z</updated>
+  <link rel="self" href="https://www.legislation.gov.uk/new/data.feed?page=1"/>
+  <entry>
+    <!-- Missing <id> entirely: unusable, must be dropped without failing the page. -->
+    <title>Entry with no id</title>
+    <updated>2026-01-04T10:00:00Z</updated>
+    <link rel="alternate" href="https://www.legislation.gov.uk/uksi/2026/50"/>
+    <dc:type>UnitedKingdomStatutoryInstrument</dc:type>
+  </entry>
+  <entry>
+    <!-- Has an id but no updated/published timestamp: unusable, must be dropped. -->
+    <id>https://www.legislation.gov.uk/id/uksi/2026/51</id>
+    <title>Entry with no timestamp</title>
+    <link rel="alternate" href="https://www.legislation.gov.uk/uksi/2026/51"/>
+    <dc:type>UnitedKingdomStatutoryInstrument</dc:type>
+  </entry>
+  <entry>
+    <id>https://www.legislation.gov.uk/id/uksi/2026/52</id>
+    <title>Valid entry alongside the broken ones</title>
+    <updated>2026-01-05T09:00:00Z</updated>
+    <published>2026-01-05T00:00:00Z</published>
+    <link rel="alternate" href="https://www.legislation.gov.uk/uksi/2026/52"/>
+    <dc:type>UnitedKingdomStatutoryInstrument</dc:type>
+  </entry>
+</feed>

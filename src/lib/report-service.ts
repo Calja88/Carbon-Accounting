@@ -1,6 +1,10 @@
+import { requireFrozenReportAccess } from "@/lib/rbac/carbon-access";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { buildAnalyticsSnapshot } from "@/lib/analytics-service";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import { accessibleActivityEntryFilter, accessibleEntityFilter, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 export interface CategoryBreakdown {
   category: string;
@@ -109,29 +113,36 @@ function toNum(d: Prisma.Decimal | number): number {
   return typeof d === "number" ? d : Number(d);
 }
 
-export async function buildReportPayload(periodStart: Date, periodEnd: Date): Promise<ReportPayload> {
+export async function buildReportPayload(
+  context: OrganisationContext,
+  periodStart: Date,
+  periodEnd: Date,
+): Promise<ReportPayload> {
+  requireFrozenReportAccess(context);
   // Per-site, prior-year and monthly figures come from the same aggregation
   // the dashboard uses, so a report and the dashboard can never disagree
   // about the same period.
-  const analytics = await buildAnalyticsSnapshot(periodStart, periodEnd);
+  const analytics = await buildAnalyticsSnapshot(context, periodStart, periodEnd);
+  const ctx = toTenantRepositoryContext(context);
 
   const [entities, includedCalculations, flaggedEntries, awaitingFactorEntriesRaw] = await Promise.all([
-    prisma.entity.findMany({ orderBy: { name: "asc" } }),
+    prisma.entity.findMany({ where: tenantWhere<Prisma.EntityWhereInput>(ctx, accessibleEntityFilter(context)), orderBy: { name: "asc" } }),
     prisma.calculation.findMany({
-      where: {
+      where: tenantWhere<Prisma.CalculationWhereInput>(ctx, {
         activityEntry: {
           periodStart: { gte: periodStart, lte: periodEnd },
           status: { not: "FLAGGED" },
+          ...accessibleActivityEntryFilter(context),
         },
-      },
+      }),
       include: { activityEntry: { include: { activityDataPoint: true, site: true } } },
     }),
     prisma.activityEntry.findMany({
-      where: { periodStart: { gte: periodStart, lte: periodEnd }, status: "FLAGGED" },
+      where: tenantWhere<Prisma.ActivityEntryWhereInput>(ctx, { periodStart: { gte: periodStart, lte: periodEnd }, status: "FLAGGED", ...accessibleActivityEntryFilter(context) }),
       include: { activityDataPoint: true, site: true },
     }),
     prisma.activityEntry.findMany({
-      where: { periodStart: { gte: periodStart, lte: periodEnd }, status: "AWAITING_FACTOR" },
+      where: tenantWhere<Prisma.ActivityEntryWhereInput>(ctx, { periodStart: { gte: periodStart, lte: periodEnd }, status: "AWAITING_FACTOR", ...accessibleActivityEntryFilter(context) }),
       include: { activityDataPoint: true, site: true },
     }),
   ]);

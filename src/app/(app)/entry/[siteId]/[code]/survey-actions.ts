@@ -2,10 +2,12 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createCommutingSurvey } from "@/lib/entries-service";
 import { resolvePeriod } from "@/lib/period";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { assertSiteAccess, requirePermission } from "@/lib/rbac/authorize";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
 
 const schema = z.object({
   siteId: z.string().min(1),
@@ -21,8 +23,13 @@ export interface SurveyFormState {
 }
 
 export async function submitSurveyAction(_prevState: SurveyFormState, formData: FormData): Promise<SurveyFormState> {
-  const session = await auth();
-  if (!session?.user) return { error: "You must be signed in.", success: false };
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) return { error: "You must be signed in.", success: false };
+    throw err;
+  }
 
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
@@ -51,13 +58,16 @@ export async function submitSurveyAction(_prevState: SurveyFormState, formData: 
   }
 
   try {
-    await createCommutingSurvey({
+    requirePermission(context, "carbon.entry.create");
+    assertSiteAccess(context, data.siteId);
+
+    await createCommutingSurvey(toTenantRepositoryContext(context), {
       siteId: data.siteId,
       periodStart,
       periodEnd,
       headcount: data.headcount,
       commutingDaysInPeriod: data.commutingDaysInPeriod,
-      enteredByUserId: session.user.id,
+      enteredByUserId: context.userId,
       responses,
     });
 

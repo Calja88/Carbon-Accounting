@@ -7,6 +7,10 @@ import {
   summariseUncertainty,
 } from "@/lib/lca/analysis";
 import { toMethodologyConfig } from "@/lib/lca/methodology";
+import { getLcaContext } from "@/lib/lca/permissions";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { DATA_TYPE_COLORS, formatKgPrecise } from "@/components/charts/palette";
 import { ContributionBarChart, ProportionBar } from "@/components/charts/contribution-bar-chart";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +22,15 @@ export const dynamic = "force-dynamic";
 
 export default async function DataQualityPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const context = await getLcaContext();
+  if (!context) notFound();
+  try {
+    await requireAssessmentInScope(context, id);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) notFound();
+    throw err;
+  }
+
   const [assessment, run] = await Promise.all([loadAssessment(id), getLatestRun(id)]);
   if (!assessment) notFound();
 

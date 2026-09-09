@@ -88,6 +88,63 @@ generated `MANIFEST.md` only claims what actually happened: which files were
 included, which exclusion rules fired, and that the scan passed — not a
 broader security assurance.
 
+### Generated diffs are provenance-aware scanned
+
+`GIT_DIFF.patch` is generated content, not a file with its own path — but it
+*contains* content that came from real source files, so
+`scripts/handoff/lib/diff-scan.mjs` parses the unified diff (`diff --git`,
+`---`/`+++`, `@@` hunk headers, `rename from`/`rename to`) and attributes
+each content line to the source path it actually came from: an added line
+to the new path, a **removed line to the old path**, a context line to the
+current path. Deleted (`-`) lines are scanned too, using that old-path
+provenance — a real secret removed in this change would still appear
+verbatim in the diff and must still block generation; a file's current
+content having been scanned separately is never treated as proof its diff
+is clean. Content whose provenance can't be reliably determined (a
+malformed or unparseable diff line) is still scanned, just with no path —
+so no per-file exception can apply to it — rather than skipped.
+
+The existing exact-file/exact-matched-text reviewed exceptions
+(`REVIEWED_SAFE_CREDENTIAL_MATCHES` in `secret-scan.mjs`) apply to a diff
+line only when its provenance resolves to that exact file — the diff blob
+itself is never allowlisted as a whole, and a reviewed construct in file A
+never covers the same-looking text found under file B. Other generated
+artifacts (`CHANGED_FILES.txt`, `TASK.md`, `IMPLEMENTATION_SUMMARY.md`,
+`GIT_STATUS.txt`, `TEST_RESULTS.md`, `SECURITY_CHECK.md`, `MANIFEST.md`) are
+tool-generated metadata or authored prose with no per-source-file
+provenance of their own — they're scanned normally, with no path, and
+never inherit a reviewed source exception either.
+
+## Secret-scan audit mode (diagnostic only, no ZIP)
+
+```
+npm run handoff:secret-audit -- --task T00
+```
+
+`npm run handoff:review` fails fast: it aborts at the *first* suspected
+secret across every surface it scans, so clearing several unrelated false
+positives means fix-one/rerun/repeat. `handoff:secret-audit` instead scans
+**the same secret-bearing surfaces real handoff generation does** for the
+same `--task`/`--base` — the candidate source files, the generated diff
+(provenance-aware, exactly as described above), and the other generated
+artifacts (`GIT_STATUS.txt`, `CHANGED_FILES.txt`, `TASK.md`,
+`IMPLEMENTATION_SUMMARY.md`) — but does not stop at the first match and
+does not package anything. It collects every finding in one pass and
+prints a report, tagging each as already reviewed-allowlisted or
+unreviewed, broken out by surface (source / generated-diff / other
+generated). It never creates a ZIP, never copies a file, and never prints
+a matched secret value (only the file path or diff provenance, finding
+category, rule id, and a line number derived from counting newlines
+before the match, or the diff's own tracked line number — never from the
+matched text). It exits `0` only when there are zero unreviewed findings
+across every surface, non-zero otherwise. `secret-audit.mjs` is not
+imported by, and does not change, `full-handoff.mjs`/`review-handoff.mjs`
+— both remain exactly as fail-fast/fail-closed as before; the audit tool
+and the real handoff's `GIT_DIFF.patch` guard share the same underlying
+`diff-scan.mjs`/`secret-scan.mjs` scanning logic (never a second,
+divergent implementation), so a clean audit and a successful real handoff
+are expected to agree.
+
 ## What is never included
 
 `.env*` (except `.env.example`), Neon/DATABASE_URL/DIRECT_URL credentials,

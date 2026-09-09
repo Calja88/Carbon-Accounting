@@ -64,7 +64,7 @@ export async function extractDocument(actor: AiActor, documentId: string): Promi
   await assertDocumentInScope(actor, documentId);
 
   const document = await prisma.sourceDocument.findUniqueOrThrow({ where: { id: documentId } });
-  const config = await getAiConfig();
+  const config = await getAiConfig(actor.organisationId);
 
   if (document.byteSize > config.maxDocumentBytes) {
     throw new AiUnavailableError(
@@ -128,6 +128,7 @@ export async function extractDocument(actor: AiActor, documentId: string): Promi
       messages: [{ role: "user", content: userContent }],
       audit: {
         userId: actor.userId,
+        organisationId: actor.organisationId,
         siteId: document.siteId,
         sourceDocumentId: document.id,
         relatedType: "SOURCE_DOCUMENT",

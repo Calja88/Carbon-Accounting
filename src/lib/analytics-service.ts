@@ -1,3 +1,4 @@
+import { requireCarbonView } from "@/lib/rbac/carbon-access";
 /**
  * Read-only aggregation over Calculation rows for the emissions dashboard
  * and the report's charts. Deliberately reuses the same inclusion rules as
@@ -15,6 +16,9 @@
 
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import { accessibleActivityEntryFilter, accessibleSiteFilter, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 export interface ScopeTotals {
   scope1: number;
@@ -108,14 +112,20 @@ type CalcWithEntry = Prisma.CalculationGetPayload<{
   include: { activityEntry: { include: { activityDataPoint: true; site: { include: { entity: true } } } } };
 }>;
 
-async function loadCalculations(periodStart: Date, periodEnd: Date): Promise<CalcWithEntry[]> {
+async function loadCalculations(
+  context: OrganisationContext,
+  periodStart: Date,
+  periodEnd: Date,
+): Promise<CalcWithEntry[]> {
+  const ctx = toTenantRepositoryContext(context);
   return prisma.calculation.findMany({
-    where: {
+    where: tenantWhere<Prisma.CalculationWhereInput>(ctx, {
       activityEntry: {
         periodStart: { gte: periodStart, lte: periodEnd },
         status: { not: "FLAGGED" },
+        ...accessibleActivityEntryFilter(context),
       },
-    },
+    }),
     include: {
       activityEntry: { include: { activityDataPoint: true, site: { include: { entity: true } } } },
     },
@@ -216,15 +226,29 @@ function buildMonthly(calcs: CalcWithEntry[], periodStart: Date, periodEnd: Date
   return Array.from(months.values());
 }
 
-export async function buildAnalyticsSnapshot(periodStart: Date, periodEnd: Date): Promise<AnalyticsSnapshot> {
+export async function buildAnalyticsSnapshot(
+  context: OrganisationContext,
+  periodStart: Date,
+  periodEnd: Date,
+): Promise<AnalyticsSnapshot> {
+  requireCarbonView(context);
   const previous = previousYearPeriod(periodStart, periodEnd);
+  const ctx = toTenantRepositoryContext(context);
 
   const [currentCalcs, previousCalcs, sites, awaitingFactorCount, flaggedCount] = await Promise.all([
-    loadCalculations(periodStart, periodEnd),
-    loadCalculations(previous.start, previous.end),
-    prisma.site.findMany({ where: { isActive: true }, include: { entity: true }, orderBy: [{ entity: { name: "asc" } }, { name: "asc" }] }),
-    prisma.activityEntry.count({ where: { periodStart: { gte: periodStart, lte: periodEnd }, status: "AWAITING_FACTOR" } }),
-    prisma.activityEntry.count({ where: { periodStart: { gte: periodStart, lte: periodEnd }, status: "FLAGGED" } }),
+    loadCalculations(context, periodStart, periodEnd),
+    loadCalculations(context, previous.start, previous.end),
+    prisma.site.findMany({
+      where: tenantWhere(ctx, { isActive: true, ...accessibleSiteFilter(context) }),
+      include: { entity: true },
+      orderBy: [{ entity: { name: "asc" } }, { name: "asc" }],
+    }),
+    prisma.activityEntry.count({
+      where: tenantWhere<Prisma.ActivityEntryWhereInput>(ctx, { periodStart: { gte: periodStart, lte: periodEnd }, status: "AWAITING_FACTOR", ...accessibleActivityEntryFilter(context) }),
+    }),
+    prisma.activityEntry.count({
+      where: tenantWhere<Prisma.ActivityEntryWhereInput>(ctx, { periodStart: { gte: periodStart, lte: periodEnd }, status: "FLAGGED", ...accessibleActivityEntryFilter(context) }),
+    }),
   ]);
 
   const group = totalsFor(currentCalcs);

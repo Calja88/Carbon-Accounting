@@ -281,11 +281,11 @@ export default function LcaHelpPage() {
         </Notice>
       </SectionCard>
 
-      <SectionCard title="Who can do what" description="Product assessment permissions follow the platform's existing roles.">
-        <DataTable headers={["Role", "Can"]}>
+      <SectionCard title="Who can do what" description="Product assessment permissions follow the organisation's configured roles.">
+        <DataTable headers={["Permission", "Can"]}>
           {ROLE_CAPABILITY_SUMMARY.map((entry) => (
-            <tr key={entry.role}>
-              <Td className="font-medium text-slate-900">{entry.role.replace(/_/g, " ").toLowerCase()}</Td>
+            <tr key={entry.permission}>
+              <Td className="font-medium text-slate-900">{entry.permission}</Td>
               <Td>
                 <ul className="ml-4 list-disc space-y-0.5">
                   {entry.can.map((capability) => (

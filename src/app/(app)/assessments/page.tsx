@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { listAssessments } from "@/lib/lca/assessment-service";
-import { canEditLcaData, getLcaActor } from "@/lib/lca/permissions";
+import { canEditLcaData, getLcaContext } from "@/lib/lca/permissions";
 import { formatKgPrecise } from "@/components/charts/palette";
 import { Card, CardContent } from "@/components/ui/card";
 import { DataTable, EmptyState, PageHeading, StatusBadge, Td } from "@/components/lca/ui";
@@ -11,17 +11,25 @@ import { NewAssessmentForm } from "./new-assessment-form";
 export const dynamic = "force-dynamic";
 
 export default async function AssessmentsPage() {
-  const [assessments, actor, productVersions, methodologies] = await Promise.all([
-    listAssessments(),
-    getLcaActor(),
+  const context = await getLcaContext();
+  if (!context) return null;
+
+  const [assessments, productVersions, methodologies] = await Promise.all([
+    listAssessments(context),
     prisma.productVersion.findMany({
+      where: { product: { organisationId: context.organisationId } },
       include: { product: { include: { entity: true } } },
       orderBy: [{ product: { name: "asc" } }, { versionLabel: "asc" }],
     }),
-    prisma.lcaMethodologyProfile.findMany({ orderBy: [{ isDefault: "desc" }, { name: "asc" }] }),
+    prisma.lcaMethodologyProfile.findMany({
+      // Archived profiles stay resolvable for assessments that already use
+      // them, but must not be offered for a new selection.
+      where: { archivedAt: null, OR: [{ organisationId: context.organisationId }, { organisationId: null }] },
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    }),
   ]);
 
-  const canEdit = canEditLcaData(actor);
+  const canEdit = canEditLcaData(context);
 
   // The headline figure comes from each assessment's own latest run, so the
   // list can never show a number the assessment page disagrees with.

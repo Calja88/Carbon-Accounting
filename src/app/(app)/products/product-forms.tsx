@@ -13,6 +13,7 @@ import {
   addManufacturingLocationAction,
   createProductAction,
   createProductVersionAction,
+  retireProductVersionAction,
   updateProductAction,
 } from "./actions";
 
@@ -255,6 +256,54 @@ export function AddLocationForm({
         <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(false)}>
           Cancel
         </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Retires a product version. Never a delete: assessments reference the
+ * version, and an issued assessment version is a frozen snapshot taken
+ * against exactly this one — clearing `isActive` withdraws it from selection
+ * while everything already built on it keeps resolving.
+ */
+export function RetireVersionForm({
+  productId,
+  productVersionId,
+  versionLabel,
+}: {
+  productId: string;
+  productVersionId: string;
+  versionLabel: string;
+}) {
+  const [state, formAction, pending] = useActionState(retireProductVersionAction, emptyProductState);
+  const [open, setOpen] = useState(false);
+
+  if (!open) {
+    return <Button size="sm" variant="danger" onClick={() => setOpen(true)}>Retire</Button>;
+  }
+
+  return (
+    <form action={formAction} className="space-y-2 text-left">
+      {state.error && <Notice tone="danger">{state.error}</Notice>}
+      {state.success && <Notice tone="success">{state.message}</Notice>}
+      <input type="hidden" name="productId" value={productId} />
+      <input type="hidden" name="productVersionId" value={productVersionId} />
+      <div>
+        <Label htmlFor={`retire-version-reason-${productVersionId}`}>Reason</Label>
+        <Input id={`retire-version-reason-${productVersionId}`} name="reason" required className="mt-1" />
+      </div>
+      <div className="flex gap-2">
+        <Button
+          type="submit"
+          size="sm"
+          variant="danger"
+          disabled={pending}
+          onClick={(event) => { if (!confirm(`Retire "${versionLabel}"? It stops being selectable for new assessments.`)) event.preventDefault(); }}
+        >
+          {pending ? "Retiring…" : "Retire version"}
+        </Button>
+        <Button type="button" size="sm" variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
       </div>
     </form>
   );

@@ -20,9 +20,10 @@ export const emptyAssessmentState: AssessmentFormState = { error: null, success:
 export interface ProductFormState {
   error: string | null;
   success: boolean;
+  message?: string | null;
 }
 
-export const emptyProductState: ProductFormState = { error: null, success: false };
+export const emptyProductState: ProductFormState = { error: null, success: false, message: null };
 
 export interface SupplierFormState {
   error: string | null;
