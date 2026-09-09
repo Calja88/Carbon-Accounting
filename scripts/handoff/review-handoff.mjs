@@ -20,7 +20,7 @@ import {
   fullStatusText,
   untrackedFiles,
 } from "./lib/git.mjs";
-import { collectSafeEntries, assertGeneratedContentSafe, SecretScanAbort } from "./lib/collect.mjs";
+import { collectSafeEntries, assertGeneratedContentSafe, assertDiffContentSafe, SecretScanAbort } from "./lib/collect.mjs";
 import { buildManifest } from "./lib/manifest.mjs";
 import { createZip } from "./lib/zip.mjs";
 import { extractTaskSection, buildTaskMd } from "./lib/task-doc.mjs";
@@ -96,7 +96,7 @@ async function main() {
 
   const testPaths = includedChanged.filter((p) => /__tests__|\.test\.[tj]sx?$/.test(p));
 
-  const patch = assertGeneratedContentSafe("GIT_DIFF.patch", diffPatch(baseRef));
+  const patch = assertDiffContentSafe("GIT_DIFF.patch", diffPatch(baseRef));
   const gitStatusText = assertGeneratedContentSafe("GIT_STATUS.txt", fullStatusText());
 
   const changedFilesTxt = assertGeneratedContentSafe(

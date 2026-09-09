@@ -7,6 +7,7 @@ import { readFileSync, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { isExcluded } from "./exclude.mjs";
 import { scanContentForSecrets, isLikelyBinary, isAllowlistedForSecretScan } from "./secret-scan.mjs";
+import { scanDiffForSecrets } from "./diff-scan.mjs";
 
 export class SecretScanAbort extends Error {
   constructor(relPath, category, line) {
@@ -51,11 +52,33 @@ export function collectSafeEntries(repoRoot, relPaths, arcPrefix = "") {
   return { entries, included, skippedExcluded };
 }
 
-/** Scans and returns in-memory generated text before it is added to the ZIP. */
+/**
+ * Scans and returns in-memory generated text before it is added to the
+ * ZIP. Use only for tool-generated metadata or authored prose (task docs,
+ * summaries, manifests, status/changed-file listings) that carries no
+ * per-source-file provenance of its own — see `assertDiffContentSafe`
+ * below for content that does.
+ */
 export function assertGeneratedContentSafe(name, content) {
   const finding = scanContentForSecrets(content);
   if (finding) {
     throw new SecretScanAbort(name, finding.category, finding.line);
   }
   return content;
+}
+
+/**
+ * Provenance-aware counterpart for a generated unified git diff
+ * (GIT_DIFF.patch): every content line — added, removed, and context — is
+ * still scanned, attributed to its real source path where the diff makes
+ * that determinable, so the exact-file/exact-match allowlist applies only
+ * under the file it was actually reviewed for. The diff blob itself is
+ * never allowlisted as a whole. See scripts/handoff/lib/diff-scan.mjs.
+ */
+export function assertDiffContentSafe(name, diffText) {
+  const finding = scanDiffForSecrets(diffText);
+  if (finding) {
+    throw new SecretScanAbort(finding.diffRelPath ? `${name} (${finding.diffRelPath})` : name, finding.category, finding.line);
+  }
+  return diffText;
 }

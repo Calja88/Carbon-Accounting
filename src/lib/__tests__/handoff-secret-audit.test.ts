@@ -93,3 +93,66 @@ describe("full-handoff.mjs / review-handoff.mjs — unaffected by the audit tool
     expect(source).not.toMatch(/secret-audit\.mjs/);
   });
 });
+
+describe("generated metadata (CHANGED_FILES.txt / IMPLEMENTATION_SUMMARY.md-shaped content) — no inherited source allowlist", () => {
+  it("a reviewed source construct appearing in generic generated prose (no relPath) is NOT allowlisted there", () => {
+    // Real generated metadata never actually contains this — it's only
+    // file paths and counts — but the guarantee itself must hold: the
+    // allowlist is keyed to an exact file path, never to "this text was
+    // reviewed somewhere". Scanning with no relPath (exactly what
+    // assertGeneratedContentSafe / findingsForGeneratedText do) must never
+    // treat a reviewed-elsewhere construct as safe here.
+    const ownerMatch = join("RLS_SPIKE_OWNER_PASSWORD", ":-rls_spike_owner_local_only");
+    const fixture = `Some generated text mentions OWNER_PASSWORD="\${${ownerMatch}}" without a file path`;
+    expect(scanContentForSecrets(fixture)).not.toBeNull();
+  });
+});
+
+describe("audit/handoff parity — both real paths share the one diff-scan implementation", () => {
+  it("secret-audit.mjs uses the provenance-aware diff collector, not a second implementation", () => {
+    const source = readFileSync(resolve(__dirname, "../../../scripts/handoff/secret-audit.mjs"), "utf8");
+    expect(source).toMatch(/import\s*\{\s*collectAllDiffFindings\s*\}\s*from\s*["']\.\/lib\/diff-scan\.mjs["']/);
+  });
+
+  it("collect.mjs's real-handoff diff guard uses the same provenance-aware scanner, not a second implementation", () => {
+    const source = readFileSync(resolve(__dirname, "../../../scripts/handoff/lib/collect.mjs"), "utf8");
+    expect(source).toMatch(/import\s*\{\s*scanDiffForSecrets\s*\}\s*from\s*["']\.\/diff-scan\.mjs["']/);
+  });
+
+  it("review-handoff.mjs scans GIT_DIFF.patch via the provenance-aware guard, not the plain generated-content one", () => {
+    const source = readFileSync(resolve(__dirname, "../../../scripts/handoff/review-handoff.mjs"), "utf8");
+    expect(source).toMatch(/assertDiffContentSafe\("GIT_DIFF\.patch"/);
+    expect(source).not.toMatch(/assertGeneratedContentSafe\("GIT_DIFF\.patch"/);
+  });
+});
+
+describe("ZIP safety — a real handoff never packages while a diff finding remains unreviewed", () => {
+  it("assertDiffContentSafe throws (does not silently pass) for an unreviewed diff finding", async () => {
+    const { assertDiffContentSafe, SecretScanAbort } = await import("../../../scripts/handoff/lib/collect.mjs");
+    const secretValue = join("a-brand-new-real-look", "ing-secret-value");
+    const diff = [
+      `diff --git a/src/some/new-file.ts b/src/some/new-file.ts`,
+      `new file mode 100644`,
+      `index 0000000..1111111`,
+      `--- /dev/null`,
+      `+++ b/src/some/new-file.ts`,
+      `@@ -0,0 +1,1 @@`,
+      `+API_SECRET = "${secretValue}"`,
+    ].join("\n");
+    expect(() => assertDiffContentSafe("GIT_DIFF.patch", diff)).toThrow(SecretScanAbort);
+  });
+
+  it("assertDiffContentSafe returns the diff text unchanged when every finding is reviewed", async () => {
+    const { assertDiffContentSafe } = await import("../../../scripts/handoff/lib/collect.mjs");
+    const diff = [
+      `diff --git a/src/app/invite/[token]/actions.ts b/src/app/invite/[token]/actions.ts`,
+      `new file mode 100644`,
+      `index 0000000..1111111`,
+      `--- /dev/null`,
+      `+++ b/src/app/invite/[token]/actions.ts`,
+      `@@ -0,0 +1,1 @@`,
+      `+  const ${join("tokenHash ", "= hashInvitationToken")}(parsed.data.token);`,
+    ].join("\n");
+    expect(assertDiffContentSafe("GIT_DIFF.patch", diff)).toBe(diff);
+  });
+});
