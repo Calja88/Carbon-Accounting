@@ -4,15 +4,15 @@ import type { OverviewModel } from "@/lib/board/contracts";
 import { OrganisationAccessError } from "@/lib/organisation/session";
 import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { getBoardOverview, InvalidBoardScopeError, type BoardOverviewSearchParams } from "@/lib/board/live-overview";
-import { ExecutiveOverview } from "@/components/board/overview";
+import { AttentionWorkbench } from "@/components/board/attention-workbench";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 /**
- * BD05: the real executive Overview. Supersedes BD04's temporary
- * `redirect("/carbon")` — the working emissions dashboard stays reachable
- * at `/carbon`, unchanged, per INTEGRATION/LIVE_BINDINGS.md §1.
+ * BD05: the full source-derived management queue. Renders the same full
+ * authorized critical-item set the Overview's compact panel summarises —
+ * never a truncated list with a false total (INTEGRATION/LIVE_BINDINGS.md §2.8).
  */
-export default async function OverviewPage({
+export default async function AttentionPage({
   searchParams,
 }: {
   searchParams: Promise<BoardOverviewSearchParams>;
@@ -23,20 +23,26 @@ export default async function OverviewPage({
     model = await getBoardOverview(params);
   } catch (err) {
     if (err instanceof PermissionDeniedError) {
-      model = { unavailable: { title: "Carbon view not permitted", detail: "Your current membership does not have permission to view the Overview." } };
+      model = { unavailable: { title: "Not permitted", detail: "Your current membership does not have permission to view the Attention queue." } };
     } else if (err instanceof OrganisationAccessError) {
       if (err.reason === "NOT_AUTHENTICATED") redirect("/login");
       model = { unavailable: { title: "No organisation access", detail: "Your account isn't an active member of any organisation right now." } };
     } else if (err instanceof InvalidBoardScopeError) {
       model = { unavailable: { title: "Invalid selection", detail: "That organisation or site selection could not be verified." } };
     } else if (err instanceof ZodError) {
-      model = { unavailable: { title: "Invalid period selected", detail: "The selected date range or site could not be understood. Use the period picker on the Carbon page to choose a valid range." } };
+      model = { unavailable: { title: "Invalid period selected", detail: "The selected date range or site could not be understood." } };
     } else {
       throw err;
     }
   }
   if ("unavailable" in model) return <Unavailable title={model.unavailable.title} detail={model.unavailable.detail} />;
-  return <ExecutiveOverview model={model} />;
+  if (model.attention.state === "unavailable") return <Unavailable title="Attention queue unavailable" detail={model.attention.message} />;
+  return (
+    <AttentionWorkbench
+      items={model.attention.data.items}
+      capturedAt={new Date(model.capturedAt).toLocaleString("en-GB", { timeZone: "Europe/London" })}
+    />
+  );
 }
 
 function Unavailable({ title, detail }: { title: string; detail: string }) {
