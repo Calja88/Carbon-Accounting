@@ -18,7 +18,7 @@ assertDisposableDatabase(); // throws if this run isn't pointed at a safe, dispo
 
 const tag = randomUUID();
 const grants = [
-  "carbon.view", "ems.view", "ems.nonconformity.manage", "ems.corrective_action.manage",
+  "carbon.view", "ems.view", "ems.aspect.edit", "ems.control.manage", "ems.nonconformity.manage", "ems.corrective_action.manage",
   "ems.corrective_action.effectiveness_review", "ems.compliance_evaluation.perform", "ems.controlled_document.manage",
 ];
 
