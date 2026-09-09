@@ -1,3 +1,4 @@
+import { withLockedNonconformity } from "./locked-transaction";
 /**
  * Root-cause analysis (task T64, Docs/PHASE6_AUDIT_INCIDENT_CAPA_SPEC.md
  * §§1-2,4). Depends on T63 (`Nonconformity`), already on this branch.
@@ -19,9 +20,8 @@ import { prisma } from "@/lib/prisma";
 import type { Prisma, RootCauseMethod } from "@prisma/client";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import { requirePermission } from "@/lib/rbac/authorize";
-import { findTenantNonconformity, findTenantRootCauseAnalysis, toTenantRepositoryContext } from "@/lib/repositories/ems-repository";
+import { findTenantNonconformity, toTenantRepositoryContext } from "@/lib/repositories/ems-repository";
 import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-scope";
-import { runInTenantTransaction } from "@/lib/repositories/transaction";
 import { recordAuditEvent } from "@/lib/repositories/audit-repository";
 
 export { TenantOwnershipError };
@@ -44,14 +44,14 @@ export interface RecordRootCauseAnalysisInput {
 export async function recordRootCauseAnalysis(context: OrganisationContext, nonconformityId: string, input: RecordRootCauseAnalysisInput) {
   requirePermission(context, NONCONFORMITY_MANAGE_PERMISSION);
   if (!input.conclusion.trim()) throw new RootCauseError("Enter the root-cause conclusion.");
-  const ctx = toTenantRepositoryContext(context);
-  const nonconformity = await findTenantNonconformity(ctx, nonconformityId);
+  return withLockedNonconformity(context, { nonconformityId }, NONCONFORMITY_MANAGE_PERMISSION, async (tx, txCtx, context) => {
+  const ctx = txCtx;
+  const nonconformity = await tx.nonconformity.findFirst({ where: tenantWhere(ctx, { id: nonconformityId }) });
   if (!nonconformity) throw new TenantOwnershipError();
   if (!ANALYSABLE_STATUSES.has(nonconformity.status)) {
     throw new RootCauseError(`A root-cause analysis cannot be recorded while the nonconformity is ${nonconformity.status}.`);
   }
 
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const analysis = await tx.rootCauseAnalysis.create({
       data: {
         organisationId: txCtx.organisationId,
@@ -60,7 +60,7 @@ export async function recordRootCauseAnalysis(context: OrganisationContext, nonc
         analysisPayload: input.analysisPayload as Prisma.InputJsonValue,
         contributors: (input.contributors as Prisma.InputJsonValue | undefined) ?? undefined,
         conclusion: input.conclusion.trim(),
-        createdByUserId: input.actorUserId,
+        createdByUserId: context.userId,
       },
     });
     await recordAuditEvent(tx, txCtx, {
@@ -68,7 +68,7 @@ export async function recordRootCauseAnalysis(context: OrganisationContext, nonc
       resourceType: "root_cause_analysis",
       resourceId: analysis.id,
       summary: `Root-cause analysis (${input.method}) recorded for nonconformity "${nonconformity.reference}".`,
-      actorUserId: input.actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       after: { nonconformityId: nonconformity.id, method: input.method },
@@ -87,18 +87,20 @@ export interface ApproveRootCauseAnalysisInput {
  * module performs.
  */
 export async function approveRootCauseAnalysis(context: OrganisationContext, rootCauseAnalysisId: string, input: ApproveRootCauseAnalysisInput) {
+  // Compatibility argument only: the authenticated context supplies the actor.
+  void input;
   requirePermission(context, NONCONFORMITY_MANAGE_PERMISSION);
-  const ctx = toTenantRepositoryContext(context);
-  const analysis = await findTenantRootCauseAnalysis(ctx, rootCauseAnalysisId);
+  return withLockedNonconformity(context, { rootCauseAnalysisId }, NONCONFORMITY_MANAGE_PERMISSION, async (tx, txCtx, context) => {
+  const ctx = txCtx;
+  const analysis = await tx.rootCauseAnalysis.findFirst({ where: tenantWhere(ctx, { id: rootCauseAnalysisId }) });
   if (!analysis) throw new TenantOwnershipError();
   if (analysis.approvedAt) throw new RootCauseError("This root-cause analysis has already been approved.");
-  const nonconformity = await findTenantNonconformity(ctx, analysis.nonconformityId);
+  const nonconformity = await tx.nonconformity.findFirst({ where: tenantWhere(ctx, { id: analysis.nonconformityId }) });
   if (!nonconformity) throw new TenantOwnershipError();
   if (!ANALYSABLE_STATUSES.has(nonconformity.status)) {
     throw new RootCauseError(`Root-cause approval cannot be recorded while the nonconformity is ${nonconformity.status}.`);
   }
 
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const approved = await tx.rootCauseAnalysis.update({
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: analysis.id } },
       data: { approvedByMembershipId: context.membershipId, approvedAt: new Date() },
@@ -108,7 +110,7 @@ export async function approveRootCauseAnalysis(context: OrganisationContext, roo
       resourceType: "root_cause_analysis",
       resourceId: analysis.id,
       summary: `Root-cause analysis approved for nonconformity "${nonconformity.reference}".`,
-      actorUserId: input.actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       after: { nonconformityId: nonconformity.id },
@@ -122,7 +124,7 @@ export async function approveRootCauseAnalysis(context: OrganisationContext, roo
       resourceType: "nonconformity",
       resourceId: nonconformity.id,
       summary: `Nonconformity "${nonconformity.reference}" moved to ROOT_CAUSE_APPROVED.`,
-      actorUserId: input.actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       before: { status: nonconformity.status },

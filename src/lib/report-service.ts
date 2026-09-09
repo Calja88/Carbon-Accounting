@@ -1,3 +1,4 @@
+import { requireFrozenReportAccess } from "@/lib/rbac/carbon-access";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { buildAnalyticsSnapshot } from "@/lib/analytics-service";
@@ -117,6 +118,7 @@ export async function buildReportPayload(
   periodStart: Date,
   periodEnd: Date,
 ): Promise<ReportPayload> {
+  requireFrozenReportAccess(context);
   // Per-site, prior-year and monthly figures come from the same aggregation
   // the dashboard uses, so a report and the dashboard can never disagree
   // about the same period.

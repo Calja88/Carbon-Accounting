@@ -249,6 +249,7 @@ export async function getEvidence(context: OrganisationContext, evidenceId: stri
   const ctx = toTenantRepositoryContext(context);
   const scoped = await findTenantEvidence(ctx, evidenceId, expectedAssessmentId);
   if (!scoped) return null;
+  await requireAssessmentInScope(context, scoped.assessmentId);
   return prisma.lcaEvidence.findUnique({
     where: { id: evidenceId },
     include: {

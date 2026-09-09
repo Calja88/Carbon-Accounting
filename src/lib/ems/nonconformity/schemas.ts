@@ -136,6 +136,7 @@ export const requestEffectivenessReviewFormSchema = z.object({
 export const effectivenessResultSchema = z.enum(["EFFECTIVE", "PARTIALLY_EFFECTIVE", "INEFFECTIVE"]);
 
 export const performEffectivenessReviewFormSchema = z.object({
+  reviewCycle: z.coerce.number().int().positive(),
   nonconformityId: z.string().trim().min(1),
   criteria: z.string().trim().min(1, "Enter the review criteria.").max(2000),
   reviewDate: z.coerce.date(),

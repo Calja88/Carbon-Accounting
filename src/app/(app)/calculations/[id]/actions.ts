@@ -1,5 +1,7 @@
 "use server";
 
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
+import { requireCarbonView } from "@/lib/rbac/carbon-access";
 import { AiUnavailableError, carbonAI, resolveAiActor } from "@/lib/ai";
 import { assertSiteInScope } from "@/lib/ai/authorization";
 import { prisma } from "@/lib/prisma";
@@ -26,7 +28,9 @@ export async function explainInPlainEnglishAction(_prev: ExplainState, formData:
   let context;
   try {
     context = await requireOrganisationContext();
+    requireCarbonView(context);
   } catch (err) {
+    if (err instanceof PermissionDeniedError) return { ...initial, error: "That calculation is not available to you." };
     if (err instanceof OrganisationAccessError) return { ...initial, error: "You must be signed in." };
     throw err;
   }

@@ -30,8 +30,7 @@ export default async function EmsDashboardPage() {
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">EMS dashboard &amp; reporting</h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-500">
           A leadership overview across the modules you have access to. Every figure below is a count from that
-          module&apos;s own existing records — nothing here decides compliance or ISO conformity. All data shown is
-          synthetic.
+          module&apos;s own existing records — nothing here decides compliance or ISO conformity.
         </p>
       </div>
 

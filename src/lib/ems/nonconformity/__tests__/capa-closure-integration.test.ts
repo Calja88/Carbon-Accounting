@@ -88,17 +88,18 @@ function simpleModel(rows: Row[], prefix: string, defaults: Row = {}) {
 vi.mock("@/lib/prisma", () => {
   const organisationMembership = simpleModel(tables.memberships, "membership");
   const auditFinding = simpleModel(tables.auditFindings, "finding");
-  const nonconformity = simpleModel(tables.nonconformities, "nc", { status: "OPEN" });
+  const nonconformity = simpleModel(tables.nonconformities, "nc", { status: "OPEN", reviewCycle: 0 });
   const nonconformitySourceLink = simpleModel(tables.sourceLinks, "link", { linkedAt: new Date() });
   const containmentRecord = simpleModel(tables.containmentRecords, "containment", { adequacyReviewed: false, adequate: null });
   const rootCauseAnalysis = simpleModel(tables.rootCauseAnalyses, "rca", { approvedAt: null });
-  const correctiveAction = simpleModel(tables.correctiveActions, "corrective-action", { status: "OPEN" });
+  const correctiveAction = simpleModel(tables.correctiveActions, "corrective-action", { status: "OPEN", reviewCycle: 0 });
   const effectivenessReview = simpleModel(tables.effectivenessReviews, "review");
   const nonconformityClosure = simpleModel(tables.nonconformityClosures, "closure");
   const nonconformityClosurePolicy = simpleModel(tables.closurePolicies, "policy");
   const notification = simpleModel(tables.notifications, "notification", { status: "PENDING" });
 
   const prismaClient = {
+    $queryRaw: vi.fn(async () => []),
     organisationMembership,
     auditFinding,
     nonconformity,
@@ -193,6 +194,7 @@ describe("full CAPA lifecycle -> closure", () => {
     });
     const nonconformityId = await driveToEffectivenessReview();
     await performEffectivenessReview(reviewerContextA, nonconformityId, {
+      reviewCycle: 1,
       criteria: "Fictional criteria.",
       reviewDate: new Date("2026-08-20"),
       result: "EFFECTIVE",
@@ -231,6 +233,7 @@ describe("full CAPA lifecycle -> closure", () => {
     });
     const nonconformityId = await driveToEffectivenessReview();
     const result = await performEffectivenessReview(reviewerContextA, nonconformityId, {
+      reviewCycle: 1,
       criteria: "Fictional criteria.",
       reviewDate: new Date("2026-08-20"),
       result: "INEFFECTIVE",
@@ -251,6 +254,7 @@ describe("full CAPA lifecycle -> closure", () => {
     });
     const nonconformityId = await driveToEffectivenessReview();
     await performEffectivenessReview(reviewerContextA, nonconformityId, {
+      reviewCycle: 1,
       criteria: "Fictional criteria.",
       reviewDate: new Date("2026-08-20"),
       result: "EFFECTIVE",
@@ -261,4 +265,12 @@ describe("full CAPA lifecycle -> closure", () => {
     const { PermissionDeniedError } = await import("@/lib/rbac/authorize");
     await expect(closeNonconformity(revokedContext, nonconformityId, revokedContext.userId)).rejects.toThrow(PermissionDeniedError);
   });
+});
+
+// These are state-machine unit tests only. Real locking/rollback is proved by tests/checkpoint-a/postgres.test.ts.
+vi.mock("@/lib/ems/nonconformity/locked-transaction", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { toTenantRepositoryContext } = await import("@/lib/repositories/ems-repository");
+  return { withLockedNonconformity: async (context: Parameters<typeof toTenantRepositoryContext>[0], _target: unknown, _permission: unknown,
+    operation: (tx: typeof prisma, ctx: ReturnType<typeof toTenantRepositoryContext>, context: Parameters<typeof toTenantRepositoryContext>[0]) => unknown) => operation(prisma, toTenantRepositoryContext(context), context) };
 });

@@ -40,8 +40,10 @@ vi.mock("@/lib/prisma", () => {
     },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => {
       const tx = {
+        ...prismaClient,
+        $queryRaw: vi.fn(async () => [{ id: "locked-entry" }]),
         calculation: {
-          findMany: vi.fn(async ({ where }: { where: Row }) => tables.calculations.filter((c) => c.activityEntryId === where.activityEntryId)),
+          findMany: vi.fn(async ({ where }: { where: Row }) => tables.calculations.filter((c) => c.activityEntryId === where.activityEntryId && c.derivedFromCalculationId == null)),
           create: vi.fn(async ({ data }: { data: Row }) => {
             const row: Row = { id: `calc-${tables.nextId++}`, ...data };
             tables.calculations.push(row);
@@ -114,7 +116,7 @@ describe("runCalculationsForEntry — BD03 idempotency and atomicity", () => {
     expect(tables.calculations.filter((c) => c.activityEntryId === entry.id)).toHaveLength(1);
   });
 
-  it("simulated concurrent duplicate calls (Promise.all) still leave exactly one Calculation row", async () => {
+  it("parallel retries after an initial calculation return the existing row (not a concurrency proof)", async () => {
     seedFactor();
     const entry = seedEntry();
     const ctx = toTenantRepositoryContext(orgContextA);
@@ -125,4 +127,19 @@ describe("runCalculationsForEntry — BD03 idempotency and atomicity", () => {
     await Promise.all([runCalculationsForEntry(ctx, entry.id as string), runCalculationsForEntry(ctx, entry.id as string)]);
     expect(tables.calculations.filter((c) => c.activityEntryId === entry.id)).toHaveLength(1);
   });
+});
+
+it("Checkpoint A excludes derived history from primary creation and replay", async () => {
+  seedFactor(); const entry = seedEntry(); const ctx = toTenantRepositoryContext(orgContextA);
+  tables.calculations.push({ id: "derived-fixture", activityEntryId: entry.id, organisationId: ORG_A, scope: "SCOPE_3", basis: "STANDARD", derivedFromCalculationId: "another-parent" });
+  const first = await runCalculationsForEntry(ctx, entry.id as string);
+  expect(first).toHaveLength(1); expect(first[0].scope).toBe("SCOPE_1");
+  expect(await runCalculationsForEntry(ctx, entry.id as string)).toEqual(first);
+  expect(tables.calculations.filter(c => c.activityEntryId === entry.id)).toHaveLength(2);
+});
+it("Checkpoint A retains and rejects a partial Scope 2 history", async () => {
+  const entry = seedEntry({ activityDataPoint: { scope: "SCOPE_2", factorCategory: "grid_electricity" } });
+  tables.calculations.push({ id: "partial-fixture", activityEntryId: entry.id, organisationId: ORG_A, scope: "SCOPE_2", basis: "LOCATION_BASED", derivedFromCalculationId: null });
+  await expect(runCalculationsForEntry(toTenantRepositoryContext(orgContextA), entry.id as string)).rejects.toThrow("Incomplete");
+  expect(tables.calculations.filter(c => c.activityEntryId === entry.id)).toHaveLength(1);
 });

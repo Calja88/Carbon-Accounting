@@ -1,3 +1,4 @@
+import { withLockedNonconformity } from "./locked-transaction";
 /**
  * Nonconformity workflow (task T63, extended by T64 for the closure gate —
  * see `root-cause-service.ts`, `corrective-action-service.ts` and
@@ -45,7 +46,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import type { NonconformitySourceType } from "@prisma/client";
+import type { NonconformitySourceType, Prisma } from "@prisma/client";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import { requirePermission } from "@/lib/rbac/authorize";
 import {
@@ -57,7 +58,6 @@ import {
   findTenantOperationalControl,
   findTenantNonconformityClassification,
   findTenantNonconformity,
-  findTenantContainmentRecord,
   toTenantRepositoryContext,
 } from "@/lib/repositories/ems-repository";
 import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-scope";
@@ -154,7 +154,7 @@ export async function createNonconformityClassification(context: OrganisationCon
       key: input.key.trim(),
       label: input.label.trim(),
       rank: input.rank,
-      createdByUserId: input.actorUserId,
+      createdByUserId: context.userId,
     },
   });
 }
@@ -225,22 +225,25 @@ export interface UpsertNonconformityClosurePolicyInput {
 export async function upsertNonconformityClosurePolicy(context: OrganisationContext, input: UpsertNonconformityClosurePolicyInput) {
   requirePermission(context, NONCONFORMITY_MANAGE_PERMISSION);
   const ctx = toTenantRepositoryContext(context);
-  const existing = await prisma.nonconformityClosurePolicy.findFirst({ where: tenantWhere(ctx, {}) });
+  return prisma.$transaction(async tx => {
+  await tx.$queryRaw`SELECT "id" FROM "Organisation" WHERE "id" = ${ctx.organisationId} FOR UPDATE`;
+  const existing = await tx.nonconformityClosurePolicy.findFirst({ where: tenantWhere(ctx, {}) });
   const data = {
     requireContainment: input.requireContainment ?? true,
     requireRootCauseApproval: input.requireRootCauseApproval ?? false,
     requireCorrectiveActionsComplete: input.requireCorrectiveActionsComplete ?? false,
     requireEffectivenessReview: input.requireEffectivenessReview ?? false,
-    updatedByUserId: input.actorUserId,
+    updatedByUserId: context.userId,
   };
   if (existing) {
-    return prisma.nonconformityClosurePolicy.update({
+    return tx.nonconformityClosurePolicy.update({
       where: { id: existing.id },
       data,
     });
   }
-  return prisma.nonconformityClosurePolicy.create({
+  return tx.nonconformityClosurePolicy.create({
     data: { organisationId: ctx.organisationId, ...data },
+  });
   });
 }
 
@@ -339,7 +342,7 @@ export async function createNonconformityFromSource(context: OrganisationContext
         classificationConfigSnapshot: classificationSnapshot ?? undefined,
         ownerMembershipId: input.ownerMembershipId || null,
         dueDate: input.dueDate ?? null,
-        createdByUserId: input.actorUserId,
+        createdByUserId: context.userId,
       },
     });
     await tx.nonconformitySourceLink.create({
@@ -358,7 +361,7 @@ export async function createNonconformityFromSource(context: OrganisationContext
       resourceType: "nonconformity",
       resourceId: nonconformity.id,
       summary: `Nonconformity "${input.reference}" created from ${input.sourceType}.`,
-      actorUserId: input.actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       after: { reference: input.reference, sourceType: input.sourceType, sourceId: input.sourceId ?? null },
@@ -407,7 +410,7 @@ export async function linkAdditionalSourceToNonconformity(context: OrganisationC
       resourceType: "nonconformity_source_link",
       resourceId: link.id,
       summary: `Additional source (${input.sourceType}) linked to nonconformity "${nonconformity.reference}".`,
-      actorUserId: input.actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       after: { nonconformityId: nonconformity.id, sourceType: input.sourceType, sourceId: input.sourceId ?? null },
@@ -478,19 +481,19 @@ export interface RecordContainmentInput {
 export async function recordContainment(context: OrganisationContext, nonconformityId: string, input: RecordContainmentInput) {
   requirePermission(context, NONCONFORMITY_MANAGE_PERMISSION);
   if (!input.actionTaken.trim()) throw new NonconformityError("Describe the containment action taken.");
-  const ctx = toTenantRepositoryContext(context);
-  const nonconformity = await findTenantNonconformity(ctx, nonconformityId);
+  return withLockedNonconformity(context, { nonconformityId }, NONCONFORMITY_MANAGE_PERMISSION, async (tx, txCtx, context) => {
+  const ctx = txCtx;
+  const nonconformity = await tx.nonconformity.findFirst({ where: tenantWhere(ctx, { id: nonconformityId }) });
   if (!nonconformity) throw new TenantOwnershipError();
   if (!["OPEN", "CONTAINED", "REOPENED"].includes(nonconformity.status)) {
     throw new NonconformityError(`Containment cannot be recorded while the nonconformity is ${nonconformity.status}.`);
   }
-  const owner = await prisma.organisationMembership.findFirst({
+  const owner = await tx.organisationMembership.findFirst({
     where: { id: input.ownerMembershipId, organisationId: ctx.organisationId, status: "ACTIVE" },
     select: { id: true },
   });
   if (!owner) throw new TenantOwnershipError();
 
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const containment = await tx.containmentRecord.create({
       data: {
         organisationId: txCtx.organisationId,
@@ -498,7 +501,7 @@ export async function recordContainment(context: OrganisationContext, nonconform
         actionTaken: input.actionTaken.trim(),
         actionTakenAt: input.actionTakenAt,
         ownerMembershipId: input.ownerMembershipId,
-        createdByUserId: input.actorUserId,
+        createdByUserId: context.userId,
       },
     });
     await recordAuditEvent(tx, txCtx, {
@@ -506,7 +509,7 @@ export async function recordContainment(context: OrganisationContext, nonconform
       resourceType: "containment_record",
       resourceId: containment.id,
       summary: `Containment recorded for nonconformity "${nonconformity.reference}".`,
-      actorUserId: input.actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       after: { nonconformityId: nonconformity.id },
@@ -521,7 +524,7 @@ export async function recordContainment(context: OrganisationContext, nonconform
         resourceType: "nonconformity",
         resourceId: nonconformity.id,
         summary: `Nonconformity "${nonconformity.reference}" moved from OPEN to CONTAINED.`,
-        actorUserId: input.actorUserId,
+        actorUserId: context.userId,
         correlationId: txCtx.correlationId,
         source: "web-app",
         before: { status: "OPEN" },
@@ -540,11 +543,14 @@ export interface ReviewContainmentAdequacyInput {
 
 export async function reviewContainmentAdequacy(context: OrganisationContext, containmentId: string, input: ReviewContainmentAdequacyInput) {
   requirePermission(context, NONCONFORMITY_MANAGE_PERMISSION);
-  const ctx = toTenantRepositoryContext(context);
-  const containment = await findTenantContainmentRecord(ctx, containmentId);
+  return withLockedNonconformity(context, { containmentId }, NONCONFORMITY_MANAGE_PERMISSION, async (tx, txCtx, context) => {
+  const ctx = txCtx;
+  const containment = await tx.containmentRecord.findFirst({ where: tenantWhere(ctx, { id: containmentId }) });
   if (!containment) throw new TenantOwnershipError();
+  const parent = await tx.nonconformity.findFirst({ where: tenantWhere(ctx, { id: containment.nonconformityId }) });
+  if (!parent) throw new TenantOwnershipError();
+  if (parent.status === "CLOSED" || parent.status === "EFFECTIVENESS_REVIEW") throw new NonconformityError("Containment cannot change during review or after closure.");
 
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const updated = await tx.containmentRecord.update({
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: containment.id } },
       data: {
@@ -560,7 +566,7 @@ export async function reviewContainmentAdequacy(context: OrganisationContext, co
       resourceType: "containment_record",
       resourceId: containment.id,
       summary: `Containment adequacy reviewed: ${input.adequate ? "adequate" : "not adequate"}.`,
-      actorUserId: input.actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       after: { adequate: input.adequate },
@@ -582,14 +588,14 @@ export async function uploadEvidenceToNonconformity(
     fileName: input.fileName,
     mimeType: input.mimeType,
     bytes: input.bytes,
-    uploadedByUserId: input.actorUserId,
+    uploadedByUserId: context.userId,
   });
   await linkEvidence(context, {
     evidenceId: evidence.id,
     resourceType: "nonconformity",
     resourceId: nonconformity.id,
     purpose: input.purpose,
-    linkedByUserId: input.actorUserId,
+    linkedByUserId: context.userId,
   });
   return evidence;
 }
@@ -614,16 +620,17 @@ const CLOSABLE_STATUSES = new Set(["OPEN", "CONTAINED", "EFFECTIVENESS_REVIEW"])
  */
 async function assertMandatoryCloseStepsComplete(
   ctx: ReturnType<typeof toTenantRepositoryContext>,
-  nonconformity: { id: string; status: string },
+  nonconformity: { id: string; status: string; reviewCycle: number },
+  tx: Prisma.TransactionClient,
 ): Promise<void> {
-  const policy = await prisma.nonconformityClosurePolicy.findFirst({ where: tenantWhere(ctx, {}) });
+  const policy = await tx.nonconformityClosurePolicy.findFirst({ where: tenantWhere(ctx, {}) });
   const requireContainment = policy?.requireContainment ?? true;
   const requireRootCauseApproval = policy?.requireRootCauseApproval ?? false;
   const requireCorrectiveActionsComplete = policy?.requireCorrectiveActionsComplete ?? false;
   const requireEffectivenessReview = policy?.requireEffectivenessReview ?? false;
 
   if (requireContainment) {
-    const containmentRecords = await prisma.containmentRecord.findMany({ where: tenantWhere(ctx, { nonconformityId: nonconformity.id }) });
+    const containmentRecords = await tx.containmentRecord.findMany({ where: tenantWhere(ctx, { nonconformityId: nonconformity.id }) });
     const hasAdequateContainment = containmentRecords.some((record) => record.adequacyReviewed && record.adequate === true);
     if (!hasAdequateContainment) {
       throw new NonconformityError("Closing requires an adequate, reviewed containment record.");
@@ -631,7 +638,7 @@ async function assertMandatoryCloseStepsComplete(
   }
 
   if (requireRootCauseApproval) {
-    const approvedAnalysis = await prisma.rootCauseAnalysis.findFirst({
+    const approvedAnalysis = await tx.rootCauseAnalysis.findFirst({
       where: tenantWhere(ctx, { nonconformityId: nonconformity.id, approvedAt: { not: null } }),
     });
     if (!approvedAnalysis) {
@@ -640,7 +647,7 @@ async function assertMandatoryCloseStepsComplete(
   }
 
   if (requireCorrectiveActionsComplete) {
-    const actions = await prisma.correctiveAction.findMany({ where: tenantWhere(ctx, { nonconformityId: nonconformity.id }) });
+    const actions = await tx.correctiveAction.findMany({ where: tenantWhere(ctx, { nonconformityId: nonconformity.id }) });
     const nonCancelled = actions.filter((action) => action.status !== "CANCELLED");
     const allComplete = nonCancelled.length > 0 && nonCancelled.every((action) => action.status === "COMPLETED" || action.status === "VERIFIED");
     if (!allComplete) {
@@ -648,19 +655,12 @@ async function assertMandatoryCloseStepsComplete(
     }
   }
 
-  if (requireEffectivenessReview) {
-    const latestReview = await prisma.effectivenessReview.findFirst({
-      where: tenantWhere(ctx, { nonconformityId: nonconformity.id }),
-      orderBy: { createdAt: "desc" },
-    });
-    // T64 acceptance: "INEFFECTIVE reopens/follow-up; it cannot close" —
-    // only the most recent review's EFFECTIVE result satisfies this gate. A
-    // PARTIALLY_EFFECTIVE/INEFFECTIVE result already moved the
-    // nonconformity out of a closable status (effectiveness-service.ts), so
-    // this check is defence-in-depth against a stale/superseded review.
-    if (!latestReview || latestReview.result !== "EFFECTIVE") {
-      throw new NonconformityError("Closing requires the most recent effectiveness review to have found the corrective actions effective.");
-    }
+  const review = await tx.effectivenessReview.findFirst({
+    where: tenantWhere(ctx, { nonconformityId: nonconformity.id, reviewCycle: nonconformity.reviewCycle }),
+  });
+  // Once a review is requested it must finish effectively even if the policy normally makes review optional.
+  if ((review && review.result !== "EFFECTIVE") || ((requireEffectivenessReview || nonconformity.status === "EFFECTIVENESS_REVIEW") && (!review || review.result !== "EFFECTIVE"))) {
+    throw new NonconformityError("Closing requires an EFFECTIVE decision for the current review cycle.");
   }
 }
 
@@ -670,16 +670,18 @@ function toJsonSafe<T>(value: T): T {
 }
 
 export async function closeNonconformity(context: OrganisationContext, nonconformityId: string, actorUserId: string) {
+  // Compatibility argument only: the authenticated context supplies the actor.
+  void actorUserId;
   requirePermission(context, NONCONFORMITY_MANAGE_PERMISSION);
-  const ctx = toTenantRepositoryContext(context);
-  const nonconformity = await findTenantNonconformity(ctx, nonconformityId);
+  return withLockedNonconformity(context, { nonconformityId }, NONCONFORMITY_MANAGE_PERMISSION, async (tx, txCtx, context) => {
+  const ctx = txCtx;
+  const nonconformity = await tx.nonconformity.findFirst({ where: tenantWhere(ctx, { id: nonconformityId }) });
   if (!nonconformity) throw new TenantOwnershipError();
   if (!CLOSABLE_STATUSES.has(nonconformity.status)) {
     throw new NonconformityError(`A nonconformity in status ${nonconformity.status} cannot be closed directly.`);
   }
-  await assertMandatoryCloseStepsComplete(ctx, nonconformity);
+  await assertMandatoryCloseStepsComplete(ctx, nonconformity, tx);
 
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const [containmentRecords, rootCauseAnalyses, correctiveActions, effectivenessReviews] = await Promise.all([
       tx.containmentRecord.findMany({ where: tenantWhere(txCtx, { nonconformityId: nonconformity.id }) }),
       tx.rootCauseAnalysis.findMany({ where: tenantWhere(txCtx, { nonconformityId: nonconformity.id }) }),
@@ -688,14 +690,14 @@ export async function closeNonconformity(context: OrganisationContext, nonconfor
     ]);
     const updated = await tx.nonconformity.update({
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: nonconformity.id } },
-      data: { status: "CLOSED", closedAt: new Date(), closedByUserId: actorUserId },
+      data: { status: "CLOSED", closedAt: new Date(), closedByUserId: context.userId },
     });
     await tx.nonconformityClosure.create({
       data: {
         organisationId: txCtx.organisationId,
         nonconformityId: nonconformity.id,
         snapshot: toJsonSafe({ containmentRecords, rootCauseAnalyses, correctiveActions, effectivenessReviews }),
-        closedByUserId: actorUserId,
+        closedByUserId: context.userId,
       },
     });
     await recordAuditEvent(tx, txCtx, {
@@ -703,7 +705,7 @@ export async function closeNonconformity(context: OrganisationContext, nonconfor
       resourceType: "nonconformity",
       resourceId: nonconformity.id,
       summary: `Nonconformity "${nonconformity.reference}" closed.`,
-      actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       before: { status: nonconformity.status },
@@ -714,24 +716,26 @@ export async function closeNonconformity(context: OrganisationContext, nonconfor
 }
 
 export async function reopenNonconformity(context: OrganisationContext, nonconformityId: string, reason: string, actorUserId: string) {
+  // Compatibility argument only: the authenticated context supplies the actor.
+  void actorUserId;
   requirePermission(context, NONCONFORMITY_MANAGE_PERMISSION);
   if (!reason.trim()) throw new NonconformityError("Enter a reason for reopening this nonconformity.");
-  const ctx = toTenantRepositoryContext(context);
-  const nonconformity = await findTenantNonconformity(ctx, nonconformityId);
+  return withLockedNonconformity(context, { nonconformityId }, NONCONFORMITY_MANAGE_PERMISSION, async (tx, txCtx, context) => {
+  const ctx = txCtx;
+  const nonconformity = await tx.nonconformity.findFirst({ where: tenantWhere(ctx, { id: nonconformityId }) });
   if (!nonconformity) throw new TenantOwnershipError();
   if (nonconformity.status !== "CLOSED") throw new NonconformityError("Only a closed nonconformity can be reopened.");
 
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const updated = await tx.nonconformity.update({
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: nonconformity.id } },
-      data: { status: "REOPENED", reopenedAt: new Date(), reopenedByUserId: actorUserId, reopenReason: reason.trim() },
+      data: { status: "REOPENED", reopenedAt: new Date(), reopenedByUserId: context.userId, reopenReason: reason.trim() },
     });
     await recordAuditEvent(tx, txCtx, {
       eventType: "nonconformity.reopened",
       resourceType: "nonconformity",
       resourceId: nonconformity.id,
       summary: `Nonconformity "${nonconformity.reference}" reopened: ${reason}`,
-      actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       before: { status: nonconformity.status },

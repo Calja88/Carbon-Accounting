@@ -85,15 +85,16 @@ vi.mock("@/lib/prisma", () => {
   const operationalControl = simpleModel(tables.operationalControls, "control");
   const nonconformityClassification = simpleModel(tables.classifications, "classification", { isActive: true });
   const nonconformityClosurePolicy = simpleModel(tables.closurePolicies, "policy");
-  const nonconformity = simpleModel(tables.nonconformities, "nc", { status: "OPEN" });
+  const nonconformity = simpleModel(tables.nonconformities, "nc", { status: "OPEN", reviewCycle: 0 });
   const nonconformitySourceLink = simpleModel(tables.sourceLinks, "link", { linkedAt: new Date() });
   const containmentRecord = simpleModel(tables.containmentRecords, "containment", { adequacyReviewed: false, adequate: null });
   const rootCauseAnalysis = simpleModel(tables.rootCauseAnalyses, "rca", { approvedAt: null });
-  const correctiveAction = simpleModel(tables.correctiveActions, "corrective-action", { status: "OPEN" });
+  const correctiveAction = simpleModel(tables.correctiveActions, "corrective-action", { status: "OPEN", reviewCycle: 0 });
   const effectivenessReview = simpleModel(tables.effectivenessReviews, "review");
   const nonconformityClosure = simpleModel(tables.nonconformityClosures, "closure");
 
   const prismaClient = {
+    $queryRaw: vi.fn(async () => []),
     organisationMembership,
     auditFinding,
     environmentalIncident,
@@ -422,4 +423,12 @@ describe("classification", () => {
     const nc = await createNonconformityFromSource(managerContextA, createNcInput({ reference: "NC-CLASSIFY-FOREIGN" }));
     await expect(assignNonconformityClassification(managerContextA, nc.id, "classification-does-not-exist", managerContextA.userId)).rejects.toThrow(TenantOwnershipError);
   });
+});
+
+// These are state-machine unit tests only. Real locking/rollback is proved by tests/checkpoint-a/postgres.test.ts.
+vi.mock("@/lib/ems/nonconformity/locked-transaction", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { toTenantRepositoryContext } = await import("@/lib/repositories/ems-repository");
+  return { withLockedNonconformity: async (context: Parameters<typeof toTenantRepositoryContext>[0], _target: unknown, _permission: unknown,
+    operation: (tx: typeof prisma, ctx: ReturnType<typeof toTenantRepositoryContext>, context: Parameters<typeof toTenantRepositoryContext>[0]) => unknown) => operation(prisma, toTenantRepositoryContext(context), context) };
 });

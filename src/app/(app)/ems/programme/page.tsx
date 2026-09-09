@@ -76,7 +76,7 @@ export default async function EmsProgrammePage({
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">EMS programme &amp; scope</h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-500">
           Programme status, scope boundary, organisational context, interested parties, risks/opportunities and
-          change control — the foundation records introduced in task T23. All data shown is synthetic.
+          change control — the foundation records introduced in task T23.
         </p>
       </div>
 

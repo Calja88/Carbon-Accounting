@@ -1,3 +1,6 @@
+import { requirePermission } from "@/lib/rbac/authorize";
+import { hasClassificationClearance, readableEvidenceIds } from "./classification-access";
+export { hasClassificationClearance } from "./classification-access";
 /**
  * Shared attachment/evidence service (task T22,
  * Docs/PHASE2_EMS_FOUNDATION_SPEC.md §3 "Controlled documents and
@@ -25,7 +28,6 @@ import {
   tenantWhere,
 } from "@/lib/repositories/documents-repository";
 import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
-import type { TenantRepositoryContext } from "@/lib/repositories/context";
 import { documentEvidenceStorage } from "@/lib/documents/storage/provider";
 import { scanEvidence } from "@/lib/documents/malware-scan";
 
@@ -220,8 +222,7 @@ export async function linkEvidence(
   if (!isKnownEvidenceLinkResourceType(input.resourceType)) {
     throw new EvidenceError(`Evidence cannot be linked to resource type "${input.resourceType}".`);
   }
-  const ctx = toTenantRepositoryContext(context);
-  await findTenantEvidenceObject(ctx, input.evidenceId);
+  await getEvidenceObject(context, input.evidenceId);
 
   return prisma.evidenceLink.create({
     data: {
@@ -238,20 +239,25 @@ export async function linkEvidence(
 /** Organisation-scoped read — a foreign-tenant id is denied identically to a missing one. */
 export async function getEvidenceObject(context: OrganisationContext, evidenceId: string) {
   const ctx = toTenantRepositoryContext(context);
+  requirePermission(context, "ems.view");
+  if (!(await readableEvidenceIds(context, [evidenceId])).has(evidenceId)) throw new TenantOwnershipError();
   return findTenantEvidenceObject(ctx, evidenceId);
 }
 
 export async function listEvidenceForResource(
-  ctx: TenantRepositoryContext,
+  context: OrganisationContext,
   resourceType: EvidenceLinkResourceType,
   resourceId: string,
 ) {
+  requirePermission(context, "ems.view");
+  const ctx = toTenantRepositoryContext(context);
   const links = await prisma.evidenceLink.findMany({
     where: tenantWhere(ctx, { resourceType, resourceId }),
     include: { evidence: true },
     orderBy: { linkedAt: "desc" },
   });
-  return links.map((link) => link.evidence);
+  const allowed = await readableEvidenceIds(context, links.map(link => link.evidenceId));
+  return links.filter(link => allowed.has(link.evidenceId)).map(link => link.evidence);
 }
 
 /**
@@ -262,20 +268,6 @@ export async function listEvidenceForResource(
  * matching the "classification-aware" download requirement in the T22
  * acceptance criteria.
  */
-const CLASSIFICATION_RANK: Record<EvidenceClassification, number> = {
-  PUBLIC: 0,
-  INTERNAL: 1,
-  CONFIDENTIAL: 2,
-  RESTRICTED: 3,
-};
-
-export function hasClassificationClearance(
-  context: OrganisationContext,
-  classification: EvidenceClassification,
-): boolean {
-  if (CLASSIFICATION_RANK[classification] <= CLASSIFICATION_RANK.INTERNAL) return true;
-  return context.permissions.has("ems.controlled_document.manage") || context.permissions.has("ems.controlled_document.approve");
-}
 
 /**
  * Loads evidence bytes for download, or null on any failure — missing id,
@@ -314,16 +306,19 @@ export async function listEvidenceObjects(
 ) {
   const ctx = toTenantRepositoryContext(context);
   const search = options?.search?.trim();
-  return prisma.evidenceObject.findMany({
+  requirePermission(context, "ems.view");
+  const rows = await prisma.evidenceObject.findMany({
     where: tenantWhere(ctx, search ? { filename: { contains: search, mode: "insensitive" as const } } : {}),
     orderBy: { uploadedAt: "desc" },
   });
+  const allowed = await readableEvidenceIds(context, rows.map(row => row.id));
+  return rows.filter(row => allowed.has(row.id));
 }
 
 /** Every EvidenceLink pointing at one evidence object, tenant-scoped — shows the hub which resource(s) an object is attached to. */
 export async function listLinksForEvidenceObject(context: OrganisationContext, evidenceId: string) {
   const ctx = toTenantRepositoryContext(context);
-  await findTenantEvidenceObject(ctx, evidenceId);
+  await getEvidenceObject(context, evidenceId);
   return prisma.evidenceLink.findMany({
     where: tenantWhere(ctx, { evidenceId }),
     orderBy: { linkedAt: "desc" },

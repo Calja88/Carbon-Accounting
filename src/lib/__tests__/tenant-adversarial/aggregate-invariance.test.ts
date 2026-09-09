@@ -65,7 +65,7 @@ vi.mock("@/lib/prisma", () => ({
 
 const { buildAnalyticsSnapshot } = await import("@/lib/analytics-service");
 
-const contextA = makeOrganisationContext(ORG_A);
+const contextA = makeOrganisationContext(ORG_A, { permissions: new Set(["carbon.view"]) });
 const periodStart = new Date("2026-06-01");
 const periodEnd = new Date("2026-06-30");
 

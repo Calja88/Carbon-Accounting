@@ -60,10 +60,11 @@ function simpleModel(rows: Row[], prefix: string, defaults: Row = {}) {
 
 vi.mock("@/lib/prisma", () => {
   const organisationMembership = simpleModel(tables.memberships, "membership");
-  const nonconformity = simpleModel(tables.nonconformities, "nc", { status: "OPEN" });
+  const nonconformity = simpleModel(tables.nonconformities, "nc", { status: "OPEN", reviewCycle: 0 });
   const rootCauseAnalysis = simpleModel(tables.rootCauseAnalyses, "rca", { approvedAt: null });
 
   const prismaClient = {
+    $queryRaw: vi.fn(async () => []),
     organisationMembership,
     nonconformity,
     rootCauseAnalysis,
@@ -165,4 +166,12 @@ describe("listRootCauseAnalyses — tenant isolation", () => {
     const listA = await listRootCauseAnalyses(managerContextA, "nc-contained");
     expect(listA).toHaveLength(1);
   });
+});
+
+// These are state-machine unit tests only. Real locking/rollback is proved by tests/checkpoint-a/postgres.test.ts.
+vi.mock("@/lib/ems/nonconformity/locked-transaction", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { toTenantRepositoryContext } = await import("@/lib/repositories/ems-repository");
+  return { withLockedNonconformity: async (context: Parameters<typeof toTenantRepositoryContext>[0], _target: unknown, _permission: unknown,
+    operation: (tx: typeof prisma, ctx: ReturnType<typeof toTenantRepositoryContext>, context: Parameters<typeof toTenantRepositoryContext>[0]) => unknown) => operation(prisma, toTenantRepositoryContext(context), context) };
 });

@@ -540,12 +540,14 @@ export type EffectivenessReviewRow = {
 
 export function EffectivenessReviewSection({
   nonconformityId,
+  reviewCycle,
   reviews,
   nonconformityStatus,
   canRequest,
   canReview,
 }: {
   nonconformityId: string;
+  reviewCycle: number;
   reviews: EffectivenessReviewRow[];
   nonconformityStatus: string;
   canRequest: boolean;
@@ -581,6 +583,7 @@ export function EffectivenessReviewSection({
         )}
         {canReview && nonconformityStatus === "EFFECTIVENESS_REVIEW" && (
           <form action={performAction} className="grid gap-3 sm:grid-cols-2">
+            <input type="hidden" name="reviewCycle" value={reviewCycle} />
             <input type="hidden" name="nonconformityId" value={nonconformityId} />
             <div className="sm:col-span-2">
               <Label htmlFor="ev-criteria">Review criteria</Label>

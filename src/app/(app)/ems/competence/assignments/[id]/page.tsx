@@ -57,7 +57,7 @@ export default async function CompetenceAssignmentDetailPage({ params }: { param
     ? await Promise.all(
         evidence.map(async (item) => ({
           id: item.id,
-          files: await listEvidenceForResource(ctx, "competence_evidence", item.id),
+          files: await listEvidenceForResource(context, "competence_evidence", item.id),
         })),
       )
     : [];

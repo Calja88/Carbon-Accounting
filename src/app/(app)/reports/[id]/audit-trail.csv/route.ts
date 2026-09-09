@@ -1,3 +1,5 @@
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
+import { requireFrozenReportAccess } from "@/lib/rbac/carbon-access";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
@@ -21,7 +23,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   let context;
   try {
     context = await requireOrganisationContext();
+    requireFrozenReportAccess(context, true);
   } catch (err) {
+    if (err instanceof PermissionDeniedError) return new NextResponse("Report not found", { status: 404 });
     if (err instanceof OrganisationAccessError) return new NextResponse("Sign in first.", { status: 401 });
     throw err;
   }
@@ -35,7 +39,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     where: tenantWhere(ctx, { id }),
     include: {
       calculationLinks: {
-        where: { calculation: tenantWhere(ctx, {}) },
         include: {
           calculation: {
             include: {
@@ -50,7 +53,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     },
   });
 
-  if (!snapshot) {
+  if (!snapshot || snapshot.calculationLinks.some(link => link.calculation.organisationId !== context.organisationId || link.calculation.activityEntry.organisationId !== context.organisationId)) {
     return new NextResponse("Report not found", { status: 404 });
   }
 

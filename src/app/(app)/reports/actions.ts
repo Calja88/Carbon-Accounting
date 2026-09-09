@@ -1,12 +1,13 @@
 "use server";
 
+import { requireFrozenReportAccess } from "@/lib/rbac/carbon-access";
 import { z } from "zod";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { buildReportPayload } from "@/lib/report-service";
 import { deriveCategory3Calculations } from "@/lib/entries-service";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
-import { requirePermission } from "@/lib/rbac/authorize";
+import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
 import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
 
 const schema = z.object({
@@ -25,7 +26,9 @@ export async function generateReportAction(
   let context;
   try {
     context = await requireOrganisationContext();
+    requireFrozenReportAccess(context);
   } catch (err) {
+    if (err instanceof PermissionDeniedError) return { error: "Report access denied." };
     if (err instanceof OrganisationAccessError) return { error: "You must be signed in." };
     throw err;
   }

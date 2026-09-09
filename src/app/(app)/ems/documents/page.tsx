@@ -45,7 +45,7 @@ export default async function ControlledDocumentsPage() {
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Controlled documents</h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-500">
             The document register introduced in task T22 — draft, review, approve and publish controlled documents,
-            each with an immutable-once-approved revision history. All content shown here is synthetic.
+            each with an immutable-once-approved revision history.
           </p>
         </div>
         <Link

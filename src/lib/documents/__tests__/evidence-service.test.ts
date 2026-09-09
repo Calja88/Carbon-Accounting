@@ -48,6 +48,7 @@ const evidenceLinks: { id: string; evidenceId: string; organisationId: string; r
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
+    controlledDocumentRevision: { findMany: vi.fn(async () => []) },
     evidenceObject: {
       create: vi.fn(async ({ data }: { data: Partial<EvidenceRow> }) => {
         const row = {
@@ -76,13 +77,14 @@ vi.mock("@/lib/prisma", () => ({
       findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
         return rows.filter((r) =>
           Object.entries(where).every(([k, v]) => {
+            if (v && typeof v === "object" && "in" in v) return (v as { in: unknown[] }).in.includes((r as unknown as Record<string, unknown>)[k]);
             if (v && typeof v === "object" && "contains" in (v as Record<string, unknown>)) {
               const needle = String((v as { contains: unknown }).contains).toLowerCase();
               return String((r as unknown as Record<string, unknown>)[k]).toLowerCase().includes(needle);
             }
             return (r as unknown as Record<string, unknown>)[k] === v;
           }),
-        );
+        ).map(r => ({ ...r, controlledDocumentRevision: null, links: evidenceLinks.filter(l => l.evidenceId === r.id) }));
       }),
     },
     evidenceLink: {
@@ -117,10 +119,10 @@ const {
 const { resetMalwareScanner, registerMalwareScanner } = await import("@/lib/documents/malware-scan");
 
 const orgContextA = makeOrganisationContext(ORG_A, {
-  permissions: new Set(["ems.controlled_document.manage"]) as unknown as ReturnType<typeof makeOrganisationContext>["permissions"],
+  permissions: new Set(["ems.view", "ems.controlled_document.manage"]) as unknown as ReturnType<typeof makeOrganisationContext>["permissions"],
 });
-const orgContextB = makeOrganisationContext(ORG_B, { permissions: new Set() as unknown as ReturnType<typeof makeOrganisationContext>["permissions"] });
-const orgContextANoManage = makeOrganisationContext(ORG_A, { permissions: new Set() as unknown as ReturnType<typeof makeOrganisationContext>["permissions"] });
+const orgContextB = makeOrganisationContext(ORG_B, { permissions: new Set(["ems.view"]) as unknown as ReturnType<typeof makeOrganisationContext>["permissions"] });
+const orgContextANoManage = makeOrganisationContext(ORG_A, { permissions: new Set(["ems.view"]) as unknown as ReturnType<typeof makeOrganisationContext>["permissions"] });
 
 beforeEach(() => {
   resetTables();

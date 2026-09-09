@@ -1,3 +1,4 @@
+import { withLockedNonconformity } from "./locked-transaction";
 /**
  * Corrective/preventive action handling (task T64,
  * Docs/PHASE6_AUDIT_INCIDENT_CAPA_SPEC.md §§1-2,4,6). Depends on T63
@@ -36,7 +37,6 @@ import { requirePermission } from "@/lib/rbac/authorize";
 import {
   findTenantNonconformity,
   findTenantCorrectiveAction,
-  findTenantActionItem,
   toTenantRepositoryContext,
 } from "@/lib/repositories/ems-repository";
 import { tenantWhere, TenantOwnershipError } from "@/lib/repositories/tenant-scope";
@@ -60,8 +60,8 @@ function isClosed(status: CorrectiveActionStatus): boolean {
   return CLOSED_STATUSES.includes(status);
 }
 
-async function validateActiveMembership(context: OrganisationContext, membershipId: string) {
-  const membership = await prisma.organisationMembership.findFirst({
+async function validateActiveMembership(context: OrganisationContext, membershipId: string, db: Prisma.TransactionClient = prisma) {
+  const membership = await db.organisationMembership.findFirst({
     where: { id: membershipId, organisationId: context.organisationId, status: "ACTIVE" },
     select: { id: true },
   });
@@ -86,19 +86,19 @@ export async function createCorrectiveAction(context: OrganisationContext, nonco
   requirePermission(context, CORRECTIVE_ACTION_MANAGE_PERMISSION);
   if (!input.description.trim()) throw new CorrectiveActionError("Describe the corrective action.");
   if (!input.dueDate) throw new CorrectiveActionError("Enter a due date.");
-  const ctx = toTenantRepositoryContext(context);
-  const nonconformity = await findTenantNonconformity(ctx, nonconformityId);
+  return withLockedNonconformity(context, { nonconformityId }, CORRECTIVE_ACTION_MANAGE_PERMISSION, async (tx, txCtx, context) => {
+  const ctx = txCtx;
+  const nonconformity = await tx.nonconformity.findFirst({ where: tenantWhere(ctx, { id: nonconformityId }) });
   if (!nonconformity) throw new TenantOwnershipError();
   if (nonconformity.status !== "ROOT_CAUSE_APPROVED" && nonconformity.status !== "ACTIONS_IN_PROGRESS") {
     throw new CorrectiveActionError(`A corrective action cannot be created while the nonconformity is ${nonconformity.status}; approve root cause first.`);
   }
-  await validateActiveMembership(context, input.ownerMembershipId);
+  await validateActiveMembership(context, input.ownerMembershipId, tx);
   if (input.sharedActionItemId) {
-    const sharedAction = await findTenantActionItem(ctx, input.sharedActionItemId);
+    const sharedAction = await tx.actionItem.findFirst({ where: tenantWhere(ctx, { id: input.sharedActionItemId }) });
     if (!sharedAction) throw new TenantOwnershipError();
   }
 
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const action = await tx.correctiveAction.create({
       data: {
         organisationId: txCtx.organisationId,
@@ -109,7 +109,7 @@ export async function createCorrectiveAction(context: OrganisationContext, nonco
         dueDate: input.dueDate,
         sharedActionItemId: input.sharedActionItemId || null,
         status: "OPEN",
-        createdByUserId: input.actorUserId,
+        createdByUserId: context.userId,
       },
     });
     await recordAuditEvent(tx, txCtx, {
@@ -117,7 +117,7 @@ export async function createCorrectiveAction(context: OrganisationContext, nonco
       resourceType: "corrective_action",
       resourceId: action.id,
       summary: `Corrective action created for nonconformity "${nonconformity.reference}".`,
-      actorUserId: input.actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       after: { nonconformityId: nonconformity.id, ownerMembershipId: action.ownerMembershipId, dueDate: action.dueDate },
@@ -132,7 +132,7 @@ export async function createCorrectiveAction(context: OrganisationContext, nonco
         resourceType: "nonconformity",
         resourceId: nonconformity.id,
         summary: `Nonconformity "${nonconformity.reference}" moved to ACTIONS_IN_PROGRESS.`,
-        actorUserId: input.actorUserId,
+        actorUserId: context.userId,
         correlationId: txCtx.correlationId,
         source: "web-app",
         before: { status: "ROOT_CAUSE_APPROVED" },
@@ -165,13 +165,18 @@ export interface ReassignCorrectiveActionInput {
 
 export async function reassignCorrectiveAction(context: OrganisationContext, correctiveActionId: string, input: ReassignCorrectiveActionInput) {
   requirePermission(context, CORRECTIVE_ACTION_MANAGE_PERMISSION);
-  const ctx = toTenantRepositoryContext(context);
-  const action = await findTenantCorrectiveAction(ctx, correctiveActionId);
+  return withLockedNonconformity(context, { correctiveActionId }, CORRECTIVE_ACTION_MANAGE_PERMISSION, async (tx, txCtx, context) => {
+  const ctx = txCtx;
+  const action = await tx.correctiveAction.findFirst({ where: tenantWhere(ctx, { id: correctiveActionId }) });
   if (!action) throw new TenantOwnershipError();
-  if (isClosed(action.status)) throw new CorrectiveActionError(`Corrective action is ${action.status} and cannot be reassigned; reopen it first.`);
-  await validateActiveMembership(context, input.newOwnerMembershipId);
+  const parent = await tx.nonconformity.findFirst({ where: tenantWhere(ctx, { id: action.nonconformityId }) });
+  if (!parent) throw new TenantOwnershipError();
+  if (parent.status === "CLOSED") throw new CorrectiveActionError("Reopen the nonconformity before changing its corrective actions.");
+  if (parent.status === "EFFECTIVENESS_REVIEW") throw new CorrectiveActionError("Reopen the corrective action to start a new review cycle before changing it.");
 
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+  if (isClosed(action.status)) throw new CorrectiveActionError(`Corrective action is ${action.status} and cannot be reassigned; reopen it first.`);
+  await validateActiveMembership(context, input.newOwnerMembershipId, tx);
+
     const updated = await tx.correctiveAction.update({
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: action.id } },
       data: { ownerMembershipId: input.newOwnerMembershipId },
@@ -182,7 +187,7 @@ export async function reassignCorrectiveAction(context: OrganisationContext, cor
       resourceType: "corrective_action",
       resourceId: action.id,
       summary: "Corrective action reassigned to a new owner.",
-      actorUserId: input.actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       before: { ownerMembershipId: action.ownerMembershipId },
@@ -203,17 +208,24 @@ const OPEN_STATUS_TRANSITIONS: Record<string, CorrectiveActionStatus[]> = {
 };
 
 export async function setCorrectiveActionStatus(context: OrganisationContext, correctiveActionId: string, status: CorrectiveActionStatus, actorUserId: string) {
+  // Compatibility argument only: the authenticated context supplies the actor.
+  void actorUserId;
   requirePermission(context, CORRECTIVE_ACTION_MANAGE_PERMISSION);
-  const ctx = toTenantRepositoryContext(context);
-  const action = await findTenantCorrectiveAction(ctx, correctiveActionId);
+  return withLockedNonconformity(context, { correctiveActionId }, CORRECTIVE_ACTION_MANAGE_PERMISSION, async (tx, txCtx, context) => {
+  const ctx = txCtx;
+  const action = await tx.correctiveAction.findFirst({ where: tenantWhere(ctx, { id: correctiveActionId }) });
   if (!action) throw new TenantOwnershipError();
+  const parent = await tx.nonconformity.findFirst({ where: tenantWhere(ctx, { id: action.nonconformityId }) });
+  if (!parent) throw new TenantOwnershipError();
+  if (parent.status === "CLOSED") throw new CorrectiveActionError("Reopen the nonconformity before changing its corrective actions.");
+  if (parent.status === "EFFECTIVENESS_REVIEW") throw new CorrectiveActionError("Reopen the corrective action to start a new review cycle before changing it.");
+
   if (isClosed(action.status)) throw new CorrectiveActionError(`Corrective action is ${action.status} and cannot change status directly; reopen it first.`);
   const allowed = OPEN_STATUS_TRANSITIONS[action.status] ?? [];
   if (!allowed.includes(status)) {
     throw new CorrectiveActionError(`Corrective action cannot move from ${action.status} to ${status}.`);
   }
 
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const updated = await tx.correctiveAction.update({
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: action.id } },
       data: { status },
@@ -226,7 +238,7 @@ export async function setCorrectiveActionStatus(context: OrganisationContext, co
       resourceType: "corrective_action",
       resourceId: action.id,
       summary: `Corrective action status changed to ${status}.`,
-      actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       before: { status: action.status },
@@ -248,12 +260,17 @@ export interface CompleteCorrectiveActionInput {
 export async function completeCorrectiveAction(context: OrganisationContext, correctiveActionId: string, input: CompleteCorrectiveActionInput) {
   requirePermission(context, CORRECTIVE_ACTION_MANAGE_PERMISSION);
   if (!input.completionEvidenceNote.trim()) throw new CorrectiveActionError("Describe the completion evidence.");
-  const ctx = toTenantRepositoryContext(context);
-  const action = await findTenantCorrectiveAction(ctx, correctiveActionId);
+  return withLockedNonconformity(context, { correctiveActionId }, CORRECTIVE_ACTION_MANAGE_PERMISSION, async (tx, txCtx, context) => {
+  const ctx = txCtx;
+  const action = await tx.correctiveAction.findFirst({ where: tenantWhere(ctx, { id: correctiveActionId }) });
   if (!action) throw new TenantOwnershipError();
+  const parent = await tx.nonconformity.findFirst({ where: tenantWhere(ctx, { id: action.nonconformityId }) });
+  if (!parent) throw new TenantOwnershipError();
+  if (parent.status === "CLOSED") throw new CorrectiveActionError("Reopen the nonconformity before changing its corrective actions.");
+  if (parent.status === "EFFECTIVENESS_REVIEW") throw new CorrectiveActionError("Reopen the corrective action to start a new review cycle before changing it.");
+
   if (isClosed(action.status)) throw new CorrectiveActionError(`Corrective action is already ${action.status}.`);
 
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const now = new Date();
     // BD02: CAS on the write itself, not just the read above — closes the
     // race between the pre-transaction status check and this write (a
@@ -265,7 +282,7 @@ export async function completeCorrectiveAction(context: OrganisationContext, cor
       data: {
         status: "COMPLETED",
         completedAt: now,
-        completedByUserId: input.actorUserId,
+        completedByUserId: context.userId,
         completionEvidenceNote: input.completionEvidenceNote.trim(),
       },
     });
@@ -279,7 +296,7 @@ export async function completeCorrectiveAction(context: OrganisationContext, cor
       resourceType: "corrective_action",
       resourceId: action.id,
       summary: "Corrective action completed.",
-      actorUserId: input.actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       before: { status: action.status },
@@ -305,16 +322,22 @@ export interface VerifyCorrectiveActionInput {
  * this package's demonstrated corrective-action/effectiveness chain.
  */
 export async function verifyCorrectiveAction(context: OrganisationContext, correctiveActionId: string, input: VerifyCorrectiveActionInput) {
+  // Compatibility argument only: the authenticated context supplies the actor.
+  void input;
   requirePermission(context, CORRECTIVE_ACTION_MANAGE_PERMISSION);
-  const ctx = toTenantRepositoryContext(context);
-  const action = await findTenantCorrectiveAction(ctx, correctiveActionId);
+  return withLockedNonconformity(context, { correctiveActionId }, CORRECTIVE_ACTION_MANAGE_PERMISSION, async (tx, txCtx, context) => {
+  const ctx = txCtx;
+  const action = await tx.correctiveAction.findFirst({ where: tenantWhere(ctx, { id: correctiveActionId }) });
   if (!action) throw new TenantOwnershipError();
+  const parent = await tx.nonconformity.findFirst({ where: tenantWhere(ctx, { id: action.nonconformityId }) });
+  if (!parent) throw new TenantOwnershipError();
+  if (parent.status === "CLOSED") throw new CorrectiveActionError("Reopen the nonconformity before changing its corrective actions.");
+
   if (action.status !== "COMPLETED") throw new CorrectiveActionError("Only a completed corrective action can be verified.");
-  if (action.completedByUserId === input.actorUserId) {
+  if (action.completedByUserId === context.userId) {
     throw new CorrectiveActionError("The person who completed this corrective action cannot also verify it.");
   }
 
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     const now = new Date();
     // BD02: CAS re-proves both the status and the self-verification
     // exclusion at the moment of the write — closes the race where the
@@ -325,7 +348,7 @@ export async function verifyCorrectiveAction(context: OrganisationContext, corre
         organisationId: txCtx.organisationId,
         id: action.id,
         status: "COMPLETED",
-        completedByUserId: { not: input.actorUserId },
+        completedByUserId: { not: context.userId },
       },
       data: { status: "VERIFIED", verifiedAt: now, verifiedByMembershipId: context.membershipId },
     });
@@ -342,7 +365,7 @@ export async function verifyCorrectiveAction(context: OrganisationContext, corre
       resourceType: "corrective_action",
       resourceId: action.id,
       summary: "Corrective action verified.",
-      actorUserId: input.actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       before: { status: "COMPLETED" },
@@ -360,23 +383,33 @@ export interface ReopenCorrectiveActionInput {
 export async function reopenCorrectiveAction(context: OrganisationContext, correctiveActionId: string, input: ReopenCorrectiveActionInput) {
   requirePermission(context, CORRECTIVE_ACTION_MANAGE_PERMISSION);
   if (!input.reopenReason.trim()) throw new CorrectiveActionError("Enter a reason for reopening.");
-  const ctx = toTenantRepositoryContext(context);
-  const action = await findTenantCorrectiveAction(ctx, correctiveActionId);
+  return withLockedNonconformity(context, { correctiveActionId }, CORRECTIVE_ACTION_MANAGE_PERMISSION, async (tx, txCtx, context) => {
+  const ctx = txCtx;
+  const action = await tx.correctiveAction.findFirst({ where: tenantWhere(ctx, { id: correctiveActionId }) });
   if (!action) throw new TenantOwnershipError();
+  const parent = await tx.nonconformity.findFirst({ where: tenantWhere(ctx, { id: action.nonconformityId }) });
+  if (!parent) throw new TenantOwnershipError();
+  if (parent.status === "CLOSED") throw new CorrectiveActionError("Reopen the nonconformity before changing its corrective actions.");
+
   if (!isClosed(action.status)) throw new CorrectiveActionError("Only a completed, verified or cancelled corrective action can be reopened.");
 
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    if (parent.status === "EFFECTIVENESS_REVIEW") {
+      await tx.nonconformity.update({ where: { id: parent.id }, data: { status: "ACTIONS_IN_PROGRESS" } });
+      await recordAuditEvent(tx, txCtx, { eventType: "nonconformity.actions_in_progress", resourceType: "nonconformity", resourceId: parent.id,
+        summary: "Corrective action reopened; a new effectiveness review cycle is required.", actorUserId: context.userId, correlationId: txCtx.correlationId,
+        source: "web-app", before: { status: parent.status, reviewCycle: parent.reviewCycle }, after: { status: "ACTIONS_IN_PROGRESS" } });
+    }
     const now = new Date();
     const updated = await tx.correctiveAction.update({
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: action.id } },
-      data: { status: "REOPENED", reopenedAt: now, reopenedByUserId: input.actorUserId, reopenReason: input.reopenReason.trim() },
+      data: { status: "REOPENED", reopenedAt: now, reopenedByUserId: context.userId, reopenReason: input.reopenReason.trim() },
     });
     await recordAuditEvent(tx, txCtx, {
       eventType: "corrective_action.reopened",
       resourceType: "corrective_action",
       resourceId: action.id,
       summary: "Corrective action reopened.",
-      actorUserId: input.actorUserId,
+      actorUserId: context.userId,
       correlationId: txCtx.correlationId,
       source: "web-app",
       before: { status: action.status },
@@ -399,14 +432,14 @@ export async function uploadEvidenceToCorrectiveAction(
     fileName: input.fileName,
     mimeType: input.mimeType,
     bytes: input.bytes,
-    uploadedByUserId: input.actorUserId,
+    uploadedByUserId: context.userId,
   });
   await linkEvidence(context, {
     evidenceId: evidence.id,
     resourceType: "corrective_action",
     resourceId: action.id,
     purpose: input.purpose,
-    linkedByUserId: input.actorUserId,
+    linkedByUserId: context.userId,
   });
   return evidence;
 }
@@ -416,7 +449,7 @@ export async function listCorrectiveActionEvidence(context: OrganisationContext,
   const ctx = toTenantRepositoryContext(context);
   const action = await findTenantCorrectiveAction(ctx, correctiveActionId);
   if (!action) throw new TenantOwnershipError();
-  return listEvidenceForResource(ctx, "corrective_action", action.id);
+  return listEvidenceForResource(context, "corrective_action", action.id);
 }
 
 // ---------------------------------------------------------------------------

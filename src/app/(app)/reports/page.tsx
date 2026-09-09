@@ -1,3 +1,5 @@
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
+import { requireFrozenReportAccess } from "@/lib/rbac/carbon-access";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { FileText, ArrowRight } from "lucide-react";
@@ -12,7 +14,9 @@ export default async function ReportsPage() {
   let context;
   try {
     context = await requireOrganisationContext();
+    requireFrozenReportAccess(context);
   } catch (err) {
+    if (err instanceof PermissionDeniedError) redirect("/");
     if (err instanceof OrganisationAccessError) redirect("/login");
     throw err;
   }

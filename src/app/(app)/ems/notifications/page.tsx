@@ -76,8 +76,7 @@ export default async function NotificationsWorkQueuePage({ searchParams }: PageP
       <div>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">My work queue</h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-500">
-          Notifications and reminders addressed to you, from the T24 notifications and reminders service. All
-          content shown here is synthetic. Only you can see or act on your own queue.
+          Notifications and reminders addressed to you, from the T24 notifications and reminders service.  Only you can see or act on your own queue.
         </p>
       </div>
 

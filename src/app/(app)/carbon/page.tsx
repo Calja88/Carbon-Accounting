@@ -1,3 +1,5 @@
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
+import { requireCarbonView } from "@/lib/rbac/carbon-access";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AlertTriangle, ArrowRight, CheckCircle2, Clock, FlagTriangleRight } from "lucide-react";
@@ -28,7 +30,9 @@ export default async function DashboardPage({
   let context;
   try {
     context = await requireOrganisationContext();
+    requireCarbonView(context);
   } catch (err) {
+    if (err instanceof PermissionDeniedError) redirect("/");
     if (err instanceof OrganisationAccessError) {
       // UI14: only an unauthenticated visitor belongs at /login. A signed-in
       // user with no ACTIVE membership (suspended, removed, or never

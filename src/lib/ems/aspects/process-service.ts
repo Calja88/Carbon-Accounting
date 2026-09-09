@@ -22,7 +22,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { OrganisationContext } from "@/lib/organisation/context";
-import { requirePermission } from "@/lib/rbac/authorize";
+import { requireUnscopedEmsAccess as requirePermission } from "@/lib/rbac/ems-access";
 import { requireEntityInScope, requireSiteInScope } from "@/lib/repositories/carbon-repository";
 import {
   findTenantEmsProgramme,
@@ -52,6 +52,7 @@ export interface ListActivityProcessesFilter {
 }
 
 export async function listActivityProcesses(context: OrganisationContext, filter: ListActivityProcessesFilter = {}) {
+  requirePermission(context, "ems.view");
   const ctx = toTenantRepositoryContext(context);
   return prisma.activityProcess.findMany({
     where: tenantWhere(ctx, {
@@ -65,6 +66,7 @@ export async function listActivityProcesses(context: OrganisationContext, filter
 }
 
 export async function getActivityProcess(context: OrganisationContext, id: string) {
+  requirePermission(context, "ems.view");
   const ctx = toTenantRepositoryContext(context);
   return findTenantActivityProcess(ctx, id);
 }

@@ -1,3 +1,4 @@
+import { requireCarbonView } from "@/lib/rbac/carbon-access";
 /**
  * "How was this calculated?"
  *
@@ -100,6 +101,7 @@ export async function explainCalculation(
   context: OrganisationContext,
   calculationId: string,
 ): Promise<CalculationExplanation | null> {
+  requireCarbonView(context);
   const ctx = toTenantRepositoryContext(context);
   const calc = await prisma.calculation.findFirst({
     where: tenantWhere(ctx, { id: calculationId }),

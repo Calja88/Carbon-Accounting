@@ -412,7 +412,7 @@ export async function listIncidentEvidence(context: OrganisationContext, inciden
   const incident = await findTenantEnvironmentalIncident(ctx, incidentId);
   if (!incident) throw new TenantOwnershipError();
   assertIncidentReadAccess(context, incident);
-  return listEvidenceForResource(ctx, "environmental_incident", incident.id);
+  return listEvidenceForResource(context, "environmental_incident", incident.id);
 }
 
 // ---------------------------------------------------------------------------

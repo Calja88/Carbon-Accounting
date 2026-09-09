@@ -82,13 +82,14 @@ function simpleModel(rows: Row[], prefix: string, defaults: Row = {}) {
 
 vi.mock("@/lib/prisma", () => {
   const organisationMembership = simpleModel(tables.memberships, "membership");
-  const nonconformity = simpleModel(tables.nonconformities, "nc", { status: "OPEN" });
-  const correctiveAction = simpleModel(tables.correctiveActions, "corrective-action", { status: "OPEN" });
+  const nonconformity = simpleModel(tables.nonconformities, "nc", { status: "OPEN", reviewCycle: 0 });
+  const correctiveAction = simpleModel(tables.correctiveActions, "corrective-action", { status: "OPEN", reviewCycle: 0 });
   const effectivenessReview = simpleModel(tables.effectivenessReviews, "review");
   const nonconformityClosurePolicy = simpleModel(tables.closurePolicies, "policy");
   const nonconformitySourceLink = simpleModel(tables.sourceLinks, "link", { linkedAt: new Date() });
 
   const prismaClient = {
+    $queryRaw: vi.fn(async () => []),
     organisationMembership,
     nonconformity,
     correctiveAction,
@@ -131,7 +132,7 @@ beforeEach(() => {
     id: "nc-actions-in-progress",
     organisationId: ORG_A,
     reference: "NC-1",
-    status: "ACTIONS_IN_PROGRESS",
+    status: "ACTIONS_IN_PROGRESS", reviewCycle: 0,
     requirementReference: "ISO 14001:2015 Clause 9.1 (fictional)",
     complianceObligationId: null,
     operationalControlId: null,
@@ -141,7 +142,7 @@ beforeEach(() => {
     id: "nc-review",
     organisationId: ORG_A,
     reference: "NC-2",
-    status: "EFFECTIVENESS_REVIEW",
+    status: "EFFECTIVENESS_REVIEW", reviewCycle: 1,
     requirementReference: "ISO 14001:2015 Clause 9.1 (fictional)",
     complianceObligationId: null,
     operationalControlId: null,
@@ -173,6 +174,7 @@ describe("requestEffectivenessReview", () => {
 
 function reviewInput(overrides: Partial<Parameters<typeof performEffectivenessReview>[2]> = {}) {
   return {
+    reviewCycle: 1,
     criteria: "Fictional criteria: no repeat occurrence within 30 days.",
     reviewDate: new Date("2026-08-15"),
     result: "EFFECTIVE" as const,
@@ -232,11 +234,11 @@ describe("performEffectivenessReview — outcome handling", () => {
     expect(result.followUp).toBeNull();
   });
 
-  it("PARTIALLY_EFFECTIVE creates a separate follow-up nonconformity under the CREATE_FOLLOW_UP policy, leaving the original in EFFECTIVENESS_REVIEW", async () => {
+  it("PARTIALLY_EFFECTIVE creates a separate follow-up nonconformity under the CREATE_FOLLOW_UP policy, reopening the original", async () => {
     tables.closurePolicies.push({ id: "policy-1", organisationId: ORG_A, ineffectiveOutcomePolicy: "CREATE_FOLLOW_UP" });
     tables.correctiveActions.push({ id: "ca-1", organisationId: ORG_A, nonconformityId: "nc-review", status: "COMPLETED", ownerMembershipId: "membership-owner" });
     const result = await performEffectivenessReview(reviewerContextA, "nc-review", reviewInput({ result: "PARTIALLY_EFFECTIVE" }));
-    expect(result.nonconformity.status).toBe("EFFECTIVENESS_REVIEW");
+    expect(result.nonconformity.status).toBe("REOPENED");
     expect(result.followUp).not.toBeNull();
     expect(result.followUp?.organisationId).toBe(ORG_A);
     expect(result.followUp?.sourceReferenceNote).toContain("NC-2");
@@ -263,5 +265,32 @@ describe("listEffectivenessReviews — tenant isolation", () => {
     await expect(listEffectivenessReviews(reviewerContextB, "nc-review")).rejects.toThrow(TenantOwnershipError);
     const listA = await listEffectivenessReviews(reviewerContextA, "nc-review");
     expect(listA).toHaveLength(1);
+  });
+});
+
+// These are state-machine unit tests only. Real locking/rollback is proved by tests/checkpoint-a/postgres.test.ts.
+vi.mock("@/lib/ems/nonconformity/locked-transaction", async () => {
+  const { prisma } = await import("@/lib/prisma");
+  const { toTenantRepositoryContext } = await import("@/lib/repositories/ems-repository");
+  return { withLockedNonconformity: async (context: Parameters<typeof toTenantRepositoryContext>[0], _target: unknown, _permission: unknown,
+    operation: (tx: typeof prisma, ctx: ReturnType<typeof toTenantRepositoryContext>, context: Parameters<typeof toTenantRepositoryContext>[0]) => unknown) => operation(prisma, toTenantRepositoryContext(context), context) };
+});
+
+describe("Checkpoint A review cycle regressions", () => {
+  function completed() { tables.correctiveActions.push({ id: "ca-regression", organisationId: ORG_A, nonconformityId: "nc-review", status: "COMPLETED", ownerMembershipId: "membership-owner" }); }
+  it("rejects duplicate EFFECTIVE decisions without a second review row", async () => {
+    completed(); await performEffectivenessReview(reviewerContextA, "nc-review", reviewInput());
+    await expect(performEffectivenessReview(reviewerContextA, "nc-review", reviewInput())).rejects.toThrow(EffectivenessError);
+    expect(tables.effectivenessReviews).toHaveLength(1);
+  });
+  it("rejects a submitted decision for an old cycle", async () => {
+    completed(); tables.nonconformities.find(n => n.id === "nc-review")!.reviewCycle = 2;
+    await expect(performEffectivenessReview(reviewerContextA, "nc-review", reviewInput())).rejects.toThrow(EffectivenessError);
+    expect(tables.effectivenessReviews).toHaveLength(0);
+  });
+  it("rechecks action completion when the review is submitted", async () => {
+    completed(); tables.correctiveActions[0].status = "REOPENED";
+    await expect(performEffectivenessReview(reviewerContextA, "nc-review", reviewInput())).rejects.toThrow(EffectivenessError);
+    expect(tables.effectivenessReviews).toHaveLength(0);
   });
 });

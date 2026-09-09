@@ -443,6 +443,7 @@ export async function performEffectivenessReviewAction(_previous: NonconformityA
     const context = await requireOrganisationContext();
     const parsed = performEffectivenessReviewFormSchema.safeParse({
       nonconformityId: formData.get("nonconformityId"),
+      reviewCycle: formData.get("reviewCycle"),
       criteria: formData.get("criteria"),
       reviewDate: formData.get("reviewDate"),
       result: formData.get("result"),
@@ -450,6 +451,7 @@ export async function performEffectivenessReviewAction(_previous: NonconformityA
     });
     if (!parsed.success) return { ...emptyState, error: parsed.error.issues[0]?.message ?? "Check the effectiveness review." };
     await performEffectivenessReview(context, parsed.data.nonconformityId, {
+      reviewCycle: parsed.data.reviewCycle,
       criteria: parsed.data.criteria,
       reviewDate: parsed.data.reviewDate,
       result: parsed.data.result,

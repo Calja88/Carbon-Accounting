@@ -7406,6 +7406,7 @@ model NonconformityClosurePolicy {
 /// assigned (same convention as `EnvironmentalIncident.severityConfigSnapshot`,
 /// T62) so a later config edit never rewrites a past record.
 model Nonconformity {
+  reviewCycle Int @default(0)
   id             String       @id @default(cuid())
   organisationId String
   organisation   Organisation @relation(fields: [organisationId], references: [id])
@@ -7672,6 +7673,8 @@ model CorrectiveAction {
 /// review when policy enabled"). Never edited after creation — a later
 /// review is a new row, preserving review history.
 model EffectivenessReview {
+  reviewCycle Int
+  @@unique([organisationId, nonconformityId, reviewCycle], map: "EffectivenessReview_nc_cycle_key")
   id             String       @id @default(cuid())
   organisationId String
   organisation   Organisation @relation(fields: [organisationId], references: [id])

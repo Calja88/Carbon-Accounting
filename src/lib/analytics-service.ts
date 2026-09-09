@@ -1,3 +1,4 @@
+import { requireCarbonView } from "@/lib/rbac/carbon-access";
 /**
  * Read-only aggregation over Calculation rows for the emissions dashboard
  * and the report's charts. Deliberately reuses the same inclusion rules as
@@ -230,6 +231,7 @@ export async function buildAnalyticsSnapshot(
   periodStart: Date,
   periodEnd: Date,
 ): Promise<AnalyticsSnapshot> {
+  requireCarbonView(context);
   const previous = previousYearPeriod(periodStart, periodEnd);
   const ctx = toTenantRepositoryContext(context);
 

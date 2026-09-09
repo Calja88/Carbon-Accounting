@@ -960,8 +960,10 @@ async function seedAuditsIncidentsNonconformity(ctx: SeedContext, aspectId: stri
     where: { organisationId, nonconformityId: nonconformity.id },
   });
   if (!effectivenessExists) {
+    await prisma.nonconformity.update({ where: { id: nonconformity.id }, data: { reviewCycle: 1 } });
     await prisma.effectivenessReview.create({
       data: {
+        reviewCycle: 1,
         organisationId,
         nonconformityId: nonconformity.id,
         criteria: "Three consecutive shifts with a complete storage log (demo).",

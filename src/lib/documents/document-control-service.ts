@@ -1,3 +1,4 @@
+import { assertReadableDocument, readableDocumentIds } from "./classification-access";
 /**
  * Controlled document / revision lifecycle service (task T22,
  * Docs/PHASE2_EMS_FOUNDATION_SPEC.md §§1-2 "Controlled documents and
@@ -55,6 +56,7 @@ function idempotencyKeyFor(revisionId: string, status: ControlledDocumentStatus)
 
 export async function getControlledDocument(context: OrganisationContext, documentId: string) {
   const ctx = toTenantRepositoryContext(context);
+  await assertReadableDocument(context, documentId);
   const document = await findTenantControlledDocument(ctx, documentId);
   return prisma.controlledDocument.findUnique({
     where: { id: document.id },
@@ -72,6 +74,7 @@ export async function getControlledDocument(context: OrganisationContext, docume
  */
 export async function getControlledDocumentDetail(context: OrganisationContext, documentId: string) {
   const ctx = toTenantRepositoryContext(context);
+  await assertReadableDocument(context, documentId);
   const document = await findTenantControlledDocument(ctx, documentId);
   return prisma.controlledDocument.findUnique({
     where: { id: document.id },
@@ -88,17 +91,24 @@ export async function getControlledDocumentDetail(context: OrganisationContext, 
 
 export async function listControlledDocuments(context: OrganisationContext) {
   const ctx = toTenantRepositoryContext(context);
-  return prisma.controlledDocument.findMany({
+  requirePermission(context, "ems.view");
+  const rows = await prisma.controlledDocument.findMany({
     where: tenantWhere(ctx, {}),
     include: { currentRevision: true },
     orderBy: { reference: "asc" },
   });
+  const allowed = await readableDocumentIds(context, rows.map(row => row.id));
+  return rows.filter(row => allowed.has(row.id));
 }
 
 /** Loads a revision, verified in-tenant and (when supplied) attached to the expected document — the nested-parent-substitution guard. */
 export async function getRevision(context: OrganisationContext, revisionId: string, expectedDocumentId?: string) {
   const ctx = toTenantRepositoryContext(context);
-  return findTenantControlledDocumentRevision(ctx, revisionId, expectedDocumentId);
+  requirePermission(context, "ems.view");
+  const revision = await findTenantControlledDocumentRevision(ctx, revisionId, expectedDocumentId);
+  if (!revision) throw new TenantOwnershipError();
+  await assertReadableDocument(context, revision.documentId);
+  return revision;
 }
 
 // ---------------------------------------------------------------------------

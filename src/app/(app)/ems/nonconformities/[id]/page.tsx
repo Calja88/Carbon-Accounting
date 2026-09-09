@@ -184,6 +184,7 @@ export default async function NonconformityDetailPage({ params }: { params: Prom
       />
 
       <EffectivenessReviewSection
+          reviewCycle={nonconformity.reviewCycle}
         nonconformityId={nonconformity.id}
         reviews={nonconformity.effectivenessReviews.map((r) => ({
           id: r.id,

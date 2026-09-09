@@ -18,7 +18,7 @@ import type {
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { OrganisationContext } from "@/lib/organisation/context";
-import { requirePermission } from "@/lib/rbac/authorize";
+import { requireUnscopedEmsAccess as requirePermission } from "@/lib/rbac/ems-access";
 import {
   findTenantActivityProcess,
   findTenantEnvironmentalAspect,

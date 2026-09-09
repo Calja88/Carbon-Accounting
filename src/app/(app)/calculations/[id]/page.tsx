@@ -1,3 +1,5 @@
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
+import { requireCarbonView } from "@/lib/rbac/carbon-access";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, FileScan } from "lucide-react";
@@ -36,7 +38,9 @@ export default async function CalculationDetailPage({ params }: { params: Promis
   let context;
   try {
     context = await requireOrganisationContext();
+    requireCarbonView(context);
   } catch (err) {
+    if (err instanceof PermissionDeniedError) redirect("/");
     if (err instanceof OrganisationAccessError) redirect("/login");
     throw err;
   }

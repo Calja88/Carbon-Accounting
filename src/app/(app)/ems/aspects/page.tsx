@@ -1,7 +1,9 @@
+import { readableEvidenceIds } from "@/lib/documents/classification-access";
+import { requireUnscopedEmsAccess } from "@/lib/rbac/ems-access";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
-import { hasPermission, PermissionDeniedError, requirePermission } from "@/lib/rbac/authorize";
+import { hasPermission, PermissionDeniedError } from "@/lib/rbac/authorize";
 import { listActivityProcesses } from "@/lib/ems/aspects/process-service";
 import { listEnvironmentalAspects, listEnvironmentalImpacts } from "@/lib/ems/aspects/aspect-service";
 import { listEmsProgrammes } from "@/lib/ems/foundation/programme-service";
@@ -16,7 +18,7 @@ export default async function EmsAspectsPage() {
   let context;
   try {
     context = await requireOrganisationContext();
-    requirePermission(context, "ems.view");
+    requireUnscopedEmsAccess(context);
   } catch (error) {
     if (error instanceof OrganisationAccessError || error instanceof PermissionDeniedError) redirect("/");
     throw error;
@@ -51,8 +53,10 @@ export default async function EmsAspectsPage() {
     orderBy: { linkedAt: "desc" },
   });
 
+  const allowedEvidence = await readableEvidenceIds(context, evidenceLinks.map(link => link.evidence.id));
   const evidenceByAspect = new Map<string, Array<{ id: string; filename: string }>>();
   for (const link of evidenceLinks) {
+    if (!allowedEvidence.has(link.evidence.id)) continue;
     const current = evidenceByAspect.get(link.resourceId) ?? [];
     current.push(link.evidence);
     evidenceByAspect.set(link.resourceId, current);

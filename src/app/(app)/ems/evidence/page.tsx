@@ -52,7 +52,7 @@ export default async function EvidenceHubPage({
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Evidence hub</h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-500">
           Every shared evidence object uploaded across the EMS (task T22) — controlled-document content, monitoring
-          readings, incident evidence and more, in one searchable place. All content shown is synthetic.
+          readings, incident evidence and more, in one searchable place.
         </p>
       </div>
 

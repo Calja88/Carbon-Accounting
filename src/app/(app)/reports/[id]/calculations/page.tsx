@@ -1,12 +1,13 @@
+import { PermissionDeniedError } from "@/lib/rbac/authorize";
+import { requireFrozenReportAccess } from "@/lib/rbac/carbon-access";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
-import { resolveAiActor } from "@/lib/ai";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
-import { accessibleActivityEntryFilter, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
 import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 /**
@@ -20,13 +21,12 @@ export default async function ReportCalculationsPage({ params }: { params: Promi
   let context;
   try {
     context = await requireOrganisationContext();
+    requireFrozenReportAccess(context);
   } catch (err) {
+    if (err instanceof PermissionDeniedError) redirect("/");
     if (err instanceof OrganisationAccessError) redirect("/login");
     throw err;
   }
-
-  const actor = await resolveAiActor(context);
-  if (!actor) redirect("/login");
 
   const ctx = toTenantRepositoryContext(context);
 
@@ -39,11 +39,7 @@ export default async function ReportCalculationsPage({ params }: { params: Promi
   const links = await prisma.reportSnapshotCalculation.findMany({
     where: {
       reportSnapshotId: id,
-      // Scope filter applied here, not after — a calculation outside the
-      // caller's scope is never listed, even inside a snapshot they can open.
-      calculation: tenantWhere(ctx, {
-        activityEntry: { siteId: { in: actor.siteIds }, ...accessibleActivityEntryFilter(context) },
-      }),
+
     },
     include: {
       calculation: {
@@ -56,6 +52,8 @@ export default async function ReportCalculationsPage({ params }: { params: Promi
     },
   });
 
+  // An issued report is indivisible, including calculations for archived sites.
+  if (links.some(link => link.calculation.organisationId !== context.organisationId || link.calculation.activityEntry.organisationId !== context.organisationId)) notFound();
   const rows = links
     .map((l) => l.calculation)
     .sort((a, b) => Number(b.resultKgCo2e) - Number(a.resultKgCo2e));

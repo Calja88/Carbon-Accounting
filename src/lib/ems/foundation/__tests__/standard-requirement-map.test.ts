@@ -70,6 +70,7 @@ vi.mock("@/lib/prisma", () => {
     findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) => tables.programmes.find((row) => matches(row, where)) ?? null),
   };
   const evidenceObject = {
+    findMany: vi.fn(async () => tables.evidence.map(row => ({ ...row, classification: "INTERNAL", links: [], controlledDocumentRevision: null }))),
     findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) => tables.evidence.find((row) => matches(row, where)) ?? null),
   };
   const evidenceLink = {
@@ -80,6 +81,7 @@ vi.mock("@/lib/prisma", () => {
     }),
   };
   const prismaMock = {
+    controlledDocumentRevision: { findMany: vi.fn(async () => []) },
     standardRequirementMap,
     emsProgramme,
     evidenceObject,
@@ -106,7 +108,7 @@ const orgAReadinessContext = makeOrganisationContext(ORG_A, {
   permissions: new Set(["ems.programme.manage", "ems.readiness.review"]) as unknown as ReturnType<typeof makeOrganisationContext>["permissions"],
 });
 const orgAContributorContext = makeOrganisationContext(ORG_A, {
-  permissions: new Set(["ems.programme.manage"]) as unknown as ReturnType<typeof makeOrganisationContext>["permissions"],
+  permissions: new Set(["ems.view", "ems.programme.manage"]) as unknown as ReturnType<typeof makeOrganisationContext>["permissions"],
 });
 const orgBReadinessContext = makeOrganisationContext(ORG_B, {
   permissions: new Set(["ems.programme.manage", "ems.readiness.review"]) as unknown as ReturnType<typeof makeOrganisationContext>["permissions"],

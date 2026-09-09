@@ -1,3 +1,4 @@
+import { readableEvidenceIds } from "@/lib/documents/classification-access";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
@@ -51,7 +52,9 @@ export default async function ApplicabilityPage() {
         orderBy: { linkedAt: "desc" },
       });
   const evidenceByAssessment = new Map<string, Array<{ id: string; filename: string }>>();
+  const allowedEvidence = await readableEvidenceIds(context, evidenceLinks.map(link => link.evidence.id));
   for (const link of evidenceLinks) {
+    if (!allowedEvidence.has(link.evidence.id)) continue;
     const current = evidenceByAssessment.get(link.resourceId) ?? [];
     current.push(link.evidence);
     evidenceByAssessment.set(link.resourceId, current);

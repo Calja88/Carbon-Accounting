@@ -1,0 +1,57 @@
+name: Checkpoint A PostgreSQL gate
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checkpoint-a-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ca_owner
+          POSTGRES_PASSWORD: ca_disposable_only
+          POSTGRES_DB: ca_checkpoint
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ca_owner -d ca_checkpoint"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://ca_owner:ca_disposable_only@127.0.0.1:5432/ca_checkpoint?application_name=ca_app&connection_limit=6
+      DIRECT_URL: postgresql://ca_owner:ca_disposable_only@127.0.0.1:5432/ca_checkpoint
+      CHECKPOINT_A_DISPOSABLE: "1"
+      CHECKPOINT_DISABLE: "1"
+      NEXT_TELEMETRY_DISABLED: "1"
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma validate
+      - name: Cumulative migration and no-op proof
+        run: pnpm exec tsx tests/checkpoint-a/migrate.ts
+      - name: Unit regression suite
+        run: pnpm test --maxWorkers=2
+      - name: Type check
+        run: pnpm exec tsc --noEmit
+      - name: Real PostgreSQL concurrency and authorization
+        run: pnpm exec vitest run --config vitest.checkpoint-a.config.mts --reporter=default --reporter=junit --outputFile.junit=artifacts/checkpoint-a/postgres-junit.xml
+      - name: Preserve gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint-a-postgres-evidence
+          path: artifacts/checkpoint-a/
+          if-no-files-found: warn
