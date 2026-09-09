@@ -401,3 +401,33 @@ describe("reviewed exact-match credential allowlist (.github/workflows/checkpoin
     expect(JSON.stringify(finding)).not.toContain(secretValue);
   });
 });
+
+// Checkpoint A: the CA01-CA06 real-PostgreSQL integration suite's one
+// synthetic test-user fixture, whose required Prisma passwordHash field is
+// the fixed, self-documenting literal "not-a-login-hash" — every user this
+// file creates has an @example.invalid email and is discarded with the
+// disposable database at the end of the CI job.
+describe("reviewed exact-match credential allowlist (tests/checkpoint-a/postgres.test.ts)", () => {
+  const postgresTestPath = join("tests/checkpoint-a/", "postgres.test.ts");
+  const passwordHashMatch = join("passwordHash", ': "not-a-login-hash"');
+
+  it("allows the reviewed synthetic test-user fixture in its file", () => {
+    expect(scanContentForSecrets(passwordHashMatch, postgresTestPath)).toBeNull();
+  });
+
+  it("still fails a different/new credential-like value added to the same file", () => {
+    const fixture = `passwordHash: "${join("a-real-look", "ing-secret-value")}"`;
+    expect(scanContentForSecrets(fixture, postgresTestPath)).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    const finding = scanContentForSecrets(passwordHashMatch, join("tests/checkpoint-a/", "other.test.ts"));
+    expect(finding).not.toBeNull();
+  });
+
+  it("never echoes the matched text for a case it still flags", () => {
+    const secretValue = join("a-real-look", "ing-secret-value");
+    const finding = scanContentForSecrets(`passwordHash: "${secretValue}"`, postgresTestPath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});

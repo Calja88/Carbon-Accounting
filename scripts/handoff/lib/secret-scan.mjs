@@ -246,6 +246,17 @@ export function isAllowlistedForSecretScan(relPath) {
  * operator and needs no allowlist entry), or a `127.0.0.1`-addressed
  * connection string already suppressed by the placeholder-marker check —
  * no real host, key, token, or other secret appears anywhere in it.
+ *
+ * tests/checkpoint-a/postgres.test.ts (Checkpoint A, board demo sprint):
+ * the CA01-CA06 real-PostgreSQL integration suite. Its one synthetic test
+ * user fixture sets Prisma's required `passwordHash` field to the fixed,
+ * self-documenting literal `not-a-login-hash` — every user this file
+ * creates has an `@example.invalid` email and is discarded with the
+ * disposable database at the end of the CI job; no login ever occurs
+ * against it. Confirmed by reading the entire 223-line file: no other
+ * credential-like, connection-string, key, token, or private-key material
+ * appears anywhere in it (the disposable-database URL itself comes only
+ * from `assertDisposableDatabase()` in ./disposable, never a literal here).
  */
 // Built from parts rather than written as literal contiguous strings, same
 // reason as src/lib/__tests__/handoff-secret-scan.test.ts's fixtures: this
@@ -281,10 +292,12 @@ const COOKIE_TEST_SECRET_MATCH = ["NEXTAUTH_SECRET", ' = "test-secret-value-not-
 
 const CA06_POSTGRES_PASSWORD_MATCH = ["POSTGRES_PASSWORD", ": ca_disposable_only"].join("");
 const CA06_PGPASSWORD_MATCH = ["PGPASSWORD", ": ca_disposable_only"].join("");
+const CA06_POSTGRES_TEST_USER_MATCH = ["passwordHash", ': "not-a-login-hash"'].join("");
 
 const REVIEWED_SAFE_CREDENTIAL_MATCHES = new Map([
   ["scripts/rls-spike/setup-test-db.sh", new Set([RLS_SPIKE_OWNER_MATCH, RLS_SPIKE_APP_MATCH])],
   [".github/workflows/checkpoint-a-postgres.yml", new Set([CA06_POSTGRES_PASSWORD_MATCH, CA06_PGPASSWORD_MATCH])],
+  ["tests/checkpoint-a/postgres.test.ts", new Set([CA06_POSTGRES_TEST_USER_MATCH])],
   ["src/app/invite/[token]/actions.ts", new Set([INVITE_TOKEN_HASH_ASSIGNMENT_MATCH])],
   ["src/app/invite/[token]/page.tsx", new Set([INVITE_TOKEN_HASH_ASSIGNMENT_MATCH])],
   [
