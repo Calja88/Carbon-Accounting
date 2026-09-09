@@ -4,11 +4,24 @@ Keep this to ~1-2 pages. Update at the end of every package.
 
 ## Current state
 
-- **Package completed:** BD03 (honest metrics / calculation & report reliability). BD01, BD04, BD02 also complete. **Checkpoint A is next** (BD01+BD04+BD02+BD03 cumulative Astra review) — do not merge PR #63 before it.
-- **Branch:** `board/foundations-2026-09-22` (created from `origin/claude/paragon-id-uk-carbon-mvp-1h1uvb` @ `c9487554b058087736e031b06a672f2f61fcfbcb`)
-- **Head:** see PR #63 for current head; BD01 merge commit `7dba8a6`, docs `a343203`, package-manager decision `292355b`, BD04 `559cc48`, BD02 `9835e2d` + `0cd84e8`, BD03 `37f043f`.
-- **PR:** [#63](https://github.com/Calja88/Carbon-Accounting/pull/63) (draft), branch `board/foundations-2026-09-22` against `claude/paragon-id-uk-carbon-mvp-1h1uvb`.
-- Build pack extracted (outside the repo) at `/home/user/carbon-overhaul/build-pack`; dossier at `/home/user/carbon-overhaul/Carbon_Ledger_Product_Transformation_Implementation_Dossier.docx`. Both are on ephemeral container storage — not guaranteed to survive to a future session; re-upload if a future session can't find them.
+- **Foundation window merged.** Astra's final Checkpoint A re-review APPROVED MERGE at HEAD `ae402d0d71c52a4da9c2d53470de0c26af9997ef`. PR [#63](https://github.com/Calja88/Carbon-Accounting/pull/63) merged into `claude/paragon-id-uk-carbon-mvp-1h1uvb` as merge commit `6b0138a7b25b71b55ffe4215cba14d0f526a785c` (standard merge, no squash/rebase — `git merge-base --is-ancestor` confirmed). `board/foundations-2026-09-22` gets no further commits.
+- **Package completed:** BD05 (executive Overview + source-backed Attention). Foundation window (BD01/BD04/BD02/BD03 + Checkpoint A CA01–CA06) also complete and merged.
+- **Product branch:** `board/product-2026-09-22` (created from `origin/claude/paragon-id-uk-carbon-mvp-1h1uvb` @ `6b0138a`, the updated post-merge baseline — not branched from the old foundation branch tip).
+- **Product PR:** [#64](https://github.com/Calja88/Carbon-Accounting/pull/64) (draft), branch `board/product-2026-09-22` against `claude/paragon-id-uk-carbon-mvp-1h1uvb`. Cumulative window for BD05→BD08; stays draft until Checkpoint B.
+- **Head:** BD05 commit `51722f0`.
+- Build pack extracted (outside the repo) at `/home/user/carbon-overhaul/build-pack`; Board Demo Build Pack at `/home/user/carbon-overhaul/board-demo-build-pack`; Checkpoint A remediation pack at `/home/user/carbon-overhaul/checkpoint-a-remediation-pack`; dossier at `/home/user/carbon-overhaul/Carbon_Ledger_Product_Transformation_Implementation_Dossier.docx`. All on ephemeral container storage — not guaranteed to survive to a future session; re-upload if a future session can't find them.
+
+## BD05 — executive Overview and source-backed Attention (complete)
+
+Real Overview (`/`) and Attention queue (`/attention`) replacing BD04's temporary `/` → `/carbon` redirect; `/carbon` unchanged. Astra's `overview.tsx`/`trend-chart.tsx`/`attention-workbench.tsx` installed verbatim (hash-verified); `carbon-adapter.ts`/`attention.ts`/`overview-service.ts` reused byte-identical from BD03, not overwritten. New `src/lib/board/live-overview.ts` (+ `live-overview-helpers.ts` for pure/testable logic) is the live adapter: real `buildAnalyticsSnapshot` reads (current + prior-year window) feed `buildCarbonSection`; Coverage is derived from real `ActivityEntry` rows with `expected` left `null` (unknown) rather than inventing a completeness denominator no live obligation model supports yet; four real Attention families (carbon gaps, obligation evaluation, effectiveness review, corrective action/ActionItem canonicalized via `mapCanonicalActionRows` + the existing `dedupeActions`/`actionAttention`/`mergeAttention`, which throws on a genuine state conflict rather than picking one). Every read is permission-gated (`carbon.view`, `ems.view`, corrective-action grants) and re-authorizes on every request — a revoked grant drops that section on refresh, never falls back to unscoped data.
+
+One genuine bug caught by the new unit tests before it shipped: the initial row mapping set an ActionItem's own `canonicalActionId` to `null`, so it never actually matched a linked CorrectiveAction's `sharedActionItemId` dedupe key — fixed to use the ActionItem's own id.
+
+Deviations (both matching the identical, already-documented BD04 finding for `live-nav.ts`): `import "server-only"` omitted from `live-overview.ts` (not a real dependency of this repo, breaks Vitest); `live-nav.ts`'s `NOT_YET_BUILT` set no longer excludes `overview`/`attention`, both gated on `carbon.view`.
+
+Local checks: `tsc --noEmit` PASS; lint PASS (0 errors, 4 pre-existing warnings); full suite PASS (128 files / 2001 tests, 3 skipped, 0 failed), including 8 new focused `live-overview.test.ts` cases; `git diff --check` PASS.
+
+**Not run — deferred, same reason as BD02/BD03:** guarded-synthetic-environment browser/visual verification. No disposable database has been reachable from any environment this branch has run in (see BD02 section below) — 1366×768/1440×900/375px checks remain deferred until that changes, not weakened or faked.
 
 ## Integration decisions (BD01)
 
@@ -150,4 +163,4 @@ Astra's Checkpoint A decision was APPROVE AFTER REQUIRED FIXES. Her pre-authored
 
 ## Next package
 
-**Checkpoint A re-review** — corrected H00 handoff generated and returned to Astra. Do not merge PR #63 until Astra re-approves. BD05 not started.
+**BD06** on `board/product-2026-09-22` / PR #64. Foundation merged (PR #63), BD05 complete. Do not merge PR #64 before Checkpoint B (after BD08).
