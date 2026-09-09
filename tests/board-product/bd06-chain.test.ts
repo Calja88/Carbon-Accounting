@@ -9,6 +9,7 @@ import { recordComplianceEvaluationItemResult } from "@/lib/ems/legal/evaluation
 import {
   createNonconformityFromSource, linkAdditionalSourceToNonconformity, closeNonconformity, getNonconformity,
 } from "@/lib/ems/nonconformity/nonconformity-service";
+import { recordRootCauseAnalysis, approveRootCauseAnalysis } from "@/lib/ems/nonconformity/root-cause-service";
 import { createCorrectiveAction, completeCorrectiveAction, uploadEvidenceToCorrectiveAction } from "@/lib/ems/nonconformity/corrective-action-service";
 import { requestEffectivenessReview, performEffectivenessReview } from "@/lib/ems/nonconformity/effectiveness-service";
 import { readEvidenceObjectBytes, listEvidenceForResource } from "@/lib/documents/evidence-service";
@@ -126,6 +127,10 @@ describe("BD06 real-Postgres connected-records chain", () => {
     expect(links.find((l) => l.isPrimary)?.sourceId).toBe(findingId);
     expect(links.some((l) => l.sourceType === "COMPLIANCE_EVALUATION_ITEM" && l.sourceId === evaluationItemId)).toBe(true);
 
+    // root cause must be recorded and approved before a corrective action can exist (spec §2 state machine)
+    const rootCause = await recordRootCauseAnalysis(owner, nc.id, { method: "FIVE_WHYS", analysisPayload: { note: "Synthetic root cause" }, conclusion: "Synthetic root cause conclusion", actorUserId: owner.userId });
+    await approveRootCauseAnalysis(owner, rootCause.id, { actorUserId: owner.userId });
+
     // corrective action belongs to the correct NC
     const action = await createCorrectiveAction(owner, nc.id, { description: "Synthetic corrective action", ownerMembershipId: owner.membershipId, dueDate: new Date("2026-06-01"), actorUserId: owner.userId });
     expect(action.nonconformityId).toBe(nc.id);
@@ -175,6 +180,8 @@ describe("BD06 real-Postgres connected-records chain", () => {
       statement: "Synthetic NC for ineffective-cannot-close proof.", requirementReference: "Internal fuel storage policy",
       ownerMembershipId: owner.membershipId, actorUserId: owner.userId,
     });
+    const rootCause2 = await recordRootCauseAnalysis(owner, nc2.id, { method: "FIVE_WHYS", analysisPayload: { note: "Synthetic root cause 2" }, conclusion: "Synthetic root cause conclusion 2", actorUserId: owner.userId });
+    await approveRootCauseAnalysis(owner, rootCause2.id, { actorUserId: owner.userId });
     const action2 = await createCorrectiveAction(owner, nc2.id, { description: "Synthetic action 2", ownerMembershipId: owner.membershipId, dueDate: new Date("2026-06-01"), actorUserId: owner.userId });
     await completeCorrectiveAction(owner, action2.id, { completionEvidenceNote: "Synthetic completion note 2", actorUserId: owner.userId });
     const reviewable2 = await requestEffectivenessReview(owner, nc2.id, { actorUserId: owner.userId });
