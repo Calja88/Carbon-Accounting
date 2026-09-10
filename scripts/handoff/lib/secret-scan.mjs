@@ -298,6 +298,8 @@ const REVIEWED_SAFE_CREDENTIAL_MATCHES = new Map([
   ["scripts/rls-spike/setup-test-db.sh", new Set([RLS_SPIKE_OWNER_MATCH, RLS_SPIKE_APP_MATCH])],
   [".github/workflows/checkpoint-a-postgres.yml", new Set([CA06_POSTGRES_PASSWORD_MATCH, CA06_PGPASSWORD_MATCH])],
   ["tests/checkpoint-a/postgres.test.ts", new Set([CA06_POSTGRES_TEST_USER_MATCH])],
+  ["tests/board-product/bd06-chain.test.ts", new Set([CA06_POSTGRES_TEST_USER_MATCH])],
+  ["tests/board-product/bd08-fixes.test.ts", new Set([CA06_POSTGRES_TEST_USER_MATCH])],
   ["src/app/invite/[token]/actions.ts", new Set([INVITE_TOKEN_HASH_ASSIGNMENT_MATCH])],
   ["src/app/invite/[token]/page.tsx", new Set([INVITE_TOKEN_HASH_ASSIGNMENT_MATCH])],
   [
