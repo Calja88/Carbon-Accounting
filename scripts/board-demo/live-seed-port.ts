@@ -915,6 +915,23 @@ export class LiveSeedPort implements DemoSeedPort {
     const marketCompanion = round4(sum(primaryCalcs.filter((c) => c.basis === "RESIDUAL_MIX" || c.basis === "MARKET_BASED")));
 
     if (Math.abs(currentTotal - BOARD1.currentKg) > 1) {
+      // Diagnostic breakdown only — narrows down which scope/category/site
+      // is short without guessing, before the hard failure below.
+      const byScope = new Map<string, number>();
+      const byCategory = new Map<string, number>();
+      const bySite = new Map<string, number>();
+      for (const c of primaryCalcs.filter((c) => c.basis !== "RESIDUAL_MIX" && c.basis !== "MARKET_BASED")) {
+        byScope.set(c.scope, (byScope.get(c.scope) ?? 0) + Number(c.resultKgCo2e));
+        byCategory.set(c.scope3Category ?? c.scope, (byCategory.get(c.scope3Category ?? c.scope) ?? 0) + Number(c.resultKgCo2e));
+        bySite.set(c.activityEntry.siteId, (bySite.get(c.activityEntry.siteId) ?? 0) + Number(c.resultKgCo2e));
+      }
+      let derivedByCategory = 0;
+      for (const c of derivedCalcs) derivedByCategory += Number(c.resultKgCo2e);
+      const awaitingCount = await prisma.activityEntry.count({ where: { organisationId, status: "AWAITING_FACTOR" } });
+      const totalEntryCount = await prisma.activityEntry.count({ where: { organisationId, periodStart: { gte: new Date("2026-01-01"), lte: new Date("2026-08-31") } } });
+      trace(
+        `reconciliation diagnostic: primaryCalcCount=${primaryCalcs.length} derivedCalcCount=${derivedCalcs.length} awaitingFactorEntries=${awaitingCount} totalEntries2026=${totalEntryCount} byScope=${JSON.stringify(Object.fromEntries(byScope))} byCategory=${JSON.stringify(Object.fromEntries(byCategory))} bySite=${JSON.stringify(Object.fromEntries(bySite))} derivedSum=${derivedByCategory}`,
+      );
       throw new Error(`Reconciliation failed: current headline is ${currentTotal} kgCO2e, expected ${BOARD1.currentKg}.`);
     }
     if (Math.abs(marketCompanion - BOARD1.marketBasedScope2Kg) > 1) {
