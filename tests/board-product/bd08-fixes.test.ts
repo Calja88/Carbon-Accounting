@@ -91,16 +91,16 @@ describe("BD08 management-review pack issue concurrency (real Postgres)", () => 
 
 describe("BD08 Category 3 report-generation side effect (real Postgres)", () => {
   it("report generation never derives Category 3 rows; only the explicit prepare step does", async () => {
-    // Structural proof against the real source, not a mock: the action that
-    // builds and persists a ReportSnapshot must never import the deriving
-    // function. If a future change re-introduces the hidden side effect,
-    // this import-graph check fails loudly.
-    const actionsModule = await import("@/app/(app)/reports/actions");
-    expect(actionsModule.generateReportAction).toBeTypeOf("function");
-    expect(actionsModule.prepareReportingDataAction).toBeTypeOf("function");
-
+    // Structural proof against the real source, not a mock or a live import
+    // (the actions module pulls in next-auth's session code, which isn't
+    // resolvable under Vitest's node environment — same documented
+    // exception as live-nav.ts/live-overview.ts/live-records.ts/live-lca.ts).
+    // If a future change re-introduces the hidden side effect, this
+    // source-text check fails loudly.
     const fs = await import("node:fs");
     const source = fs.readFileSync(new URL("../../src/app/(app)/reports/actions.ts", import.meta.url), "utf8");
+    expect(source).toMatch(/export async function prepareReportingDataAction/);
+    expect(source).toMatch(/export async function generateReportAction/);
     const generateBody = source.slice(source.indexOf("export async function generateReportAction"));
     expect(generateBody).not.toMatch(/deriveCategory3Calculations|prepareReportingData\(/);
   });
