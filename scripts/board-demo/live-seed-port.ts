@@ -27,6 +27,7 @@ import {
   LcaFactorSelectionMode,
   LcaItemType,
   LcaLifecycleStage,
+  type Prisma,
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resolveOrganisationContext, type OrganisationContext } from "@/lib/organisation/context";
@@ -91,6 +92,12 @@ export class LiveSeedPort implements DemoSeedPort {
   private lcaScenarioId: string | null = null;
   private managementReviewId: string | null = null;
   private managementPackId: string | null = null;
+  // Set only while withExclusiveFixtureLease's own transaction holds the
+  // DemoFixtureLease row lock. Reads/writes to that same row must go through
+  // this same connection — routing them via the bare global `prisma` client
+  // instead would open a second connection that deadlocks waiting for a lock
+  // the first connection (this one) can never release until it returns.
+  private leaseTx: Prisma.TransactionClient | null = null;
 
   // -------------------------------------------------------------------
   // Identity / lease
@@ -154,16 +161,21 @@ export class LiveSeedPort implements DemoSeedPort {
         // instead of racing writes.
         await tx.$queryRaw`SELECT id FROM "DemoFixtureLease" WHERE "fixtureKey" = ${key} FOR UPDATE NOWAIT`;
         trace("lease row locked; calling operation()");
-        const result = await operation();
-        trace("operation() resolved");
-        return result;
+        this.leaseTx = tx;
+        try {
+          const result = await operation();
+          trace("operation() resolved");
+          return result;
+        } finally {
+          this.leaseTx = null;
+        }
       },
       { timeout: 10 * 60 * 1000, maxWait: 5000 },
     );
   }
 
   async existingFixture(): Promise<{ version: string; digest: string } | null> {
-    const lease = await prisma.demoFixtureLease.findUnique({ where: { fixtureKey: FIXTURE_KEY } });
+    const lease = await (this.leaseTx ?? prisma).demoFixtureLease.findUnique({ where: { fixtureKey: FIXTURE_KEY } });
     if (!lease || lease.status === "NONE") return null;
     if (lease.status === "BUILDING") return { version: FIXTURE_KEY, digest: "" }; // deliberately invalid digest -> orchestrator refuses a partial fixture
     return { version: FIXTURE_KEY, digest: lease.digest };
@@ -171,7 +183,7 @@ export class LiveSeedPort implements DemoSeedPort {
 
   async beginFixture(version: string): Promise<void> {
     trace("beginFixture start");
-    await prisma.demoFixtureLease.update({
+    await (this.leaseTx ?? prisma).demoFixtureLease.update({
       where: { fixtureKey: version },
       data: { status: "BUILDING", digest: "" },
     });
@@ -952,7 +964,7 @@ export class LiveSeedPort implements DemoSeedPort {
 
   async markFixtureReady(version: string, digest: string): Promise<void> {
     trace("markFixtureReady start");
-    await prisma.demoFixtureLease.update({ where: { fixtureKey: version }, data: { status: "READY", digest } });
+    await (this.leaseTx ?? prisma).demoFixtureLease.update({ where: { fixtureKey: version }, data: { status: "READY", digest } });
   }
 }
 
