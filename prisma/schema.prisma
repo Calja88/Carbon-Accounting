@@ -8758,3 +8758,62 @@ model ManagementReviewActionLink {
   @@index([organisationId, decisionId])
   @@index([organisationId, actionItemId])
 }
+
+// ---------------------------------------------------------------------------
+// BD08 board-demo fixture infrastructure. Not tenant domain data: these
+// three models exist only to let scripts/board-demo/live-seed-port.ts prove
+// (a) which physical database it is actually connected to, independently
+// of any environment variable (guard.ts's assertDemoTarget), (b) that only
+// one seed/verify operation ever runs against a given fixture at a time
+// (BUILDING -> READY, never READY early), and (c) that the BOARD-1 fixture's
+// "192/192 expected submissions reviewed" Overview claim corresponds to 192
+// real, independently reviewable rows rather than a raw count with no
+// backing record — the exact gap BD05 found and left honestly unresolved
+// (`expected: null` in live-overview.ts) pending this package.
+// ---------------------------------------------------------------------------
+
+/// Singleton row (fixed id) written exactly once, out-of-band, when a
+/// disposable demo database is provisioned — never inferred from a
+/// connection string, env var, or URL substring. `readConnectedIdentity()`
+/// reads this row; its absence means the connected database has not been
+/// positively identified, so the guard fails closed.
+model DemoDatabaseManifest {
+  id            String   @id @default("singleton")
+  databaseId    String
+  environmentId String
+  createdAt     DateTime @default(now())
+}
+
+/// One row per fixture key (e.g. "BOARD-1"). A `SELECT ... FOR UPDATE
+/// NOWAIT` on this row inside a single transaction is the exclusive
+/// fixture-build lease `seed-orchestrator.ts` requires; `status` only ever
+/// moves BUILDING -> READY, and only after `verifyAllInvariants` succeeds.
+model DemoFixtureLease {
+  id         String   @id @default(cuid())
+  fixtureKey String   @unique
+  status     String   @default("NONE")
+  digest     String   @default("")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+/// One row per BOARD-1 named source-period return
+/// (`site:month:source`, e.g. "north-works:2026-01:gas"). Deliberately not
+/// related via Prisma `@relation` to Organisation/Site — a leaf-level
+/// fixture-bookkeeping table, scoped and filtered at the application layer
+/// like every other tenant-scoped read in this codebase, not a new
+/// FK-linked domain concept.
+model CarbonSourcePeriodObligation {
+  id                     String    @id @default(cuid())
+  organisationId         String
+  siteId                 String
+  month                  String
+  sourceKey              String
+  externalKey            String    @unique
+  status                 String    @default("REVIEW_REQUIRED")
+  reviewedByMembershipId String?
+  reviewedAt             DateTime?
+  createdAt              DateTime  @default(now())
+
+  @@index([organisationId, siteId, month])
+}
