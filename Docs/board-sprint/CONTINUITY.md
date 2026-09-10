@@ -5,10 +5,10 @@ Keep this to ~1-2 pages. Update at the end of every package.
 ## Current state
 
 - **Foundation window merged.** Astra's final Checkpoint A re-review APPROVED MERGE at HEAD `ae402d0d71c52a4da9c2d53470de0c26af9997ef`. PR [#63](https://github.com/Calja88/Carbon-Accounting/pull/63) merged into `claude/paragon-id-uk-carbon-mvp-1h1uvb` as merge commit `6b0138a7b25b71b55ffe4215cba14d0f526a785c` (standard merge, no squash/rebase — `git merge-base --is-ancestor` confirmed). `board/foundations-2026-09-22` gets no further commits.
-- **Packages completed:** BD05 (executive Overview + source-backed Attention), BD06 (connected records, evidence, one complete EMS improvement chain). Foundation window (BD01/BD04/BD02/BD03 + Checkpoint A CA01–CA06) also complete and merged.
+- **Packages completed:** BD05 (executive Overview + source-backed Attention), BD06 (connected records, evidence, one complete EMS improvement chain), BD07 (LCA scenario experience). Foundation window (BD01/BD04/BD02/BD03 + Checkpoint A CA01–CA06) also complete and merged.
 - **Product branch:** `board/product-2026-09-22` (created from `origin/claude/paragon-id-uk-carbon-mvp-1h1uvb` @ `6b0138a`, the updated post-merge baseline — not branched from the old foundation branch tip).
 - **Product PR:** [#64](https://github.com/Calja88/Carbon-Accounting/pull/64) (draft), branch `board/product-2026-09-22` against `claude/paragon-id-uk-carbon-mvp-1h1uvb`. Cumulative window for BD05→BD08; stays draft until Checkpoint B.
-- **Head:** BD06 commit `71aea85`.
+- **Head:** BD07 commit `28fc120`.
 - Build pack extracted (outside the repo) at `/home/user/carbon-overhaul/build-pack`; Board Demo Build Pack at `/home/user/carbon-overhaul/board-demo-build-pack`; Checkpoint A remediation pack at `/home/user/carbon-overhaul/checkpoint-a-remediation-pack`; dossier at `/home/user/carbon-overhaul/Carbon_Ledger_Product_Transformation_Implementation_Dossier.docx`. All on ephemeral container storage — not guaranteed to survive to a future session; re-upload if a future session can't find them.
 
 ## BD05 — executive Overview and source-backed Attention (complete)
@@ -43,6 +43,30 @@ Astra's `records.tsx` (`RelationshipPanel`/`EvidencePanel`/`RecordWorkspace`) in
 **Browser/runtime:** deferred, same reason as every prior package — no disposable Postgres/browser environment is reachable from this sandbox (see BD02's network-capability finding above). Not weakened or faked.
 
 **Schema/migration impact:** none. No new tables, columns, or migrations — every relationship in the chain uses an existing table; the "internal requirement" uses the existing `OtherRequirementSourceType.VOLUNTARY_COMMITMENT` enum value. No RED-boundary escalation was required.
+
+## BD07 — LCA scenario experience (complete)
+
+Astra's `assessment-nav.tsx` replacement, `lca-navigation.tsx` and `lca-scenario.tsx` installed. Confirmed before applying: the live `assessment-nav.tsx` sha256 matched the pack's `baseline_sha256` exactly (no drift since Astra's snapshot), and the supplied replacement file and the alternative `BD07-lca-navigation.patch` are byte-equivalent (`git apply --check` on the patch also succeeded) — applied the replacement, not both. All three files installed verbatim, hash-verified against `FILE_MANIFEST.json`.
+
+**Navigation:** the existing thirteen assessment destinations (Overview, Goal & scope, Lifecycle model, Inventory & BOM, Results, Data quality, Scenarios, Assumptions & exclusions, Evidence, Review, Versions, Audit trail, Report) are unchanged in `layout.tsx` and now render through `LcaNavigation`'s four groups — Setup, Inventory, Results, Review & issue — with every one of the thirteen segments falling inside a known group (none silently pushed into "Additional assessment pages", none removed). Badge counts (inventory/scenario/assumption+exclusion/evidence/review-error counts) are unchanged, still sourced live from `layout.tsx`'s existing Prisma counts and `runValidation`.
+
+**Scenario binding:** new `src/lib/board/live-lca.ts` (+ `live-lca-helpers.ts` for pure, testable comparability logic) binds `LcaScenario` to actual baseline/scenario runs via the existing `requireAssessmentInScope`, `getLatestRun`, `isCalculationStale`, `runTotals`, and `contributionsByStage`/`resultsToAnalysisRows` — no new engine or analysis code. `comparable` is a server judgment: both must have a calculated run, matching functional-unit type/unit/quantity, matching system boundary, and neither stale — otherwise `comparable: false` with an honest `reason` (e.g. "System boundaries differ", "Results are out of date. Baseline: ..."), never a silent unit conversion and never an unqualified percentage from a stale or incompatible pair. Wired into the existing `scenarios/page.tsx` as a summary panel above the page's existing detailed stage/line-item comparison (which is untouched).
+
+**Numerical result:** proven with a minimal synthetic fixture (`src/lib/lca/__tests__/bd07-scenario-fixture.test.ts`) that calls the real, unmodified engine (`calculateAssessment`) directly — one material line, 0.120 kg then 0.102 kg of "card substrate" at 1 kgCO2e/kg, functional unit = 1 item ("1 card"). Baseline = 0.120 kgCO2e/card, scenario = 0.102 kgCO2e/card, percentage reduction computed (not hard-coded) = exactly 15%. Only the fixture's material quantity differs between baseline and scenario; methodology, factor, allocation method and functional unit are asserted identical.
+
+**Engine/accounting integrity:** no calculation, allocation, factor, or functional-unit semantics were touched — `live-lca.ts` only reads already-stored run totals and stage contributions. A structural regression test (`lca-corporate-separation.test.ts`) confirms the corporate analytics/entries read-and-write paths (`analytics-service.ts`, `entries-service.ts`) contain no reference to any `Lca*` model, and that `live-lca.ts` never touches the corporate `Calculation`/`ActivityEntry` models — the product footprint cannot reach Scope 1/2/3 totals or the Overview headline because there is no code path connecting them.
+
+**Permission/entity scope:** `getLcaScenarioModel` calls `canViewLca` then `requireAssessmentInScope` for both the scenario and its baseline (the same tenant-scoped function already covered by `lca-repository.test.ts`'s adversarial suite) — a denial from either maps to `null`, never a partial model. `live-lca.test.ts` proves this wiring directly (unauthorised caller, foreign-tenant scenario, foreign-tenant baseline, non-scenario assessment all resolve to `null`).
+
+**Stale/issued behaviour:** unchanged — `isCalculationStale` (existing, unmodified) still judges staleness from the assessment/inventory/process `updatedAt` versus the run's own baseline; a stale result is surfaced honestly through `comparable: false` rather than presented as current.
+
+**Local tests:** `tsc --noEmit` PASS; `pnpm run lint` PASS (0 errors, 8 warnings — 4 pre-existing plus 4 new `_args` unused-parameter mock-signature warnings, same convention used elsewhere in the suite); full mocked suite PASS (133 files / 2030 tests, 3 skipped, 0 failed) including all pre-existing LCA golden tests (194 tests, all still green) and 29 new focused BD07 tests across 5 files (comparability logic, live-lca wiring/denial, navigation-group coverage, corporate separation, engine fixture); `git diff --check` PASS.
+
+**Real Postgres:** not run for BD07. The scenario-comparability logic is pure and fully covered by mocked/deterministic tests; the tenant/entity-scope path it reuses (`requireAssessmentInScope`) already has its own real-Postgres-independent adversarial suite; no LCA service code was modified. Per BD07's own instruction not to force Postgres testing when the authoritative result path is already proven by deterministic engine tests plus existing persistence tests, no new integration test was added to `checkpoint-a-postgres.yml`.
+
+**Browser/runtime:** deferred, same reason as every prior package — no disposable Postgres/browser environment reachable from this sandbox.
+
+**Schema/migration impact:** none.
 
 ## Integration decisions (BD01)
 
@@ -184,4 +208,4 @@ Astra's Checkpoint A decision was APPROVE AFTER REQUIRED FIXES. Her pre-authored
 
 ## Next package
 
-**BD07** on `board/product-2026-09-22` / PR #64 — not started, awaiting explicit authorization. Foundation merged (PR #63), BD05 and BD06 complete. Do not merge PR #64 before Checkpoint B (after BD08).
+**BD08** on `board/product-2026-09-22` / PR #64 — not started, awaiting explicit authorization. Foundation merged (PR #63), BD05, BD06 and BD07 complete. Do not merge PR #64 before Checkpoint B (after BD08).
