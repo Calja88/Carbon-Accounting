@@ -355,7 +355,11 @@ export class LiveSeedPort implements DemoSeedPort {
     this.wttFactorSetId = wttSet.id;
     await prisma.emissionFactor.createMany({
       data: [
-        { factorSetId: officialSet.id, scope: "SCOPE_1", category: "stationary_combustion_natural_gas", basis: "STANDARD", unit: "kg", co2eFactor: "1" },
+        // toCanonicalUnit (src/lib/units.ts) hardcodes natural gas as the one
+        // category with more than one entry unit, and always converts it to
+        // kWh — so this is the one factor row that must be stored in kWh,
+        // not kg, or calculateEmission's exact-unit-match check throws.
+        { factorSetId: officialSet.id, scope: "SCOPE_1", category: "stationary_combustion_natural_gas", basis: "STANDARD", unit: "kWh", co2eFactor: "1" },
         { factorSetId: officialSet.id, scope: "SCOPE_1", category: "mobile_combustion_fuel", basis: "STANDARD", unit: "kg", co2eFactor: "1" },
         { factorSetId: officialSet.id, scope: "SCOPE_2", category: "grid_electricity", basis: "LOCATION_BASED", unit: "kg", co2eFactor: "1" },
         { factorSetId: officialSet.id, scope: "SCOPE_2", category: "grid_electricity", basis: "RESIDUAL_MIX", unit: "kg", co2eFactor: "0.5" },
@@ -431,7 +435,10 @@ export class LiveSeedPort implements DemoSeedPort {
                 periodStart,
                 periodEnd,
                 rawValue: kg,
-                rawUnit: "kg",
+                // Natural gas is the one category toCanonicalUnit forces
+                // through a kWh conversion (kWh or m3 only) — everything
+                // else passes its raw unit straight through as canonical.
+                rawUnit: source === "gas" ? "kWh" : "kg",
                 enteredByUserId: owner.userId,
                 dataQualityTier: "TIER_3",
               });
@@ -533,7 +540,7 @@ export class LiveSeedPort implements DemoSeedPort {
             if (kg <= 0) continue;
             writes.push(createActivityEntryWithCalculations(ctx, {
               activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
-              siteId: site.id, periodStart, periodEnd, rawValue: kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+              siteId: site.id, periodStart, periodEnd, rawValue: kg, rawUnit: source === "gas" ? "kWh" : "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
             }));
           }
         }
