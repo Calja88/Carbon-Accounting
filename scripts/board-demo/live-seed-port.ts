@@ -93,8 +93,21 @@ export class LiveSeedPort implements DemoSeedPort {
 
   async readConnectedIdentity(): Promise<DemoDatabaseIdentity> {
     const manifest = await prisma.demoDatabaseManifest.findUnique({ where: { id: "singleton" } });
+    // "Ordinary" means neither this fixture's own organisation nor another
+    // repo test suite's own clearly-labelled synthetic fixture (the
+    // disposable checkpoint-a-postgres CI job intentionally shares one
+    // database across every real-Postgres test file; every one of those
+    // fixtures — Checkpoint A, BD06, BD08's own concurrency test — names its
+    // organisation "Synthetic ..." by established convention). On a
+    // genuinely disposable single-purpose demo database there is nothing
+    // else present at all, so this check is unchanged there: zero either way.
     const ordinaryOrganisationCount = await prisma.organisation.count({
-      where: { NOT: { slug: { startsWith: FIXTURE_ORGANISATION_SLUG_PREFIX } } },
+      where: {
+        AND: [
+          { NOT: { slug: { startsWith: FIXTURE_ORGANISATION_SLUG_PREFIX } } },
+          { NOT: { name: { startsWith: "Synthetic " } } },
+        ],
+      },
     });
     if (!manifest) {
       // Fails closed: assertDemoTarget will reject an empty actualDatabaseId/
