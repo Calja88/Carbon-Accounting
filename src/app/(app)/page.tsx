@@ -3,7 +3,7 @@ import { ZodError } from "zod";
 import type { OverviewModel } from "@/lib/board/contracts";
 import { OrganisationAccessError } from "@/lib/organisation/session";
 import { PermissionDeniedError } from "@/lib/rbac/authorize";
-import { getBoardOverview, InvalidBoardScopeError, type BoardOverviewSearchParams } from "@/lib/board/live-overview";
+import { getBoardOverview, InvalidBoardScopeError, type BoardOverviewSearchParams } from "@/lib/board/overview-entry";
 import { ExecutiveOverview } from "@/components/board/overview";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 

@@ -52,6 +52,7 @@ import { runCalculation, getLatestRun, runTotals } from "@/lib/lca/calculation-s
 import { cloneAssessment } from "@/lib/lca/assessment-service";
 import { scheduleManagementReview, startManagementReviewInputCollection } from "@/lib/ems/review/review-service";
 import { generateManagementReviewPack, issueManagementReviewPack } from "@/lib/ems/review/pack-service";
+import { generateBoardManagementPack, issueBoardManagementPack } from "@/lib/board/live-management-pack";
 import { BOARD1, buildSubmissionObligations, IMPROVEMENT_CHAIN, type CarbonTarget } from "./board1";
 import { buildSyntheticEvidence } from "./evidence";
 import type { DemoDatabaseIdentity } from "./guard";
@@ -118,6 +119,8 @@ export class LiveSeedPort implements DemoSeedPort {
   private lcaScenarioId: string | null = null;
   private managementReviewId: string | null = null;
   private managementPackId: string | null = null;
+  private boardManagementPackId: string | null = null;
+  static readonly BOARD_MANAGEMENT_PACK_REFERENCE = "BOARD1-PACK-2026-Q3";
 
   // -------------------------------------------------------------------
   // Identity / lease
@@ -291,6 +294,9 @@ export class LiveSeedPort implements DemoSeedPort {
 
     const pack = await prisma.managementReviewPack.findFirst({ where: { organisationId } });
     this.managementPackId = pack?.id ?? null;
+
+    const boardPack = await prisma.boardManagementPack.findFirst({ where: { organisationId, reference: LiveSeedPort.BOARD_MANAGEMENT_PACK_REFERENCE } });
+    this.boardManagementPackId = boardPack?.id ?? null;
 
     // Deliberately the OLDEST matching row, ordered explicitly rather than
     // left to an unspecified default: a genuine post-freeze live transition
@@ -1048,6 +1054,40 @@ export class LiveSeedPort implements DemoSeedPort {
     await generateManagementReviewPack(owner, review.id, owner.userId);
     const issued = await issueManagementReviewPack(owner, review.id, owner.userId);
     this.managementPackId = issued.id;
+
+    // The board-sprint's own FrozenBoardPack (contracts.ts) — a real
+    // Overview snapshot plus decisions/source revisions genuinely pinned to
+    // this fixture's own EMS chain and LCA assessment, not the T73 pack's
+    // (empty) input-link catalogue above.
+    if (!this.nonconformityId || !this.correctiveActionId || !this.lcaAssessmentId || !this.lcaScenarioId) {
+      throw new Error("EMS chain and LCA must be built before the frozen board pack.");
+    }
+    const [nonconformity, correctiveAction] = await Promise.all([
+      prisma.nonconformity.findUniqueOrThrow({ where: { id: this.nonconformityId } }),
+      prisma.correctiveAction.findUniqueOrThrow({ where: { id: this.correctiveActionId } }),
+    ]);
+    await generateBoardManagementPack(owner, {
+      reference: LiveSeedPort.BOARD_MANAGEMENT_PACK_REFERENCE,
+      overviewWindow: { from: "2026-01", to: "2026-08" },
+      actorUserId: owner.userId,
+      decisions: [
+        {
+          title: "Close the containment inspection gap",
+          rationale: correctiveAction.completionEvidenceNote ?? correctiveAction.description,
+          owner: BOARD1.organisation,
+          dueDate: correctiveAction.dueDate.toISOString().slice(0, 10),
+          status: correctiveAction.status === "VERIFIED" || correctiveAction.status === "COMPLETED" ? "approved" : "draft",
+        },
+      ],
+      sourceRevisions: [
+        { id: nonconformity.id, kind: "nonconformity", revision: nonconformity.updatedAt.toISOString(), label: nonconformity.reference, href: `/ems/nonconformities/${nonconformity.id}` },
+        { id: correctiveAction.id, kind: "corrective_action", revision: (correctiveAction.verifiedAt ?? correctiveAction.completedAt ?? correctiveAction.dueDate).toISOString(), label: "Containment corrective action", href: `/ems/nonconformities/${nonconformity.id}` },
+        { id: this.lcaAssessmentId, kind: "lca_assessment", revision: "baseline", label: "BOARD1-LCA-001 baseline", href: `/assessments/${this.lcaAssessmentId}` },
+        { id: this.lcaScenarioId, kind: "lca_assessment", revision: "scenario", label: "BOARD1-LCA-001-S1 scenario", href: `/assessments/${this.lcaScenarioId}` },
+      ],
+    });
+    const issuedBoardPack = await issueBoardManagementPack(owner, LiveSeedPort.BOARD_MANAGEMENT_PACK_REFERENCE, owner.userId);
+    this.boardManagementPackId = issuedBoardPack.id;
   }
 
   // -------------------------------------------------------------------
@@ -1129,6 +1169,17 @@ export class LiveSeedPort implements DemoSeedPort {
     const pack = await prisma.managementReviewPack.findUniqueOrThrow({ where: { id: this.managementPackId } });
     if (pack.status !== "ISSUED") throw new Error("Reconciliation failed: management pack is not issued.");
 
+    if (!this.boardManagementPackId) throw new Error("Reconciliation failed: the board management pack (FrozenBoardPack) was never issued.");
+    const boardPack = await prisma.boardManagementPack.findUniqueOrThrow({ where: { id: this.boardManagementPackId } });
+    if (boardPack.status !== "ISSUED") throw new Error("Reconciliation failed: the board management pack is not issued.");
+    const boardPackBody = boardPack.snapshot as unknown as { decisions: unknown[]; sourceRevisions: unknown[] };
+    if (!Array.isArray(boardPackBody.decisions) || boardPackBody.decisions.length === 0) {
+      throw new Error("Reconciliation failed: the board management pack has no linked decisions.");
+    }
+    if (!Array.isArray(boardPackBody.sourceRevisions) || boardPackBody.sourceRevisions.length === 0) {
+      throw new Error("Reconciliation failed: the board management pack has no pinned source revisions.");
+    }
+
     if (!this.nonconformityId) throw new Error("Reconciliation failed: EMS chain nonconformity is missing.");
     const nc = await prisma.nonconformity.findUniqueOrThrow({ where: { id: this.nonconformityId } });
     if (nc.status !== "CLOSED") throw new Error(`Reconciliation failed: EMS chain nonconformity should be CLOSED, is ${nc.status}.`);
@@ -1143,6 +1194,8 @@ export class LiveSeedPort implements DemoSeedPort {
       lcaScenarioPerFunctionalUnitKgCo2e: scenarioPerFu,
       managementPackId: pack.id,
       managementPackChecksum: pack.checksumSha256,
+      boardManagementPackId: boardPack.id,
+      boardManagementPackChecksum: boardPack.payloadSha256,
       nonconformityStatus: nc.status,
     };
     const digest = createHash("sha256").update(JSON.stringify(summary)).digest("hex");

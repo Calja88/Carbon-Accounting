@@ -145,24 +145,43 @@ export async function generateManagementReviewPack(context: OrganisationContext,
   const checksumSha256 = computeChecksum(payload);
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
-    const pack = await tx.managementReviewPack.upsert({
-      where: { organisationId_reviewId: { organisationId: txCtx.organisationId, reviewId: review.id } },
-      create: {
-        organisationId: txCtx.organisationId,
-        reviewId: review.id,
-        agendaTemplateVersionId: review.agendaTemplateVersionId,
-        cutoffDate: review.cutoffDate,
-        generatorVersion: MANAGEMENT_REVIEW_PACK_GENERATOR_VERSION,
-        payload: toJsonInput(payload),
-        checksumSha256,
-        generatedAt: new Date(),
-      },
-      update: {
-        payload: toJsonInput(payload),
-        checksumSha256,
-        generatedAt: new Date(),
-      },
-    });
+    // Checkpoint B fix: the previous unconditional upsert let a delayed
+    // generate call overwrite a payload issueManagementReviewPack had
+    // already frozen, if the issue committed between this function's
+    // pre-transaction read and its write. A plain re-read-then-write here
+    // would not fully close that window either (Postgres re-evaluates an
+    // UPDATE's WHERE clause against the latest committed row when it was
+    // blocked waiting on a concurrent writer's lock, but a SELECT does
+    // not) — so the write itself must be the conditional: updateMany's
+    // WHERE clause acts as the actual compare-and-swap when a row already
+    // exists, and a fresh row is protected by its own unique constraint.
+    const currentPack = await tx.managementReviewPack.findFirst({ where: tenantWhere(txCtx, { reviewId: review.id }) });
+    let pack;
+    if (!currentPack) {
+      pack = await tx.managementReviewPack.create({
+        data: {
+          organisationId: txCtx.organisationId,
+          reviewId: review.id,
+          agendaTemplateVersionId: review.agendaTemplateVersionId,
+          cutoffDate: review.cutoffDate,
+          generatorVersion: MANAGEMENT_REVIEW_PACK_GENERATOR_VERSION,
+          payload: toJsonInput(payload),
+          checksumSha256,
+          generatedAt: new Date(),
+        },
+      });
+    } else {
+      const casResult = await tx.managementReviewPack.updateMany({
+        where: { organisationId: txCtx.organisationId, id: currentPack.id, status: "DRAFT" },
+        data: { payload: toJsonInput(payload), checksumSha256, generatedAt: new Date() },
+      });
+      if (casResult.count === 0) {
+        throw new ManagementReviewPackError("This review's pack has already been issued and cannot be regenerated.");
+      }
+      pack = await tx.managementReviewPack.findUniqueOrThrow({
+        where: { organisationId_id: { organisationId: txCtx.organisationId, id: currentPack.id } },
+      });
+    }
 
     await recordAuditEvent(tx, txCtx, {
       eventType: "management_review_pack.generated",

@@ -8843,3 +8843,33 @@ model CarbonSourcePeriodObligation {
   @@unique([organisationId, siteId, month, sourceKey])
   @@index([organisationId, siteId, month])
 }
+
+enum BoardManagementPackStatus {
+  DRAFT
+  ISSUED
+}
+
+/// The board-sprint's own frozen management pack (`FrozenBoardPack` in
+/// src/lib/board/contracts.ts, rendered by src/components/board/management-pack.tsx)
+/// — distinct from the pre-existing T73 ManagementReviewPack, which has its
+/// own unrelated payload shape and cannot carry an Overview snapshot/decisions/
+/// pinned source revisions. `snapshot` holds the full serialized FrozenBoardPack
+/// body (everything except id/status/issuedAt/payloadSha256, which live in
+/// their own columns); generate/issue follow the same atomic-CAS,
+/// issue-once pattern as ManagementReviewPack.
+model BoardManagementPack {
+  id               String                    @id @default(cuid())
+  organisationId   String
+  reference        String
+  version          Int                       @default(1)
+  status           BoardManagementPackStatus @default(DRAFT)
+  snapshot         Json
+  payloadSha256    String
+  preparedByUserId String
+  approvedByUserId String?
+  issuedAt         DateTime?
+  generatedAt      DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  @@unique([organisationId, reference])
+}

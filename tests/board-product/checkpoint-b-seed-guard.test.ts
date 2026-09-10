@@ -69,23 +69,32 @@ describe("Checkpoint B fix 4 — trustworthy seed identity", () => {
   });
 
   it("a 'Synthetic ...'-named organisation only escapes the ordinary-organisation count when the environment independently proves disposable CI, never on name alone", async () => {
-    const org = await prisma.organisation.create({ data: { name: `Synthetic Checkpoint B Guard Probe ${randomUUID()}`, slug: `cb-guard-probe-${randomUUID()}` } });
+    // Isolate the effect of THIS ONE probe org's own name, not an absolute
+    // count — the shared disposable CI database already carries several
+    // other "Synthetic ..." orgs from sibling test files, and flipping
+    // CHECKPOINT_A_DISPOSABLE would swing the leniency for all of them at
+    // once, not just this one. Compare before/after creating the probe org
+    // under each setting instead.
+    const savedFlag = process.env.CHECKPOINT_A_DISPOSABLE;
     try {
-      const savedFlag = process.env.CHECKPOINT_A_DISPOSABLE;
+      process.env.CHECKPOINT_A_DISPOSABLE = "1"; // the true, verified state throughout this CI job
+      const before = await new LiveSeedPort().readConnectedIdentity();
+
+      const org = await prisma.organisation.create({ data: { name: `Synthetic Checkpoint B Guard Probe ${randomUUID()}`, slug: `cb-guard-probe-${randomUUID()}` } });
       try {
-        process.env.CHECKPOINT_A_DISPOSABLE = "1"; // the true, verified state throughout this CI job
-        const identityWhenGenuinelyDisposable = await new LiveSeedPort().readConnectedIdentity();
+        const withProbeDisposableProven = await new LiveSeedPort().readConnectedIdentity();
+        // Genuinely disposable CI: the naming leniency exempts this "Synthetic ..." org — count unchanged.
+        expect(withProbeDisposableProven.ordinaryOrganisationCount).toBe(before.ordinaryOrganisationCount);
 
         process.env.CHECKPOINT_A_DISPOSABLE = "0"; // simulate "not proven disposable" — the flag alone must never be enough either way
-        const identityWhenNotProven = await new LiveSeedPort().readConnectedIdentity();
-
-        // The name-based leniency can only ever subtract this org's count when disposability is independently proven — never on the name alone.
-        expect(identityWhenNotProven.ordinaryOrganisationCount).toBe(identityWhenGenuinelyDisposable.ordinaryOrganisationCount + 1);
+        const withProbeNotProven = await new LiveSeedPort().readConnectedIdentity();
+        // Not independently proven disposable: naming leniency withdrawn — this org now counts as ordinary.
+        expect(withProbeNotProven.ordinaryOrganisationCount).toBe(withProbeDisposableProven.ordinaryOrganisationCount + 1);
       } finally {
-        if (savedFlag === undefined) delete process.env.CHECKPOINT_A_DISPOSABLE; else process.env.CHECKPOINT_A_DISPOSABLE = savedFlag;
+        await prisma.organisation.delete({ where: { id: org.id } });
       }
     } finally {
-      await prisma.organisation.delete({ where: { id: org.id } });
+      if (savedFlag === undefined) delete process.env.CHECKPOINT_A_DISPOSABLE; else process.env.CHECKPOINT_A_DISPOSABLE = savedFlag;
     }
   });
 });

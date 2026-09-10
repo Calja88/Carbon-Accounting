@@ -1,7 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { OrganisationContext } from "@/lib/organisation/context";
-import { requireOrganisationContext } from "@/lib/organisation/session";
 import { requireCarbonView } from "@/lib/rbac/carbon-access";
 import { hasPermission } from "@/lib/rbac/authorize";
 import { toTenantRepositoryContext, requireSiteInScope } from "@/lib/repositories/carbon-repository";
@@ -331,12 +330,6 @@ export async function loadOverviewForContext(context: OrganisationContext, searc
     asOfDate: new Date().toISOString().slice(0, 10), // no guarded synthetic environment is wired in any environment this branch has run in — the real date is always used
   };
   return loadOverview(ports, context, scope);
-}
-
-/** Server entry point for `/` and `/attention`. Never call the adapters above directly from a page. */
-export async function getBoardOverview(searchParams: OverviewSearchParams): Promise<OverviewModel> {
-  const context = await requireOrganisationContext();
-  return loadOverviewForContext(context, searchParams);
 }
 
 export { InvalidBoardScopeError };
