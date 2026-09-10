@@ -54,6 +54,11 @@ import { buildSyntheticEvidence } from "./evidence";
 import type { DemoDatabaseIdentity } from "./guard";
 import type { DemoSeedPort } from "./seed-orchestrator";
 
+
+function trace(label: string): void {
+  process.stderr.write(`[bd08-seed-trace] ${new Date().toISOString()} ${label}\n`);
+}
+
 const FIXTURE_KEY = BOARD1.fixtureVersion;
 const ORG_SLUG = "board-1-northstar-demonstration";
 
@@ -92,6 +97,7 @@ export class LiveSeedPort implements DemoSeedPort {
   // -------------------------------------------------------------------
 
   async readConnectedIdentity(): Promise<DemoDatabaseIdentity> {
+    trace("readConnectedIdentity start");
     const manifest = await prisma.demoDatabaseManifest.findUnique({ where: { id: "singleton" } });
     // "Ordinary" means neither this fixture's own organisation nor another
     // repo test suite's own clearly-labelled synthetic fixture (the
@@ -124,6 +130,7 @@ export class LiveSeedPort implements DemoSeedPort {
   }
 
   async withExclusiveFixtureLease<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    trace("withExclusiveFixtureLease start");
     await prisma.demoFixtureLease.upsert({
       where: { fixtureKey: key },
       create: { fixtureKey: key },
@@ -135,7 +142,10 @@ export class LiveSeedPort implements DemoSeedPort {
         // seed/verify attempt on the same fixture key fails immediately
         // instead of racing writes.
         await tx.$queryRaw`SELECT id FROM "DemoFixtureLease" WHERE "fixtureKey" = ${key} FOR UPDATE NOWAIT`;
-        return operation();
+        trace("lease row locked; calling operation()");
+        const result = await operation();
+        trace("operation() resolved");
+        return result;
       },
       { timeout: 10 * 60 * 1000, maxWait: 5000 },
     );
@@ -149,6 +159,7 @@ export class LiveSeedPort implements DemoSeedPort {
   }
 
   async beginFixture(version: string): Promise<void> {
+    trace("beginFixture start");
     await prisma.demoFixtureLease.update({
       where: { fixtureKey: version },
       data: { status: "BUILDING", digest: "" },
@@ -179,6 +190,7 @@ export class LiveSeedPort implements DemoSeedPort {
   // -------------------------------------------------------------------
 
   async createSyntheticOrganisationAndActors(): Promise<void> {
+    trace("createSyntheticOrganisationAndActors start");
     const org = await prisma.organisation.create({ data: { name: BOARD1.organisation, slug: ORG_SLUG } });
     this.organisationId = org.id;
 
@@ -251,6 +263,7 @@ export class LiveSeedPort implements DemoSeedPort {
 
     this.owner = this.sustainabilityLead;
     if (!this.owner || !this.independentReviewer) throw new Error("BOARD-1 persona setup failed.");
+    trace("createSyntheticOrganisationAndActors done");
   }
 
   // -------------------------------------------------------------------
@@ -258,6 +271,7 @@ export class LiveSeedPort implements DemoSeedPort {
   // -------------------------------------------------------------------
 
   async createAndCalculateCarbon(targets: CarbonTarget[], obligations: ReturnType<typeof buildSubmissionObligations>): Promise<void> {
+    trace("createAndCalculateCarbon start");
     if (!this.owner || !this.entityId) throw new Error("Organisation must be created before carbon.");
     const owner = this.owner;
     const ctx = toTenantRepositoryContext(owner);
@@ -421,9 +435,12 @@ export class LiveSeedPort implements DemoSeedPort {
         }
       });
 
+    trace("carbon phase 1 done");
+
     // Phase 2: run the real derived-Category-3 mechanism over the whole
     // 2026 window, then read its actual persisted result per site/month.
     await prepareReportingData(owner, new Date("2026-01-01"), new Date("2026-08-31"));
+    trace("carbon phase 2 (prepareReportingData) done");
 
     const derivedRows = await prisma.calculation.findMany({
       where: { organisationId: owner.organisationId, scope3Category: "Cat 3 — Fuel- and energy-related activities" },
@@ -477,6 +494,8 @@ export class LiveSeedPort implements DemoSeedPort {
       },
     );
 
+    trace("carbon phase 3 done");
+
     // 2025 comparable window: same construction, but scope3 is entered as a
     // single "board1_purchased_goods" line per site-month (only the total
     // needs to reconcile; the fine category split is a 2026-only claim).
@@ -514,6 +533,8 @@ export class LiveSeedPort implements DemoSeedPort {
         await Promise.all(writes);
       });
 
+    trace("carbon 2025 window done");
+
     // 192 real, independently reviewable source-period obligations — plain
     // reference rows (no state machine of their own), so a single batched
     // insert is appropriate.
@@ -529,6 +550,7 @@ export class LiveSeedPort implements DemoSeedPort {
         reviewedAt: new Date(),
       })),
     });
+    trace("carbon obligations createMany done");
   }
 
   // -------------------------------------------------------------------
@@ -536,6 +558,7 @@ export class LiveSeedPort implements DemoSeedPort {
   // -------------------------------------------------------------------
 
   async storeEvidence(files: ReturnType<typeof buildSyntheticEvidence>): Promise<void> {
+    trace("storeEvidence start");
     if (!this.owner) throw new Error("Organisation must be created before evidence.");
     for (const file of files) {
       const evidence = await uploadEvidenceObject(this.owner, {
@@ -556,6 +579,7 @@ export class LiveSeedPort implements DemoSeedPort {
   // -------------------------------------------------------------------
 
   async createImprovementChain(chain: typeof IMPROVEMENT_CHAIN): Promise<void> {
+    trace("createImprovementChain start");
     void chain; // board1.ts's IMPROVEMENT_CHAIN is documentation of the intended story; the real chain below is built through live services, not iterated from this data.
     if (!this.owner || !this.independentReviewer || !this.sites.length) throw new Error("Organisation must be created before the EMS chain.");
     const owner = this.owner;
@@ -688,6 +712,7 @@ export class LiveSeedPort implements DemoSeedPort {
     if (effectivenessEvidenceId) {
       await linkEvidence(owner, { evidenceId: effectivenessEvidenceId, resourceType: "corrective_action", resourceId: action.id, purpose: "effectiveness-review-evidence", linkedByUserId: owner.userId });
     }
+    trace("createImprovementChain done");
   }
 
   // -------------------------------------------------------------------
@@ -695,6 +720,7 @@ export class LiveSeedPort implements DemoSeedPort {
   // -------------------------------------------------------------------
 
   async createAndCalculateLca(plan: typeof BOARD1.lca): Promise<void> {
+    trace("createAndCalculateLca start");
     if (!this.owner || !this.entityId) throw new Error("Organisation must be created before LCA.");
     const owner = this.owner;
 
@@ -732,6 +758,7 @@ export class LiveSeedPort implements DemoSeedPort {
     this.lcaScenarioId = scenario.id;
     await this.replaceLcaMaterialsQuantity(owner, scenario.id, plan.scenario.materials);
     await runCalculation({ assessmentId: scenario.id, actorUserId: owner.userId });
+    trace("createAndCalculateLca done");
   }
 
   private async buildLcaProcessesAndItems(context: OrganisationContext, assessmentId: string, contributions: typeof BOARD1.lca.baseline): Promise<void> {
@@ -795,6 +822,7 @@ export class LiveSeedPort implements DemoSeedPort {
   // -------------------------------------------------------------------
 
   async createFrozenManagementPack(): Promise<void> {
+    trace("createFrozenManagementPack start");
     if (!this.owner) throw new Error("Organisation must be created before the management pack.");
     const owner = this.owner;
 
@@ -834,6 +862,7 @@ export class LiveSeedPort implements DemoSeedPort {
   // -------------------------------------------------------------------
 
   async verifyAllInvariants(): Promise<{ digest: string }> {
+    trace("verifyAllInvariants start");
     if (!this.organisationId) throw new Error("Nothing to verify — organisation was never created.");
     const organisationId = this.organisationId;
 
@@ -911,6 +940,7 @@ export class LiveSeedPort implements DemoSeedPort {
   }
 
   async markFixtureReady(version: string, digest: string): Promise<void> {
+    trace("markFixtureReady start");
     await prisma.demoFixtureLease.update({ where: { fixtureKey: version }, data: { status: "READY", digest } });
   }
 }
