@@ -197,8 +197,14 @@ export async function issueManagementReviewPack(context: OrganisationContext, re
   const inputLinks = await prisma.managementReviewInputLink.findMany({ where: tenantWhere(ctx, { reviewId: review.id }) });
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
-    const issued = await tx.managementReviewPack.update({
-      where: { organisationId_id: { organisationId: txCtx.organisationId, id: pack.id } },
+    // CAS: re-prove DRAFT status inside the transaction rather than trusting
+    // the pre-transaction read above (BD08 carried-forward Astra finding —
+    // the prior unconditional update let two concurrent issue calls both
+    // succeed, double-writing input snapshots and silently re-stamping
+    // issuedAt/issuedByUserId). A losing racer gets an explicit conflict,
+    // never a second silent freeze.
+    const casResult = await tx.managementReviewPack.updateMany({
+      where: { organisationId: txCtx.organisationId, id: pack.id, status: "DRAFT" },
       data: {
         payload: toJsonInput(payload),
         checksumSha256,
@@ -207,6 +213,12 @@ export async function issueManagementReviewPack(context: OrganisationContext, re
         issuedByUserId: actorUserId,
         issuedAt: new Date(),
       },
+    });
+    if (casResult.count !== 1) {
+      throw new ManagementReviewPackError("This pack was issued by a concurrent request; reload and retry.");
+    }
+    const issued = await tx.managementReviewPack.findUniqueOrThrow({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: pack.id } },
     });
 
     for (const link of inputLinks) {
