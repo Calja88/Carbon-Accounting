@@ -62,8 +62,8 @@ export async function getAspectChainRecord(context: OrganisationContext, aspectI
     owner: aspect.process.name, site: "—", revision: aspect.updatedAt.toISOString(),
     status: { label: aspect.operatingCondition, tone: "neutral" },
     summary: `Process: ${aspect.process.name}. ${aspect.impactLinks.length} linked environmental impact${aspect.impactLinks.length === 1 ? "" : "s"}.${aspect.description ? ` ${aspect.description}` : ""}`,
-    relations: controlLinks.map((l) => ref("operational_control", l.control.id, l.control.updatedAt.toISOString(), `Control: ${l.control.title}`, "/ems/controls" as const)),
-    evidence: toEvidenceItems(evidence, "/ems/aspects" as const, "Open aspect register"),
+    relations: controlLinks.map((l) => ref("operational_control", l.control.id, l.control.updatedAt.toISOString(), `Control: ${l.control.title}`, `/ems/controls?record=${l.control.id}` as const)),
+    evidence: toEvidenceItems(evidence, `/ems/aspects?record=${aspectId}` as const, "Open this aspect"),
     timeline: [{ id: aspect.id, title: "Aspect recorded", detail: aspect.existingControls ? `Existing controls: ${aspect.existingControls}` : "No existing controls recorded.", occurredAt: aspect.createdAt.toISOString(), actor: "—" }],
     nextStep: controlLinks.length === 0
       ? { title: "No linked control yet", detail: "Link an operational control to this aspect from the controls register." }
@@ -90,10 +90,10 @@ export async function getControlChainRecord(context: OrganisationContext, contro
     status: { label: control.status, tone: control.status === "ACTIVE" ? "success" : "neutral" },
     summary: `Linked to ${control.aspectLinks.length} environmental aspect${control.aspectLinks.length === 1 ? "" : "s"}. ${control.checks.length} recorded check${control.checks.length === 1 ? "" : "s"}.`,
     relations: [
-      ...control.aspectLinks.map((l) => ref("environmental_aspect", l.aspect.id, control.updatedAt.toISOString(), `Aspect: ${l.aspect.name}`, "/ems/aspects" as const)),
-      ...obligationLinks.map((l) => ref("compliance_obligation_version", l.obligationVersion.id, l.obligationVersion.updatedAt.toISOString(), `Obligation: ${l.obligationVersion.title}`, "/ems/legal/obligations" as const)),
+      ...control.aspectLinks.map((l) => ref("environmental_aspect", l.aspect.id, control.updatedAt.toISOString(), `Aspect: ${l.aspect.name}`, `/ems/aspects?record=${l.aspect.id}` as const)),
+      ...obligationLinks.map((l) => ref("compliance_obligation_version", l.obligationVersion.id, l.obligationVersion.updatedAt.toISOString(), `Obligation: ${l.obligationVersion.title}`, `/ems/legal/obligations?record=${l.obligationVersion.id}` as const)),
     ],
-    evidence: checkEvidence.flat().map((e) => toEvidenceItems([e], "/ems/controls" as const, "Open control register")[0]),
+    evidence: checkEvidence.flat().map((e) => toEvidenceItems([e], `/ems/controls?record=${controlId}` as const, "Open this control")[0]),
     timeline: control.checks.slice(0, 5).map((c) => ({ id: c.id, title: `Control check ${c.result.toLowerCase()}`, detail: c.notes ?? "Recorded", occurredAt: (c.performedAt ?? c.scheduledAt).toISOString(), actor: "—" })),
     nextStep: obligationLinks.length === 0
       ? { title: "No linked obligation yet", detail: "Link this control to the compliance obligation it satisfies from the obligations register." }
@@ -144,7 +144,7 @@ export async function getObligationChainRecord(context: OrganisationContext, ver
     status: { label: version.status, tone: version.status === "APPROVED" ? "success" : "neutral" },
     summary: `${sourceLabel}. ${version.requirementSummary} ${evaluationItems.length} evaluation ${evaluationItems.length === 1 ? "item" : "items"} recorded.`,
     relations: [
-      ...controlLinks.map((l) => ref("operational_control", l.control.id, l.control.updatedAt.toISOString(), `Control: ${l.control.title}`, "/ems/controls" as const)),
+      ...controlLinks.map((l) => ref("operational_control", l.control.id, l.control.updatedAt.toISOString(), `Control: ${l.control.title}`, `/ems/controls?record=${l.control.id}` as const)),
       ...sourcedNonconformities.map((s) => ref("nonconformity", s.nonconformity.id, s.nonconformity.updatedAt.toISOString(), `Nonconformity: ${s.nonconformity.reference}`, `/ems/nonconformities/${s.nonconformity.id}` as const)),
     ],
     evidence: [],

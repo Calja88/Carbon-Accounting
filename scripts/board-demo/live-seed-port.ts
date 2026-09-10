@@ -46,6 +46,7 @@ import { recordRootCauseAnalysis, approveRootCauseAnalysis } from "@/lib/ems/non
 import { createCorrectiveAction, completeCorrectiveAction } from "@/lib/ems/nonconformity/corrective-action-service";
 import { requestEffectivenessReview, performEffectivenessReview } from "@/lib/ems/nonconformity/effectiveness-service";
 import { uploadEvidenceObject, linkEvidence } from "@/lib/documents/evidence-service";
+import { uploadDocument } from "@/lib/documents-service";
 import { createAssessment } from "@/lib/lca/assessment-service";
 import { upsertProcess, upsertInventoryItem, assignFactor } from "@/lib/lca/model-service";
 import { runCalculation, getLatestRun, runTotals } from "@/lib/lca/calculation-service";
@@ -53,6 +54,32 @@ import { cloneAssessment } from "@/lib/lca/assessment-service";
 import { scheduleManagementReview, startManagementReviewInputCollection } from "@/lib/ems/review/review-service";
 import { generateManagementReviewPack, issueManagementReviewPack } from "@/lib/ems/review/pack-service";
 import { generateBoardManagementPack, issueBoardManagementPack } from "@/lib/board/live-management-pack";
+import { createOtherRequirementSource } from "@/lib/ems/legal/other-requirement-service";
+import {
+  createApplicabilityAssessment,
+  attachEvidenceToApplicabilityAssessment,
+  submitApplicabilityAssessmentForReview,
+  decideApplicabilityAssessment,
+} from "@/lib/ems/legal/applicability-service";
+import {
+  createComplianceObligation,
+  submitComplianceObligationVersionForReview,
+  approveComplianceObligationVersion,
+} from "@/lib/ems/legal/obligation-service";
+import {
+  createComplianceEvaluationProgramme,
+  createComplianceEvaluation,
+  startComplianceEvaluation,
+  recordComplianceEvaluationItemResult,
+  attachEvidenceToComplianceEvaluationItem,
+  completeComplianceEvaluation,
+  issueComplianceEvaluation,
+} from "@/lib/ems/legal/evaluation-service";
+import { createAuditProgramme, approveAuditProgramme, activateAuditProgramme } from "@/lib/ems/audits/programme-service";
+import { createEmsAudit, assignAuditTeamMember, startAuditPreparation, startAuditExecution } from "@/lib/ems/audits/audit-service";
+import { ensureDraftChecklistVersion, addChecklistItem, recordQuestionResponse } from "@/lib/ems/audits/checklist-service";
+import { createAuditFinding, confirmAuditFinding } from "@/lib/ems/audits/finding-service";
+import { createAuditReportDraft, recordReportReview, issueAuditReport } from "@/lib/ems/audits/report-service";
 import { BOARD1, buildSubmissionObligations, IMPROVEMENT_CHAIN, type CarbonTarget } from "./board1";
 import { buildSyntheticEvidence } from "./evidence";
 import type { DemoDatabaseIdentity } from "./guard";
@@ -121,6 +148,8 @@ export class LiveSeedPort implements DemoSeedPort {
   private managementPackId: string | null = null;
   private boardManagementPackId: string | null = null;
   static readonly BOARD_MANAGEMENT_PACK_REFERENCE = "BOARD1-PACK-2026-Q3";
+  private invoiceSourceDocumentId: string | null = null;
+  private meterReadingSourceDocumentId: string | null = null;
 
   // -------------------------------------------------------------------
   // Identity / lease
@@ -298,6 +327,11 @@ export class LiveSeedPort implements DemoSeedPort {
     const boardPack = await prisma.boardManagementPack.findFirst({ where: { organisationId, reference: LiveSeedPort.BOARD_MANAGEMENT_PACK_REFERENCE } });
     this.boardManagementPackId = boardPack?.id ?? null;
 
+    const invoiceDoc = await prisma.sourceDocument.findFirst({ where: { organisationId, filename: "BOARD-1-invoice.txt" } });
+    this.invoiceSourceDocumentId = invoiceDoc?.id ?? null;
+    const meterDoc = await prisma.sourceDocument.findFirst({ where: { organisationId, filename: "BOARD-1-meter-reading.txt" } });
+    this.meterReadingSourceDocumentId = meterDoc?.id ?? null;
+
     // Deliberately the OLDEST matching row, ordered explicitly rather than
     // left to an unspecified default: a genuine post-freeze live transition
     // (e.g. a demonstration nonconformity created after the pack issues,
@@ -364,6 +398,15 @@ export class LiveSeedPort implements DemoSeedPort {
       "ems.corrective_action.effectiveness_review",
       "ems.objective.manage",
       "ems.management_review.manage",
+      "ems.audit_programme.manage",
+      "ems.audit.perform",
+      "ems.audit_report.issue",
+      "ems.legal_source.manage",
+      "ems.applicability.assess",
+      "ems.applicability.review",
+      "ems.compliance_obligation.edit",
+      "ems.compliance_obligation.approve",
+      "ems.compliance_evaluation.perform",
       ...lcaGrants,
     ];
     for (const code of grants) {
@@ -627,6 +670,59 @@ export class LiveSeedPort implements DemoSeedPort {
 
     trace("carbon phase 1 done");
 
+    // Checkpoint B fix 7: a real invoice and a real meter reading, each a
+    // genuine SourceDocument linked to the exact ActivityEntry it
+    // documents (never a floating evidence file with placeholder text
+    // that admits its own quantity is unfilled).
+    const invoiceEntry = await prisma.activityEntry.findFirstOrThrow({
+      where: {
+        organisationId: owner.organisationId,
+        siteId: siteById.get("north-works")!.id,
+        periodStart: new Date("2026-01-01T00:00:00Z"),
+        activityDataPoint: { factorCategory: "grid_electricity" },
+      },
+    });
+    const invoiceBytes = Buffer.from(
+      `${BOARD1.disclosure}\nFixture: ${BOARD1.fixtureVersion}\nSynthetic energy invoice\n\nSite: North Works. Period: January 2026. Metered electricity: ${invoiceEntry.canonicalValue.toString()} ${invoiceEntry.canonicalUnit}.\nNo real person, signature, certificate or company result is represented.\n`,
+      "utf8",
+    );
+    const invoiceDoc = await uploadDocument(owner, {
+      filename: "BOARD-1-invoice.txt",
+      mimeType: "text/plain",
+      bytes: invoiceBytes.buffer.slice(invoiceBytes.byteOffset, invoiceBytes.byteOffset + invoiceBytes.byteLength),
+      kind: "ELECTRICITY_INVOICE",
+      siteId: invoiceEntry.siteId,
+      uploadedByUserId: owner.userId,
+      maxBytes: 1_000_000,
+    });
+    await prisma.activityEntry.update({ where: { id: invoiceEntry.id }, data: { sourceDocumentId: invoiceDoc.id } });
+    this.invoiceSourceDocumentId = invoiceDoc.id;
+
+    const meterEntry = await prisma.activityEntry.findFirstOrThrow({
+      where: {
+        organisationId: owner.organisationId,
+        siteId: siteById.get("east-cards")!.id,
+        periodStart: new Date("2026-02-01T00:00:00Z"),
+        activityDataPoint: { factorCategory: "grid_electricity" },
+      },
+    });
+    const meterBytes = Buffer.from(
+      `${BOARD1.disclosure}\nFixture: ${BOARD1.fixtureVersion}\nSynthetic meter reading\n\nSite: East Cards. Period: February 2026. Observed electricity consumption: ${meterEntry.canonicalValue.toString()} ${meterEntry.canonicalUnit}.\nNo real person, signature, certificate or company result is represented.\n`,
+      "utf8",
+    );
+    const meterDoc = await uploadDocument(owner, {
+      filename: "BOARD-1-meter-reading.txt",
+      mimeType: "text/plain",
+      bytes: meterBytes.buffer.slice(meterBytes.byteOffset, meterBytes.byteOffset + meterBytes.byteLength),
+      kind: "METER_STATEMENT",
+      siteId: meterEntry.siteId,
+      uploadedByUserId: owner.userId,
+      maxBytes: 1_000_000,
+    });
+    await prisma.activityEntry.update({ where: { id: meterEntry.id }, data: { sourceDocumentId: meterDoc.id } });
+    this.meterReadingSourceDocumentId = meterDoc.id;
+    trace("carbon invoice/meter documents done");
+
     // Phase 2: run the real derived-Category-3 mechanism over the whole
     // 2026 window, then read its actual persisted result per site/month.
     await prepareReportingData(owner, new Date("2026-01-01"), new Date("2026-08-31"));
@@ -794,15 +890,12 @@ export class LiveSeedPort implements DemoSeedPort {
     });
     this.aspectId = aspect.id;
 
-    const otherSource = await prisma.otherRequirementSource.create({
-      data: {
-        organisationId: owner.organisationId,
-        type: "VOLUNTARY_COMMITMENT",
-        title: "Monthly containment inspection — internal requirement",
-        issuingParty: "Northstar internal policy (fictional, not a statutory obligation)",
-        ownerMembershipId: owner.membershipId,
-        createdByUserId: owner.userId,
-      },
+    const otherSource = await createOtherRequirementSource(owner, {
+      type: "VOLUNTARY_COMMITMENT",
+      title: "Monthly containment inspection — internal requirement",
+      issuingParty: "Northstar internal policy (fictional, not a statutory obligation)",
+      ownerMembershipId: owner.membershipId,
+      actorUserId: owner.userId,
     });
     this.otherRequirementSourceId = otherSource.id;
 
@@ -826,9 +919,16 @@ export class LiveSeedPort implements DemoSeedPort {
       result: "PASS",
       actorUserId: owner.userId,
     });
-    if (inspectionEvidenceId) {
-      await uploadEvidenceToControlCheck(owner, { checkId: check.id, fileName: "BOARD-1-inspection.txt", mimeType: "text/plain", bytes: Buffer.from("linked"), purpose: "inspection-checklist", actorUserId: owner.userId }).catch(() => null);
-    }
+    // Checkpoint B fix 7: a real generated checklist reflecting this exact
+    // persisted control check — never a five-byte "linked" placeholder —
+    // and a mandatory-evidence failure that genuinely fails the seed rather
+    // than being swallowed.
+    if (!inspectionEvidenceId) throw new Error("Reconciliation failed: the inspection checklist evidence fixture is missing.");
+    const generatedChecklistBytes = Buffer.from(
+      `${BOARD1.disclosure}\nFixture: ${BOARD1.fixtureVersion}\nContainment inspection checklist\n\nControl: ${control.title} (revision ${control.version}).\nCheck performed: ${check.scheduledAt.toISOString().slice(0, 10)}. Result: ${check.result}.\nItems checked: containment clear; condition recorded; inspection owner named.\n`,
+      "utf8",
+    );
+    await uploadEvidenceToControlCheck(owner, { checkId: check.id, fileName: "BOARD-1-inspection-checklist.txt", mimeType: "text/plain", bytes: generatedChecklistBytes, purpose: "inspection-checklist", actorUserId: owner.userId });
     if (procedureEvidenceId) {
       await linkEvidence(owner, { evidenceId: procedureEvidenceId, resourceType: "control_check", resourceId: check.id, purpose: "procedure-revision", linkedByUserId: owner.userId });
     }
@@ -844,25 +944,136 @@ export class LiveSeedPort implements DemoSeedPort {
       actorUserId: owner.userId,
     }).catch(() => null); // objective lifecycle is out of this chain's critical path; never blocks the mandatory NC/CAPA chain below
 
+    // Checkpoint B fix 7: a genuine internal requirement -> obligation
+    // revision -> evaluation chain through the real domain services —
+    // never just a bare OtherRequirementSource with an evidence file linked
+    // straight onto it.
     const evaluationEvidenceId = this.evidenceIdByKey.get("evaluation");
-    if (evaluationEvidenceId) {
-      await linkEvidence(owner, { evidenceId: evaluationEvidenceId, resourceType: "other_requirement_source", resourceId: otherSource.id, purpose: "internal-requirement-evaluation", linkedByUserId: owner.userId });
-    }
+    if (!evaluationEvidenceId) throw new Error("Reconciliation failed: the internal-requirement evaluation evidence fixture is missing.");
 
-    const auditProgramme = await prisma.auditProgramme.create({
-      data: { organisationId: owner.organisationId, name: "BOARD-1 internal audit programme", riskBasis: "Synthetic", periodStart: new Date("2026-01-01"), periodEnd: new Date("2026-12-31"), ownerMembershipId: owner.membershipId, createdByUserId: owner.userId },
+    const applicability = await createApplicabilityAssessment(owner, {
+      otherRequirementSourceId: otherSource.id,
+      decision: "APPLICABLE",
+      rationale: "This internal policy applies to every site handling solvent storage and transfer; North Works is in scope.",
+      scopes: [{ aspectId: aspect.id }],
+      actorUserId: owner.userId,
     });
-    const audit = await prisma.emsAudit.create({
-      data: { organisationId: owner.organisationId, programmeId: auditProgramme.id, type: "INTERNAL", title: "BOARD-1 internal audit", criteriaSummary: "Synthetic", leadMembershipId: owner.membershipId, scheduledStart: new Date("2026-08-01"), scheduledEnd: new Date("2026-08-02"), status: "REPORT_ISSUED", createdByUserId: owner.userId },
+    await attachEvidenceToApplicabilityAssessment(owner, { assessmentId: applicability.id, evidenceId: evaluationEvidenceId, purpose: "applicability-rationale", actorUserId: owner.userId });
+    await submitApplicabilityAssessmentForReview(owner, applicability.id, owner.userId);
+    await decideApplicabilityAssessment(reviewer, applicability.id, {
+      decision: "APPLICABLE",
+      rationale: "Independent review confirms the policy applies; scope and rationale are sound.",
+      nextReviewAt: new Date("2027-01-01"),
+      actorUserId: reviewer.userId,
     });
-    const finding = await prisma.auditFinding.create({
-      data: { organisationId: owner.organisationId, auditId: audit.id, classification: "MINOR_NONCONFORMITY", status: "CONFIRMED", statement: "Inspection ownership is not consistently recorded in the fictional sample.", confirmedAt: new Date(), confirmedByUserId: owner.userId, createdByUserId: owner.userId },
+
+    const { version: obligationVersion } = await createComplianceObligation(owner, {
+      title: "Monthly containment inspection",
+      requirementSummary: "Perform and record a monthly containment inspection at every in-scope site, with a named owner.",
+      ownerMembershipId: owner.membershipId,
+      frequency: "Monthly",
+      scopes: [{ aspectId: aspect.id }],
+      controlIds: [control.id],
+      applicabilityAssessmentId: applicability.id,
+      actorUserId: owner.userId,
     });
+    await submitComplianceObligationVersionForReview(owner, obligationVersion.id, owner.userId);
+    await approveComplianceObligationVersion(reviewer, obligationVersion.id, { actorUserId: reviewer.userId });
+
+    const evaluationProgramme = await createComplianceEvaluationProgramme(owner, {
+      name: "BOARD-1 compliance evaluation programme",
+      periodStart: new Date("2026-01-01"),
+      periodEnd: new Date("2026-12-31"),
+      leadMembershipId: owner.membershipId,
+      actorUserId: owner.userId,
+    });
+    const evaluation = await createComplianceEvaluation(owner, {
+      programmeId: evaluationProgramme.id,
+      periodStart: new Date("2026-08-01"),
+      periodEnd: new Date("2026-08-31"),
+      leadMembershipId: owner.membershipId,
+      scopes: [],
+      actorUserId: owner.userId,
+    });
+    await startComplianceEvaluation(owner, evaluation.id, owner.userId);
+    const evaluationItem = await prisma.complianceEvaluationItem.findFirstOrThrow({
+      where: { organisationId: owner.organisationId, evaluationId: evaluation.id, obligationVersionId: obligationVersion.id },
+    });
+    await recordComplianceEvaluationItemResult(owner, evaluationItem.id, {
+      status: "PARTIALLY_COMPLIANT",
+      rationale: "Inspections are being performed but ownership is not consistently recorded — the exact gap this chain's corrective action addresses.",
+      actorUserId: owner.userId,
+    });
+    await attachEvidenceToComplianceEvaluationItem(owner, { evaluationItemId: evaluationItem.id, evidenceId: evaluationEvidenceId, purpose: "internal-requirement-evaluation", actorUserId: owner.userId });
+    await completeComplianceEvaluation(owner, evaluation.id, owner.userId);
+    await issueComplianceEvaluation(owner, evaluation.id, owner.userId);
+
+    // Checkpoint B fix 7: a real audit programme/audit/checklist/finding
+    // lifecycle through the domain state machines — never a directly
+    // stamped REPORT_ISSUED/CONFIRMED row.
+    const auditProgramme = await createAuditProgramme(owner, {
+      name: "BOARD-1 internal audit programme",
+      riskBasis: "Synthetic, risk-based selection covering the containment-inspection control.",
+      periodStart: new Date("2026-01-01"),
+      periodEnd: new Date("2026-12-31"),
+      ownerMembershipId: owner.membershipId,
+      actorUserId: owner.userId,
+    });
+    await approveAuditProgramme(owner, auditProgramme.id, owner.userId);
+    await activateAuditProgramme(owner, auditProgramme.id, owner.userId);
+
+    const audit = await createEmsAudit(owner, {
+      programmeId: auditProgramme.id,
+      type: "INTERNAL",
+      title: "BOARD-1 internal audit",
+      criteriaSummary: "Containment inspection control operating as procedure revision 2 requires.",
+      leadMembershipId: reviewer.membershipId,
+      scheduledStart: new Date("2026-08-01"),
+      scheduledEnd: new Date("2026-08-02"),
+      scopes: [{ aspectId: aspect.id }],
+      actorUserId: owner.userId,
+    });
+    await assignAuditTeamMember(owner, audit.id, {
+      membershipId: reviewer.membershipId,
+      role: "LEAD_AUDITOR",
+      independenceDeclared: true,
+      conflictDeclared: false,
+      actorUserId: owner.userId,
+    });
+    await startAuditPreparation(owner, audit.id, owner.userId);
+
+    const checklistVersion = await ensureDraftChecklistVersion(owner, audit.id, owner.userId);
+    const checklistItem = await addChecklistItem(owner, checklistVersion.id, {
+      question: "Is the monthly containment inspection consistently recorded with a named owner?",
+      criteriaReference: "Containment inspection procedure revision 2.",
+      expectedEvidence: "Retained inspection checklist showing owner and condition.",
+      actorUserId: owner.userId,
+    });
+    await startAuditExecution(reviewer, audit.id, reviewer.userId); // freezes the checklist version
+    const questionResponse = await recordQuestionResponse(reviewer, checklistItem.id, {
+      result: "NONCONFORMANCE",
+      notes: "Inspection ownership is not consistently recorded in the fictional sample.",
+      auditorMembershipId: reviewer.membershipId,
+      actorUserId: reviewer.userId,
+    });
+
+    const finding = await createAuditFinding(reviewer, audit.id, {
+      classification: "MINOR_NONCONFORMITY",
+      statement: "Inspection ownership is not consistently recorded in the fictional sample.",
+      questionResponseId: questionResponse.id,
+      ownerMembershipId: owner.membershipId,
+      actorUserId: reviewer.userId,
+    });
+    await confirmAuditFinding(reviewer, finding.id, reviewer.userId);
     this.findingId = finding.id;
     const auditObservationEvidenceId = this.evidenceIdByKey.get("audit-observation");
     if (auditObservationEvidenceId) {
       await linkEvidence(owner, { evidenceId: auditObservationEvidenceId, resourceType: "audit_finding", resourceId: finding.id, purpose: "audit-observation", linkedByUserId: owner.userId });
     }
+
+    await createAuditReportDraft(reviewer, audit.id, reviewer.userId);
+    await recordReportReview(reviewer, audit.id, reviewer.userId);
+    await issueAuditReport(owner, audit.id, owner.userId);
 
     const nc = await createNonconformityFromSource(owner, {
       reference: `BOARD1-NC-${randomUUID().slice(0, 8)}`,
@@ -1163,6 +1374,32 @@ export class LiveSeedPort implements DemoSeedPort {
       if (row.checksumSha256 !== expectedSha) throw new Error(`Reconciliation failed: evidence "${key}" checksum does not match its generated bytes.`);
     }
 
+    // Checkpoint B fix 7: the invoice/meter-reading SourceDocuments must
+    // each be linked to a real ActivityEntry (never floating evidence) and
+    // recomputing their expected bytes from that entry's *current* persisted
+    // fields must match what was actually stored — never a placeholder.
+    if (!this.invoiceSourceDocumentId) throw new Error("Reconciliation failed: the electricity invoice source document was never created.");
+    const invoiceDoc = await prisma.sourceDocument.findUniqueOrThrow({ where: { id: this.invoiceSourceDocumentId } });
+    const invoiceLinkedEntry = await prisma.activityEntry.findFirstOrThrow({ where: { organisationId, sourceDocumentId: invoiceDoc.id } });
+    const expectedInvoiceBytes = Buffer.from(
+      `${BOARD1.disclosure}\nFixture: ${BOARD1.fixtureVersion}\nSynthetic energy invoice\n\nSite: North Works. Period: January 2026. Metered electricity: ${invoiceLinkedEntry.canonicalValue.toString()} ${invoiceLinkedEntry.canonicalUnit}.\nNo real person, signature, certificate or company result is represented.\n`,
+      "utf8",
+    );
+    if (invoiceDoc.sha256 !== createHash("sha256").update(expectedInvoiceBytes).digest("hex")) {
+      throw new Error("Reconciliation failed: the electricity invoice's stored bytes no longer match its linked activity entry.");
+    }
+
+    if (!this.meterReadingSourceDocumentId) throw new Error("Reconciliation failed: the meter-reading source document was never created.");
+    const meterDoc = await prisma.sourceDocument.findUniqueOrThrow({ where: { id: this.meterReadingSourceDocumentId } });
+    const meterLinkedEntry = await prisma.activityEntry.findFirstOrThrow({ where: { organisationId, sourceDocumentId: meterDoc.id } });
+    const expectedMeterBytes = Buffer.from(
+      `${BOARD1.disclosure}\nFixture: ${BOARD1.fixtureVersion}\nSynthetic meter reading\n\nSite: East Cards. Period: February 2026. Observed electricity consumption: ${meterLinkedEntry.canonicalValue.toString()} ${meterLinkedEntry.canonicalUnit}.\nNo real person, signature, certificate or company result is represented.\n`,
+      "utf8",
+    );
+    if (meterDoc.sha256 !== createHash("sha256").update(expectedMeterBytes).digest("hex")) {
+      throw new Error("Reconciliation failed: the meter reading's stored bytes no longer match its linked activity entry.");
+    }
+
     if (!this.lcaAssessmentId || !this.lcaScenarioId) throw new Error("Reconciliation failed: LCA assessment/scenario missing.");
     const [baselineRun, scenarioRun] = await Promise.all([getLatestRun(this.lcaAssessmentId), getLatestRun(this.lcaScenarioId)]);
     if (!baselineRun || !scenarioRun) throw new Error("Reconciliation failed: LCA baseline/scenario has no calculated run.");
@@ -1190,6 +1427,38 @@ export class LiveSeedPort implements DemoSeedPort {
     if (!this.nonconformityId) throw new Error("Reconciliation failed: EMS chain nonconformity is missing.");
     const nc = await prisma.nonconformity.findUniqueOrThrow({ where: { id: this.nonconformityId } });
     if (nc.status !== "CLOSED") throw new Error(`Reconciliation failed: EMS chain nonconformity should be CLOSED, is ${nc.status}.`);
+
+    // Checkpoint B fix 7: the internal requirement genuinely carries an
+    // obligation revision (ACTIVE, approved) and an issued evaluation
+    // (with a recorded, evidenced item outcome) — never just a bare
+    // OtherRequirementSource.
+    const obligation = await prisma.complianceObligation.findFirstOrThrow({ where: { organisationId } });
+    const obligationVersion = await prisma.complianceObligationVersion.findFirstOrThrow({ where: { organisationId, obligationId: obligation.id } });
+    if (obligationVersion.status !== "ACTIVE") {
+      throw new Error(`Reconciliation failed: the compliance obligation version should be ACTIVE, is ${obligationVersion.status}.`);
+    }
+    const evaluationItem = await prisma.complianceEvaluationItem.findFirstOrThrow({
+      where: { organisationId, obligationVersionId: obligationVersion.id },
+    });
+    if (evaluationItem.status !== "PARTIALLY_COMPLIANT" || !evaluationItem.evaluatedAt) {
+      throw new Error("Reconciliation failed: the compliance evaluation item has no genuine recorded outcome.");
+    }
+    const evaluation = await prisma.complianceEvaluation.findUniqueOrThrow({ where: { id: evaluationItem.evaluationId } });
+    if (evaluation.status !== "ISSUED") {
+      throw new Error(`Reconciliation failed: the compliance evaluation should be ISSUED, is ${evaluation.status}.`);
+    }
+
+    // Checkpoint B fix 7: the nonconformity's source finding genuinely
+    // reached CONFIRMED through the real finding lifecycle, and the audit
+    // that raised it genuinely reached REPORT_ISSUED through the real
+    // report lifecycle — never a directly stamped terminal status.
+    if (nc.sourceType !== "AUDIT_FINDING" || !nc.sourceId) {
+      throw new Error("Reconciliation failed: the EMS chain nonconformity is not genuinely sourced from an audit finding.");
+    }
+    const finding = await prisma.auditFinding.findUniqueOrThrow({ where: { id: nc.sourceId } });
+    if (finding.status !== "CONFIRMED") throw new Error(`Reconciliation failed: the audit finding should be CONFIRMED, is ${finding.status}.`);
+    const audit = await prisma.emsAudit.findUniqueOrThrow({ where: { id: finding.auditId } });
+    if (audit.status !== "REPORT_ISSUED") throw new Error(`Reconciliation failed: the audit should be REPORT_ISSUED, is ${audit.status}.`);
 
     const summary = {
       organisationId,
