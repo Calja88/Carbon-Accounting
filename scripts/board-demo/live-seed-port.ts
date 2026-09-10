@@ -798,7 +798,14 @@ export class LiveSeedPort implements DemoSeedPort {
       { key: "transport", stage: LcaLifecycleStage.INBOUND_TRANSPORT, name: "Inbound transport" },
     ];
     for (const s of stages) {
+      // createAssessment already seeded one default (empty) process per
+      // stage in the CRADLE_TO_GATE boundary — reuse it instead of creating
+      // a duplicate, or the assessment ends up with two RAW_MATERIALS/etc.
+      // processes and a later lookup-by-stage can non-deterministically
+      // find the empty default rather than the one holding this item.
+      const existing = await prisma.lcaProcess.findFirst({ where: { assessmentId, stage: s.stage } });
       const process = await upsertProcess(context, {
+        id: existing?.id ?? null,
         assessmentId,
         stage: s.stage,
         name: s.name,
