@@ -39,6 +39,8 @@ import { createEnvironmentalObjective } from "@/lib/ems/objectives/objective-ser
 import {
   createNonconformityFromSource,
   recordContainment,
+  reviewContainmentAdequacy,
+  closeNonconformity,
 } from "@/lib/ems/nonconformity/nonconformity-service";
 import { recordRootCauseAnalysis, approveRootCauseAnalysis } from "@/lib/ems/nonconformity/root-cause-service";
 import { createCorrectiveAction, completeCorrectiveAction } from "@/lib/ems/nonconformity/corrective-action-service";
@@ -742,7 +744,8 @@ export class LiveSeedPort implements DemoSeedPort {
     });
     this.nonconformityId = nc.id;
 
-    await recordContainment(owner, nc.id, { actionTaken: "Interim manual sign-off sheet introduced at North Works.", actionTakenAt: new Date("2026-08-05"), ownerMembershipId: owner.membershipId, actorUserId: owner.userId });
+    const containment = await recordContainment(owner, nc.id, { actionTaken: "Interim manual sign-off sheet introduced at North Works.", actionTakenAt: new Date("2026-08-05"), ownerMembershipId: owner.membershipId, actorUserId: owner.userId });
+    await reviewContainmentAdequacy(owner, containment.id, { adequate: true, notes: "Interim sign-off sheet is adequate pending the named-owner corrective action.", actorUserId: owner.userId });
     const rootCause = await recordRootCauseAnalysis(owner, nc.id, { method: "FIVE_WHYS", analysisPayload: { note: "No single named owner for the monthly check." }, conclusion: "Inspection ownership was never assigned to a named role.", actorUserId: owner.userId });
     await approveRootCauseAnalysis(owner, rootCause.id, { actorUserId: owner.userId });
 
@@ -768,6 +771,7 @@ export class LiveSeedPort implements DemoSeedPort {
     if (effectivenessEvidenceId) {
       await linkEvidence(owner, { evidenceId: effectivenessEvidenceId, resourceType: "corrective_action", resourceId: action.id, purpose: "effectiveness-review-evidence", linkedByUserId: owner.userId });
     }
+    await closeNonconformity(owner, nc.id, owner.userId);
     trace("createImprovementChain done");
   }
 
