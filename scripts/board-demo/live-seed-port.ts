@@ -374,47 +374,54 @@ export class LiveSeedPort implements DemoSeedPort {
     const targets2026 = targets.filter((t) => t.year === 2026);
     const targets2025 = targets.filter((t) => t.year === 2025);
 
-    const scope12EntryIds: { siteKey: string; month: string; entryId: string }[] = [];
-    for (const target of targets2026) {
-      const site = siteById.get(target.siteKey)!;
-      const periodStart = new Date(`${target.month}-01T00:00:00Z`);
-      const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
+    // Each site-month's entries touch disjoint ActivityEntry rows, so
+    // building them concurrently across targets is safe (real-Postgres CI
+    // proved the fully sequential version correct but far too slow —
+    // ~300 sequential real-service round trips exceeded a 5-minute budget).
+    await Promise.all(
+      targets2026.map(async (target) => {
+        const site = siteById.get(target.siteKey)!;
+        const periodStart = new Date(`${target.month}-01T00:00:00Z`);
+        const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
 
-      if (target.scope1Kg > 0) {
-        const [gasKg, fleetKg] = [round4(target.scope1Kg * 0.8), round4(target.scope1Kg * 0.2)];
-        for (const [source, kg] of [["gas", gasKg], ["fleet", fleetKg]] as const) {
-          if (kg <= 0) continue;
-          const entry = await createActivityEntryWithCalculations(ctx, {
-            activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
-            siteId: site.id,
-            periodStart,
-            periodEnd,
-            rawValue: kg,
-            rawUnit: "kg",
-            enteredByUserId: owner.userId,
-            dataQualityTier: "TIER_3",
-          });
-          scope12EntryIds.push({ siteKey: site.key, month: target.month, entryId: entry.entry.id });
+        if (target.scope1Kg > 0) {
+          const [gasKg, fleetKg] = [round4(target.scope1Kg * 0.8), round4(target.scope1Kg * 0.2)];
+          await Promise.all(
+            ([["gas", gasKg], ["fleet", fleetKg]] as const).map(([source, kg]) => {
+              if (kg <= 0) return null;
+              return createActivityEntryWithCalculations(ctx, {
+                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
+                siteId: site.id,
+                periodStart,
+                periodEnd,
+                rawValue: kg,
+                rawUnit: "kg",
+                enteredByUserId: owner.userId,
+                dataQualityTier: "TIER_3",
+              });
+            }),
+          );
         }
-      }
-      if (target.scope2LocationKg > 0) {
-        const electricityKeys = target.siteKey === "central-digital" ? ["electricity-a", "electricity-b"] : ["electricity"];
-        const share = target.scope2LocationKg / electricityKeys.length;
-        for (const source of electricityKeys) {
-          const entry = await createActivityEntryWithCalculations(ctx, {
-            activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
-            siteId: site.id,
-            periodStart,
-            periodEnd,
-            rawValue: round4(share),
-            rawUnit: "kg",
-            enteredByUserId: owner.userId,
-            dataQualityTier: "TIER_3",
-          });
-          scope12EntryIds.push({ siteKey: site.key, month: target.month, entryId: entry.entry.id });
+        if (target.scope2LocationKg > 0) {
+          const electricityKeys = target.siteKey === "central-digital" ? ["electricity-a", "electricity-b"] : ["electricity"];
+          const share = target.scope2LocationKg / electricityKeys.length;
+          await Promise.all(
+            electricityKeys.map((source) =>
+              createActivityEntryWithCalculations(ctx, {
+                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
+                siteId: site.id,
+                periodStart,
+                periodEnd,
+                rawValue: round4(share),
+                rawUnit: "kg",
+                enteredByUserId: owner.userId,
+                dataQualityTier: "TIER_3",
+              }),
+            ),
+          );
         }
-      }
-    }
+      }),
+    );
 
     // Phase 2: run the real derived-Category-3 mechanism over the whole
     // 2026 window, then read its actual persisted result per site/month.
@@ -432,91 +439,100 @@ export class LiveSeedPort implements DemoSeedPort {
 
     // Phase 3: Scope 3 category 1/6/7 entries — category1 is whatever
     // scope3Allocation says is left after the *actual* derived category 3,
-    // never an independently invented number.
-    for (const target of targets2026) {
-      if (target.scope3Kg <= 0) continue;
-      const site = siteById.get(target.siteKey)!;
-      const periodStart = new Date(`${target.month}-01T00:00:00Z`);
-      const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
-      const derivedCat3Kg = derivedCat3BySiteMonth.get(`${site.id}:${target.month}`) ?? 0;
-      const { scope3Allocation } = await import("./board1");
-      const parts = scope3Allocation(target.scope3Kg, round4(derivedCat3Kg));
+    // never an independently invented number. Independent per site-month,
+    // so built concurrently for the same reason as Phase 1.
+    const { scope3Allocation } = await import("./board1");
+    await Promise.all(
+      targets2026
+        .filter((t) => t.scope3Kg > 0)
+        .map(async (target) => {
+          const site = siteById.get(target.siteKey)!;
+          const periodStart = new Date(`${target.month}-01T00:00:00Z`);
+          const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
+          const derivedCat3Kg = derivedCat3BySiteMonth.get(`${site.id}:${target.month}`) ?? 0;
+          const parts = scope3Allocation(target.scope3Kg, round4(derivedCat3Kg));
 
-      if (parts.category6Kg > 0) {
-        await createActivityEntryWithCalculations(ctx, {
-          activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.travel.factorCategory)!,
-          siteId: site.id, periodStart, periodEnd, rawValue: parts.category6Kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-        });
-      }
-      if (parts.category7Kg > 0) {
-        await createActivityEntryWithCalculations(ctx, {
-          activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.commuting.factorCategory)!,
-          siteId: site.id, periodStart, periodEnd, rawValue: parts.category7Kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-        });
-      }
-      if (parts.category1Kg > 0) {
-        const purchasedKeys = target.siteKey === "central-digital" ? ["services-a", "services-b", "services-c", "services-d"] : ["substrate", "services", "consumables"];
-        const share = parts.category1Kg / purchasedKeys.length;
-        for (const source of purchasedKeys) {
-          await createActivityEntryWithCalculations(ctx, {
-            activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
-            siteId: site.id, periodStart, periodEnd, rawValue: round4(share), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-          });
-        }
-      }
-    }
+          const writes: Promise<unknown>[] = [];
+          if (parts.category6Kg > 0) {
+            writes.push(createActivityEntryWithCalculations(ctx, {
+              activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.travel.factorCategory)!,
+              siteId: site.id, periodStart, periodEnd, rawValue: parts.category6Kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+            }));
+          }
+          if (parts.category7Kg > 0) {
+            writes.push(createActivityEntryWithCalculations(ctx, {
+              activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.commuting.factorCategory)!,
+              siteId: site.id, periodStart, periodEnd, rawValue: parts.category7Kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+            }));
+          }
+          if (parts.category1Kg > 0) {
+            const purchasedKeys = target.siteKey === "central-digital" ? ["services-a", "services-b", "services-c", "services-d"] : ["substrate", "services", "consumables"];
+            const share = parts.category1Kg / purchasedKeys.length;
+            for (const source of purchasedKeys) {
+              writes.push(createActivityEntryWithCalculations(ctx, {
+                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
+                siteId: site.id, periodStart, periodEnd, rawValue: round4(share), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+              }));
+            }
+          }
+          await Promise.all(writes);
+        }),
+    );
 
     // 2025 comparable window: same construction, but scope3 is entered as a
     // single "board1_purchased_goods" line per site-month (only the total
     // needs to reconcile; the fine category split is a 2026-only claim).
-    for (const target of targets2025) {
-      const site = siteById.get(target.siteKey)!;
-      const periodStart = new Date(`${target.month}-01T00:00:00Z`);
-      const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
-      if (target.scope1Kg > 0) {
-        const [gasKg, fleetKg] = [round4(target.scope1Kg * 0.8), round4(target.scope1Kg * 0.2)];
-        for (const [source, kg] of [["gas", gasKg], ["fleet", fleetKg]] as const) {
-          if (kg <= 0) continue;
-          await createActivityEntryWithCalculations(ctx, {
-            activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
-            siteId: site.id, periodStart, periodEnd, rawValue: kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-          });
+    await Promise.all(
+      targets2025.map(async (target) => {
+        const site = siteById.get(target.siteKey)!;
+        const periodStart = new Date(`${target.month}-01T00:00:00Z`);
+        const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
+        const writes: Promise<unknown>[] = [];
+        if (target.scope1Kg > 0) {
+          const [gasKg, fleetKg] = [round4(target.scope1Kg * 0.8), round4(target.scope1Kg * 0.2)];
+          for (const [source, kg] of [["gas", gasKg], ["fleet", fleetKg]] as const) {
+            if (kg <= 0) continue;
+            writes.push(createActivityEntryWithCalculations(ctx, {
+              activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
+              siteId: site.id, periodStart, periodEnd, rawValue: kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+            }));
+          }
         }
-      }
-      if (target.scope2LocationKg > 0) {
-        const electricityKeys = target.siteKey === "central-digital" ? ["electricity-a", "electricity-b"] : ["electricity"];
-        const share = target.scope2LocationKg / electricityKeys.length;
-        for (const source of electricityKeys) {
-          await createActivityEntryWithCalculations(ctx, {
-            activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
-            siteId: site.id, periodStart, periodEnd, rawValue: round4(share), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-          });
+        if (target.scope2LocationKg > 0) {
+          const electricityKeys = target.siteKey === "central-digital" ? ["electricity-a", "electricity-b"] : ["electricity"];
+          const share = target.scope2LocationKg / electricityKeys.length;
+          for (const source of electricityKeys) {
+            writes.push(createActivityEntryWithCalculations(ctx, {
+              activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
+              siteId: site.id, periodStart, periodEnd, rawValue: round4(share), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+            }));
+          }
         }
-      }
-      if (target.scope3Kg > 0) {
-        await createActivityEntryWithCalculations(ctx, {
-          activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.substrate.factorCategory)!,
-          siteId: site.id, periodStart, periodEnd, rawValue: round4(target.scope3Kg), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-        });
-      }
-    }
+        if (target.scope3Kg > 0) {
+          writes.push(createActivityEntryWithCalculations(ctx, {
+            activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.substrate.factorCategory)!,
+            siteId: site.id, periodStart, periodEnd, rawValue: round4(target.scope3Kg), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+          }));
+        }
+        await Promise.all(writes);
+      }),
+    );
 
-    // 192 real, independently reviewable source-period obligations.
-    for (const obligation of obligations) {
-      const site = siteById.get(obligation.siteKey)!;
-      await prisma.carbonSourcePeriodObligation.create({
-        data: {
-          organisationId: owner.organisationId,
-          siteId: site.id,
-          month: obligation.month,
-          sourceKey: obligation.source,
-          externalKey: obligation.externalKey,
-          status: "REVIEWED",
-          reviewedByMembershipId: owner.membershipId,
-          reviewedAt: new Date(),
-        },
-      });
-    }
+    // 192 real, independently reviewable source-period obligations — plain
+    // reference rows (no state machine of their own), so a single batched
+    // insert is appropriate.
+    await prisma.carbonSourcePeriodObligation.createMany({
+      data: obligations.map((obligation) => ({
+        organisationId: owner.organisationId,
+        siteId: siteById.get(obligation.siteKey)!.id,
+        month: obligation.month,
+        sourceKey: obligation.source,
+        externalKey: obligation.externalKey,
+        status: "REVIEWED",
+        reviewedByMembershipId: owner.membershipId,
+        reviewedAt: new Date(),
+      })),
+    });
   }
 
   // -------------------------------------------------------------------
