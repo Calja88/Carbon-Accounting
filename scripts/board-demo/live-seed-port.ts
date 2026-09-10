@@ -314,7 +314,24 @@ export class LiveSeedPort implements DemoSeedPort {
         publisher: "Synthetic demonstration fixture",
         sourceType: "OFFICIAL_DEFRA_DESNZ",
         vintageYear: 2026,
-        effectiveFrom: new Date("2020-01-01"),
+        // findFactorSet (entries-service.ts) is a global, non-tenant,
+        // category-blind lookup: "the EmissionFactorSet with this
+        // sourceType with the latest effectiveFrom <= asOfDate", with no
+        // tiebreaker beyond that date. The disposable checkpoint-a-postgres
+        // CI job runs multiple fixtures' worth of test files against one
+        // shared database, and tests/checkpoint-a/postgres.test.ts creates
+        // its own OFFICIAL_DEFRA_DESNZ set (the default sourceType) at the
+        // same "2020-01-01" this used to use — an exact tie that let
+        // Postgres's (undefined-order) tiebreak resolve to that sibling set
+        // instead of this one for categories both happen to define (only
+        // grid_electricity), and to FactorNotFoundError for every category
+        // only this one defines (confirmed via CI: Scope 1/3 came back 100%
+        // AWAITING_FACTOR, and Scope 2 calculated using that sibling test's
+        // own later-mutated co2eFactor 0.9 instead of this set's 1/0.5).
+        // Using a later date than any sibling fixture's — but still on or
+        // before this fixture's own earliest entry (2025-01, the prior
+        // comparable window) — resolves the tie in this set's favour.
+        effectiveFrom: new Date("2024-12-31"),
         isPlaceholder: true,
         notes: `${BOARD1.disclosure}. These factors exist only to make the BOARD-1 fixture's headline reconcile; they must never be used for real reporting.`,
       },
