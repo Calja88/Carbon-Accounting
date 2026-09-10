@@ -377,11 +377,18 @@ export class LiveSeedPort implements DemoSeedPort {
         // not kg, or calculateEmission's exact-unit-match check throws.
         { factorSetId: officialSet.id, scope: "SCOPE_1", category: "stationary_combustion_natural_gas", basis: "STANDARD", unit: "kWh", co2eFactor: "1" },
         { factorSetId: officialSet.id, scope: "SCOPE_1", category: "mobile_combustion_fuel", basis: "STANDARD", unit: "kg", co2eFactor: "1" },
-        { factorSetId: officialSet.id, scope: "SCOPE_2", category: "grid_electricity", basis: "LOCATION_BASED", unit: "kg", co2eFactor: "1" },
-        { factorSetId: officialSet.id, scope: "SCOPE_2", category: "grid_electricity", basis: "RESIDUAL_MIX", unit: "kg", co2eFactor: "0.5" },
-        { factorSetId: officialSet.id, scope: "SCOPE_3", category: "wtt_natural_gas", basis: "STANDARD", unit: "kg", co2eFactor: "0.05" },
+        // calculateScope2Dual (calc-engine.ts) hardcodes "kWh" as the input
+        // unit for every Scope 2 electricity calculation regardless of the
+        // entry's own canonical unit, so these two rows must be kWh too.
+        { factorSetId: officialSet.id, scope: "SCOPE_2", category: "grid_electricity", basis: "LOCATION_BASED", unit: "kWh", co2eFactor: "1" },
+        { factorSetId: officialSet.id, scope: "SCOPE_2", category: "grid_electricity", basis: "RESIDUAL_MIX", unit: "kWh", co2eFactor: "0.5" },
+        // Each WTT/T&D companion factor is applied against its SOURCE
+        // calculation's own inputUnit (deriveCategory3Calculations reuses
+        // source.inputUnit), so these must match gas ("kWh") and
+        // electricity ("kWh") — only fleet stays "kg".
+        { factorSetId: officialSet.id, scope: "SCOPE_3", category: "wtt_natural_gas", basis: "STANDARD", unit: "kWh", co2eFactor: "0.05" },
         { factorSetId: officialSet.id, scope: "SCOPE_3", category: "wtt_road_fuel", basis: "STANDARD", unit: "kg", co2eFactor: "0.05" },
-        { factorSetId: officialSet.id, scope: "SCOPE_3", category: "td_losses_electricity", basis: "STANDARD", unit: "kg", co2eFactor: "0.05" },
+        { factorSetId: officialSet.id, scope: "SCOPE_3", category: "td_losses_electricity", basis: "STANDARD", unit: "kWh", co2eFactor: "0.05" },
       ],
     });
     // Scope 3 purchased-goods/travel/commuting factors, resolved via the
@@ -472,7 +479,10 @@ export class LiveSeedPort implements DemoSeedPort {
                 periodStart,
                 periodEnd,
                 rawValue: round4(share),
-                rawUnit: "kg",
+                // calculateScope2Dual (calc-engine.ts) hardcodes "kWh" as
+                // the input unit for every Scope 2 electricity calculation,
+                // so the factor row and this entry must both be in kWh.
+                rawUnit: "kWh",
                 enteredByUserId: owner.userId,
                 dataQualityTier: "TIER_3",
               }),
@@ -566,7 +576,7 @@ export class LiveSeedPort implements DemoSeedPort {
           for (const source of electricityKeys) {
             writes.push(createActivityEntryWithCalculations(ctx, {
               activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
-              siteId: site.id, periodStart, periodEnd, rawValue: round4(share), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+              siteId: site.id, periodStart, periodEnd, rawValue: round4(share), rawUnit: "kWh", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
             }));
           }
         }
