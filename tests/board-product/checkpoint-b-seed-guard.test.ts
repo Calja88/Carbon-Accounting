@@ -69,29 +69,36 @@ describe("Checkpoint B fix 4 — trustworthy seed identity", () => {
   });
 
   it("a 'Synthetic ...'-named organisation only escapes the ordinary-organisation count when the environment independently proves disposable CI, never on name alone", async () => {
-    // Isolate the effect of THIS ONE probe org's own name, not an absolute
-    // count — the shared disposable CI database already carries several
+    // Each half below takes its own before/after pair under ONE fixed flag
+    // value — never comparing counts taken under different flag values to
+    // each other. The shared disposable CI database already carries several
     // other "Synthetic ..." orgs from sibling test files, and flipping
-    // CHECKPOINT_A_DISPOSABLE would swing the leniency for all of them at
-    // once, not just this one. Compare before/after creating the probe org
-    // under each setting instead.
+    // CHECKPOINT_A_DISPOSABLE mid-comparison would reveal all of THEIR
+    // leniency at once, not just this one probe's — the exact mistake this
+    // test previously made (CI-discovered: "expected 8 to be 1").
     const savedFlag = process.env.CHECKPOINT_A_DISPOSABLE;
+    const probeName = `Synthetic Checkpoint B Guard Probe ${randomUUID()}`;
     try {
       process.env.CHECKPOINT_A_DISPOSABLE = "1"; // the true, verified state throughout this CI job
-      const before = await new LiveSeedPort().readConnectedIdentity();
-
-      const org = await prisma.organisation.create({ data: { name: `Synthetic Checkpoint B Guard Probe ${randomUUID()}`, slug: `cb-guard-probe-${randomUUID()}` } });
+      const beforeDisposableProven = await new LiveSeedPort().readConnectedIdentity();
+      const probeUnderDisposableProven = await prisma.organisation.create({ data: { name: probeName, slug: `cb-guard-probe-${randomUUID()}` } });
       try {
         const withProbeDisposableProven = await new LiveSeedPort().readConnectedIdentity();
         // Genuinely disposable CI: the naming leniency exempts this "Synthetic ..." org — count unchanged.
-        expect(withProbeDisposableProven.ordinaryOrganisationCount).toBe(before.ordinaryOrganisationCount);
-
-        process.env.CHECKPOINT_A_DISPOSABLE = "0"; // simulate "not proven disposable" — the flag alone must never be enough either way
-        const withProbeNotProven = await new LiveSeedPort().readConnectedIdentity();
-        // Not independently proven disposable: naming leniency withdrawn — this org now counts as ordinary.
-        expect(withProbeNotProven.ordinaryOrganisationCount).toBe(withProbeDisposableProven.ordinaryOrganisationCount + 1);
+        expect(withProbeDisposableProven.ordinaryOrganisationCount).toBe(beforeDisposableProven.ordinaryOrganisationCount);
       } finally {
-        await prisma.organisation.delete({ where: { id: org.id } });
+        await prisma.organisation.delete({ where: { id: probeUnderDisposableProven.id } });
+      }
+
+      process.env.CHECKPOINT_A_DISPOSABLE = "0"; // simulate "not proven disposable" — the flag alone must never be enough either way
+      const beforeNotProven = await new LiveSeedPort().readConnectedIdentity();
+      const probeUnderNotProven = await prisma.organisation.create({ data: { name: probeName, slug: `cb-guard-probe-${randomUUID()}` } });
+      try {
+        const withProbeNotProven = await new LiveSeedPort().readConnectedIdentity();
+        // Not independently proven disposable: naming leniency withdrawn — this same-named org now counts as ordinary.
+        expect(withProbeNotProven.ordinaryOrganisationCount).toBe(beforeNotProven.ordinaryOrganisationCount + 1);
+      } finally {
+        await prisma.organisation.delete({ where: { id: probeUnderNotProven.id } });
       }
     } finally {
       if (savedFlag === undefined) delete process.env.CHECKPOINT_A_DISPOSABLE; else process.env.CHECKPOINT_A_DISPOSABLE = savedFlag;

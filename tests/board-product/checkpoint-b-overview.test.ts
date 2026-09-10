@@ -60,8 +60,16 @@ beforeAll(async () => {
   foreignPointId = (await prisma.activityDataPoint.create({
     data: { code: `CB-FOREIGN-${tag}`, scope: "SCOPE_2", category: "Synthetic electricity", dataPointName: "Synthetic electricity", promptTemplate: "Synthetic", unitOptions: ["kWh"], frequency: "Monthly", defaultTier: "TIER_2", formType: "QUANTITY", buildPriority: "CI", factorCategory: "grid_electricity" },
   })).id;
+  // This test writes its Calculation rows directly (never through the live
+  // findFactorSet/resolveFactorMultiSource lookup), so this set's own
+  // effectiveFrom is irrelevant to its own correctness — but findFactorSet
+  // is a GLOBAL, non-tenant, category-blind "most recent effectiveFrom"
+  // lookup other real fixtures (e.g. BOARD-1) DO depend on, so this date
+  // must never collide with (or postdate) one of theirs. BOARD-1's own set
+  // uses 2024-12-31 specifically to win that race; this uses a distinct,
+  // earlier date so it can never shadow it.
   const factorSetId = (await prisma.emissionFactorSet.create({
-    data: { name: "Synthetic CB factors", publisher: "Synthetic", vintageYear: 2026, effectiveFrom: new Date("2024-12-31"), isPlaceholder: true },
+    data: { name: "Synthetic CB factors", publisher: "Synthetic", vintageYear: 2026, effectiveFrom: new Date("2021-06-01"), isPlaceholder: true },
   })).id;
   const locationFactor = await prisma.emissionFactor.create({ data: { factorSetId, scope: "SCOPE_2", category: "grid_electricity", basis: "LOCATION_BASED", unit: "kWh", co2eFactor: 1 } });
   await prisma.emissionFactor.create({ data: { factorSetId, scope: "SCOPE_2", category: "grid_electricity", basis: "RESIDUAL_MIX", unit: "kWh", co2eFactor: 0.5 } });

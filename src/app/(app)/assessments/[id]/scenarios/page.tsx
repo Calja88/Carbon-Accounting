@@ -129,6 +129,10 @@ export default async function ScenariosPage({ params }: { params: Promise<{ id: 
               <Notice tone="warning">This scenario has not been calculated yet.</Notice>
             ) : !comparison ? (
               <Notice tone="warning">The baseline has no calculated result to compare against.</Notice>
+            ) : !boardModel ? (
+              <Notice tone="warning">This scenario cannot be verified as comparable right now — the percentage and contribution breakdown are withheld.</Notice>
+            ) : !boardModel.comparable ? (
+              <Notice tone="warning">{boardModel.reason ?? "This scenario is not comparable to the baseline right now."}</Notice>
             ) : (
               <>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

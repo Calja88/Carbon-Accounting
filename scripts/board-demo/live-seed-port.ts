@@ -933,6 +933,13 @@ export class LiveSeedPort implements DemoSeedPort {
       reference: "BOARD1-LCA-001",
       title: plan.product,
       boundary: "CRADLE_TO_GATE",
+      // Explicit declared unit — cloneAssessment copies these fields
+      // verbatim onto the scenario, so both sides genuinely share a unit
+      // instead of relying on the schema's null default.
+      functionalUnitDescription: plan.declaredUnit,
+      functionalUnitQuantity: "1",
+      functionalUnitUnit: "item",
+      isDeclaredUnit: true,
       actorUserId: owner.userId,
     });
     this.lcaAssessmentId = baseline.id;

@@ -23,7 +23,11 @@ const tag = randomUUID();
 const grants = ["carbon.view", "ems.view", "ems.management_review.manage"];
 
 async function membership(org: string, name: string) {
-  const user = await prisma.user.create({ data: { name: `Synthetic ${name}`, email: `${tag}-${name}@example.invalid`, passwordHash: "not-a-login-hash", role: "DATA_OWNER" } });
+  // Each call must get its own email — this helper is called once per test
+  // (not once per file), and a shared `${tag}-${name}` would collide across
+  // the two "owner" memberships created by the two race tests below (CI-
+  // discovered: unique constraint failed on `email`).
+  const user = await prisma.user.create({ data: { name: `Synthetic ${name}`, email: `${tag}-${name}-${randomUUID()}@example.invalid`, passwordHash: "not-a-login-hash", role: "DATA_OWNER" } });
   const m = await prisma.organisationMembership.create({ data: { organisationId: org, userId: user.id, status: "ACTIVE", accessMode: "ORGANISATION_WIDE" } });
   const role = await prisma.roleDefinition.create({ data: { organisationId: org, name: `Synthetic ${name}` } });
   await prisma.rolePermission.createMany({ data: grants.map((permissionCode) => ({ organisationId: org, roleId: role.id, permissionCode })) });
