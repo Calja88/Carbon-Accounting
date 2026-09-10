@@ -195,7 +195,36 @@ export class LiveSeedPort implements DemoSeedPort {
   async verifyExistingFixture(): Promise<void> {
     await this.resolveExistingOrganisation();
     if (!this.organisationId) throw new Error("Fixture is marked READY but its organisation cannot be found.");
+    await this.resolveExistingFixtureState(this.organisationId);
     await this.verifyAllInvariants();
+  }
+
+  /**
+   * verifyAllInvariants reads several ids off `this` (evidenceIdByKey,
+   * lcaAssessmentId/lcaScenarioId, managementPackId, nonconformityId) that a
+   * fresh build populates as it goes — but a replay runs on a brand-new
+   * LiveSeedPort instance (per DemoSeedPort's contract, seedBoardDemo never
+   * assumes port state survives between calls), so verifyExistingFixture
+   * must re-derive every one of them from what's actually persisted.
+   */
+  private async resolveExistingFixtureState(organisationId: string): Promise<void> {
+    const evidenceRows = await prisma.evidenceObject.findMany({ where: { organisationId } });
+    const evidenceByFileName = new Map(evidenceRows.map((row) => [row.filename, row.id]));
+    for (const file of buildSyntheticEvidence()) {
+      const id = evidenceByFileName.get(file.name);
+      if (id) this.evidenceIdByKey.set(file.key, id);
+    }
+
+    const baseline = await prisma.lcaAssessment.findFirst({ where: { organisationId, reference: "BOARD1-LCA-001" } });
+    this.lcaAssessmentId = baseline?.id ?? null;
+    const scenario = await prisma.lcaAssessment.findFirst({ where: { organisationId, reference: "BOARD1-LCA-001-S1" } });
+    this.lcaScenarioId = scenario?.id ?? null;
+
+    const pack = await prisma.managementReviewPack.findFirst({ where: { organisationId } });
+    this.managementPackId = pack?.id ?? null;
+
+    const nc = await prisma.nonconformity.findFirst({ where: { organisationId, reference: { startsWith: "BOARD1-NC-" } } });
+    this.nonconformityId = nc?.id ?? null;
   }
 
   private async resolveExistingOrganisation(): Promise<void> {
