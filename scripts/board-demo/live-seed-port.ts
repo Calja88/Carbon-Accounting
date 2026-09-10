@@ -104,16 +104,27 @@ export class LiveSeedPort implements DemoSeedPort {
     // disposable checkpoint-a-postgres CI job intentionally shares one
     // database across every real-Postgres test file; every one of those
     // fixtures — Checkpoint A, BD06, BD08's own concurrency test — names its
-    // organisation "Synthetic ..." by established convention). On a
-    // genuinely disposable single-purpose demo database there is nothing
-    // else present at all, so this check is unchanged there: zero either way.
+    // organisation "Synthetic ..." by established convention).
+    //
+    // This name-based leniency must NEVER influence the actual persistent-
+    // demo trust decision — it is gated on CHECKPOINT_A_DISPOSABLE=1, the
+    // exact same independent signal tests/checkpoint-a/disposable.ts already
+    // requires to prove "this is definitely the CI-only disposable loopback
+    // database" before anything runs. A real target never has that variable
+    // set, so a real environment always uses the strict, name-independent
+    // check — an organisation is "ordinary" there purely by not carrying
+    // this fixture's own slug prefix, exactly as the Astra guard contract
+    // requires (verified database identity, not organisation naming).
+    const isDisposableCiSuite = process.env.CHECKPOINT_A_DISPOSABLE === "1";
     const ordinaryOrganisationCount = await prisma.organisation.count({
-      where: {
-        AND: [
-          { NOT: { slug: { startsWith: FIXTURE_ORGANISATION_SLUG_PREFIX } } },
-          { NOT: { name: { startsWith: "Synthetic " } } },
-        ],
-      },
+      where: isDisposableCiSuite
+        ? {
+            AND: [
+              { NOT: { slug: { startsWith: FIXTURE_ORGANISATION_SLUG_PREFIX } } },
+              { NOT: { name: { startsWith: "Synthetic " } } },
+            ],
+          }
+        : { NOT: { slug: { startsWith: FIXTURE_ORGANISATION_SLUG_PREFIX } } },
     });
     if (!manifest) {
       // Fails closed: assertDemoTarget will reject an empty actualDatabaseId/
