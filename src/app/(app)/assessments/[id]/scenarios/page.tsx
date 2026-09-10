@@ -14,6 +14,8 @@ import { ContributionBarChart } from "@/components/charts/contribution-bar-chart
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable, EmptyState, Notice, PageHeading, SectionCard, Stat, StatusBadge, Td } from "@/components/lca/ui";
+import { LcaScenario } from "@/components/board/lca-scenario";
+import { getLcaScenarioModel } from "@/lib/board/live-lca";
 import { CreateScenarioForm } from "./scenario-forms";
 import { recalculateScenarioAction } from "../../actions";
 
@@ -50,10 +52,12 @@ export default async function ScenariosPage({ params }: { params: Promise<{ id: 
       const run = await getLatestRun(scenario.id);
       const rows = run ? resultsToAnalysisRows(run.results) : [];
       const totals = run ? runTotals(run) : null;
+      const boardModel = await getLcaScenarioModel(context, scenario.id);
       return {
         scenario,
         run,
         totals,
+        boardModel,
         comparison:
           baselineRun && run && baselineTotals && totals
             ? compareScenario(
@@ -90,7 +94,7 @@ export default async function ScenariosPage({ params }: { params: Promise<{ id: 
           description="Create one to test a change — a different material, a supplier with a lower footprint, a shorter freight route — without touching the assessment itself."
         />
       ) : (
-        comparisons.map(({ scenario, run, totals, comparison }) => (
+        comparisons.map(({ scenario, run, totals, comparison, boardModel }) => (
           <SectionCard
             key={scenario.id}
             title={scenario.title}
@@ -116,6 +120,11 @@ export default async function ScenariosPage({ params }: { params: Promise<{ id: 
               </div>
             }
           >
+            {boardModel && (
+              <div className="mb-5">
+                <LcaScenario model={boardModel} />
+              </div>
+            )}
             {!run ? (
               <Notice tone="warning">This scenario has not been calculated yet.</Notice>
             ) : !comparison ? (
