@@ -341,18 +341,17 @@ export class LiveSeedPort implements DemoSeedPort {
     // WTT/T&D-losses companion factors so the real Category 3 derivation
     // engine (scope3-derived.ts) has something to find — a small, plausible
     // rate that leaves room under the 15%/5% travel/commuting envelope.
-    const wttSet = await prisma.emissionFactorSet.create({
-      data: {
-        name: "BOARD-1 demo WTT/T&D factors — not for reporting",
-        publisher: "Synthetic demonstration fixture",
-        sourceType: "OFFICIAL_DEFRA_DESNZ",
-        vintageYear: 2026,
-        effectiveFrom: new Date("2020-01-02"),
-        isPlaceholder: true,
-        notes: `${BOARD1.disclosure}. Well-to-tank/T&D-losses companion factors for the fixture's own derived Category 3.`,
-      },
-    });
-    this.wttFactorSetId = wttSet.id;
+    //
+    // These MUST live in the same EmissionFactorSet as the Scope 1/2
+    // factors below, not a second OFFICIAL_DEFRA_DESNZ set: findFactorSet
+    // (entries-service.ts) is a global, non-tenant, category-blind lookup —
+    // "most recent EmissionFactorSet with this sourceType effective by this
+    // date" — so a second set with a later effectiveFrom would shadow this
+    // one for every Scope 1/2 and Scope 3 board1_* lookup, not just the WTT
+    // categories it was meant to add. (Confirmed via CI: with a separate,
+    // later-dated WTT set, every Scope 1/2/3 entry silently resolved no
+    // factor and the fixture's reconciled total came back as 0.)
+    this.wttFactorSetId = officialSet.id;
     await prisma.emissionFactor.createMany({
       data: [
         // toCanonicalUnit (src/lib/units.ts) hardcodes natural gas as the one
@@ -363,9 +362,9 @@ export class LiveSeedPort implements DemoSeedPort {
         { factorSetId: officialSet.id, scope: "SCOPE_1", category: "mobile_combustion_fuel", basis: "STANDARD", unit: "kg", co2eFactor: "1" },
         { factorSetId: officialSet.id, scope: "SCOPE_2", category: "grid_electricity", basis: "LOCATION_BASED", unit: "kg", co2eFactor: "1" },
         { factorSetId: officialSet.id, scope: "SCOPE_2", category: "grid_electricity", basis: "RESIDUAL_MIX", unit: "kg", co2eFactor: "0.5" },
-        { factorSetId: wttSet.id, scope: "SCOPE_3", category: "wtt_natural_gas", basis: "STANDARD", unit: "kg", co2eFactor: "0.05" },
-        { factorSetId: wttSet.id, scope: "SCOPE_3", category: "wtt_road_fuel", basis: "STANDARD", unit: "kg", co2eFactor: "0.05" },
-        { factorSetId: wttSet.id, scope: "SCOPE_3", category: "td_losses_electricity", basis: "STANDARD", unit: "kg", co2eFactor: "0.05" },
+        { factorSetId: officialSet.id, scope: "SCOPE_3", category: "wtt_natural_gas", basis: "STANDARD", unit: "kg", co2eFactor: "0.05" },
+        { factorSetId: officialSet.id, scope: "SCOPE_3", category: "wtt_road_fuel", basis: "STANDARD", unit: "kg", co2eFactor: "0.05" },
+        { factorSetId: officialSet.id, scope: "SCOPE_3", category: "td_losses_electricity", basis: "STANDARD", unit: "kg", co2eFactor: "0.05" },
       ],
     });
     // Scope 3 purchased-goods/travel/commuting factors, resolved via the
