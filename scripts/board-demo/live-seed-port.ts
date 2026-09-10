@@ -378,8 +378,7 @@ export class LiveSeedPort implements DemoSeedPort {
     // building them concurrently across targets is safe (real-Postgres CI
     // proved the fully sequential version correct but far too slow —
     // ~300 sequential real-service round trips exceeded a 5-minute budget).
-    await Promise.all(
-      targets2026.map(async (target) => {
+    await mapWithConcurrency(targets2026, 4, async (target) => {
         const site = siteById.get(target.siteKey)!;
         const periodStart = new Date(`${target.month}-01T00:00:00Z`);
         const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
@@ -420,8 +419,7 @@ export class LiveSeedPort implements DemoSeedPort {
             ),
           );
         }
-      }),
-    );
+      });
 
     // Phase 2: run the real derived-Category-3 mechanism over the whole
     // 2026 window, then read its actual persisted result per site/month.
@@ -442,10 +440,10 @@ export class LiveSeedPort implements DemoSeedPort {
     // never an independently invented number. Independent per site-month,
     // so built concurrently for the same reason as Phase 1.
     const { scope3Allocation } = await import("./board1");
-    await Promise.all(
-      targets2026
-        .filter((t) => t.scope3Kg > 0)
-        .map(async (target) => {
+    await mapWithConcurrency(
+      targets2026.filter((t) => t.scope3Kg > 0),
+      4,
+      async (target) => {
           const site = siteById.get(target.siteKey)!;
           const periodStart = new Date(`${target.month}-01T00:00:00Z`);
           const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
@@ -476,14 +474,13 @@ export class LiveSeedPort implements DemoSeedPort {
             }
           }
           await Promise.all(writes);
-        }),
+      },
     );
 
     // 2025 comparable window: same construction, but scope3 is entered as a
     // single "board1_purchased_goods" line per site-month (only the total
     // needs to reconcile; the fine category split is a 2026-only claim).
-    await Promise.all(
-      targets2025.map(async (target) => {
+    await mapWithConcurrency(targets2025, 4, async (target) => {
         const site = siteById.get(target.siteKey)!;
         const periodStart = new Date(`${target.month}-01T00:00:00Z`);
         const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
@@ -515,8 +512,7 @@ export class LiveSeedPort implements DemoSeedPort {
           }));
         }
         await Promise.all(writes);
-      }),
-    );
+      });
 
     // 192 real, independently reviewable source-period obligations — plain
     // reference rows (no state machine of their own), so a single batched
@@ -917,6 +913,28 @@ export class LiveSeedPort implements DemoSeedPort {
   async markFixtureReady(version: string, digest: string): Promise<void> {
     await prisma.demoFixtureLease.update({ where: { fixtureKey: version }, data: { status: "READY", digest } });
   }
+}
+
+/**
+ * Runs `fn` over `items` with at most `concurrency` in flight at once.
+ * The disposable CI Postgres caps DATABASE_URL at connection_limit=6 (see
+ * .github/workflows/checkpoint-a-postgres.yml), and withExclusiveFixtureLease
+ * holds one of those for the whole seed — firing all 48 carbon targets at
+ * once starved the pool and made the "parallel" version no faster than
+ * sequential. A small bounded concurrency gets the real speedup without
+ * exhausting the pool.
+ */
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+  return results;
 }
 
 function round4(n: number): number {
