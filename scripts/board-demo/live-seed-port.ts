@@ -208,11 +208,19 @@ export class LiveSeedPort implements DemoSeedPort {
    * must re-derive every one of them from what's actually persisted.
    */
   private async resolveExistingFixtureState(organisationId: string): Promise<void> {
+    // createImprovementChain deliberately re-links some of these same
+    // filenames onto separate control-check/nonconformity evidence records
+    // with their own distinct bytes (e.g. "BOARD-1-inspection.txt" is
+    // linked again via uploadEvidenceToControlCheck as inspection-checklist
+    // evidence) — so filename alone doesn't uniquely identify the row
+    // storeEvidence originally created. Matching by filename AND checksum
+    // together does, since buildSyntheticEvidence()'s bytes are
+    // deterministic and every collision above intentionally uses different
+    // content.
     const evidenceRows = await prisma.evidenceObject.findMany({ where: { organisationId } });
-    const evidenceByFileName = new Map(evidenceRows.map((row) => [row.filename, row.id]));
     for (const file of buildSyntheticEvidence()) {
-      const id = evidenceByFileName.get(file.name);
-      if (id) this.evidenceIdByKey.set(file.key, id);
+      const row = evidenceRows.find((r) => r.filename === file.name && r.checksumSha256 === file.sha256);
+      if (row) this.evidenceIdByKey.set(file.key, row.id);
     }
 
     const baseline = await prisma.lcaAssessment.findFirst({ where: { organisationId, reference: "BOARD1-LCA-001" } });
