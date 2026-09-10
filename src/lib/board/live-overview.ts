@@ -14,7 +14,7 @@ import { buildCarbonSection, type AuthorizedAnalyticsWindow, type WindowCoverage
 import { actionAttention, actionCounts, mergeAttention } from "./attention";
 import type { OverviewModel, AttentionItem, Coverage } from "./contracts";
 import {
-  unknownCoverage, carbonGapAttention, mapCanonicalActionRows, monthKeyOf, monthKeysInRange, priorYear, monthStringToDate,
+  carbonGapAttention, mapCanonicalActionRows, monthKeyOf, monthKeysInRange, priorYear, monthStringToDate,
 } from "./live-overview-helpers";
 
 /**
@@ -46,19 +46,43 @@ export interface OverviewSearchParams {
   siteId?: string;
 }
 
+function emptyCoverage(): Coverage {
+  return { expected: null, received: 0, reviewed: 0, excluded: 0, awaitingFactor: 0, flagged: 0 };
+}
+
+/** Sums a set of same-shaped coverage cells; `expected` stays known only when every contributing cell is. */
+function sumCoverage(cells: readonly Coverage[]): Coverage {
+  const known = cells.every((c) => c.expected !== null);
+  return {
+    expected: known ? cells.reduce((sum, c) => sum + (c.expected ?? 0), 0) : null,
+    received: cells.reduce((sum, c) => sum + c.received, 0),
+    reviewed: cells.reduce((sum, c) => sum + c.reviewed, 0),
+    excluded: cells.reduce((sum, c) => sum + c.excluded, 0),
+    awaitingFactor: cells.reduce((sum, c) => sum + c.awaitingFactor, 0),
+    flagged: cells.reduce((sum, c) => sum + c.flagged, 0),
+  };
+}
+
 /**
- * Real Coverage derived from ActivityEntry rows actually submitted for the
- * window — never a fabricated "expected" denominator. There is no live
- * expected-submission-obligation model for Carbon yet (confirmed by
- * inspection: no such service exists anywhere in src/lib), so `expected`
- * stays `null` (unknown) at every level rather than inventing one — the
- * adapter's own `assertCoverageWindow` explicitly allows a uniformly-null
- * `expected` and skips its reconciliation check in that case. `received`,
- * `reviewed`, `excluded`, `awaitingFactor` and `flagged` are all real
- * counts, bucketed by the same periodStart-derived month key convention
- * `analytics-service.ts`'s own `buildMonthly` already uses, so site+month
- * coverage always reconciles with the group total by construction (every
- * row is counted in exactly one site bucket and one month bucket).
+ * Real Coverage, computed one (site, month) cell at a time from whichever
+ * source is truer for that exact cell:
+ *  - When genuine `CarbonSourcePeriodObligation` rows exist for it, they are
+ *    the real denominator — an independent, source-period review decision
+ *    distinct from entry-level QA, so `expected`/`reviewed`/`excluded` come
+ *    from the obligations themselves, and `received`/`awaitingFactor`/
+ *    `flagged` from the exact `ActivityEntry` each one is genuinely bound
+ *    to (`submittedActivityEntryId`, never populated without a real
+ *    persisted entry to point to).
+ *  - Otherwise, the same `ActivityEntry`-derived fallback this always used —
+ *    an organisation that has never adopted source-period obligations for a
+ *    given site/month never regresses to a fabricated denominator or a
+ *    metric wrongly reported "missing".
+ * A cell is decided once and contributes to exactly its own site bucket,
+ * its own month bucket and the group, so site+month coverage always
+ * reconciles with the group total by construction — and `expected` on any
+ * aggregate stays known only when every cell it sums is (never a known
+ * group denominator built over an unknown site/month, per the adapter's own
+ * `assertCoverageWindow`).
  */
 async function computeCoverageWindow(
   context: OrganisationContext,
@@ -68,29 +92,77 @@ async function computeCoverageWindow(
 ): Promise<WindowCoverage> {
   const ctx = toTenantRepositoryContext(context);
   const months = monthKeysInRange(periodStart, periodEnd);
-  const siteCoverage: Record<string, Coverage> = Object.fromEntries(siteIds.map((id) => [id, unknownCoverage()]));
-  const monthCoverage: Record<string, Coverage> = Object.fromEntries(months.map((m) => [m, unknownCoverage()]));
-  const group = unknownCoverage();
+  const siteCoverage: Record<string, Coverage> = Object.fromEntries(siteIds.map((id) => [id, emptyCoverage()]));
+  const monthCoverage: Record<string, Coverage> = Object.fromEntries(months.map((m) => [m, emptyCoverage()]));
+  if (siteIds.length === 0 || months.length === 0) return { group: emptyCoverage(), sites: siteCoverage, months: monthCoverage };
 
-  if (siteIds.length > 0) {
-    const rows = await prisma.activityEntry.findMany({
-      where: tenantWhere(ctx, { siteId: { in: [...siteIds] }, periodStart: { gte: periodStart, lte: periodEnd } }),
-      select: { siteId: true, periodStart: true, status: true },
-    });
-    for (const row of rows) {
-      const monthKey = monthKeyOf(row.periodStart);
-      const site = siteCoverage[row.siteId];
-      const month = monthCoverage[monthKey];
-      if (!site || !month) continue; // outside the requested site/month set — never happens given the query's own filters, but fail closed rather than miscount
-      for (const bucket of [site, month, group]) {
-        bucket.received += 1;
-        if (row.status === "APPROVED") bucket.reviewed += 1;
-        else if (row.status === "REJECTED") bucket.excluded += 1;
-        else if (row.status === "AWAITING_FACTOR") bucket.awaitingFactor += 1;
-        else if (row.status === "FLAGGED") bucket.flagged += 1;
+  const cellKey = (siteId: string, month: string) => `${siteId} ${month}`;
+
+  const entryRows = await prisma.activityEntry.findMany({
+    where: tenantWhere(ctx, { siteId: { in: [...siteIds] }, periodStart: { gte: periodStart, lte: periodEnd } }),
+    select: { siteId: true, periodStart: true, status: true },
+  });
+  const entriesByCell = new Map<string, typeof entryRows>();
+  for (const row of entryRows) {
+    const key = cellKey(row.siteId, monthKeyOf(row.periodStart));
+    const list = entriesByCell.get(key);
+    if (list) list.push(row);
+    else entriesByCell.set(key, [row]);
+  }
+
+  const obligationRows = await prisma.carbonSourcePeriodObligation.findMany({
+    where: tenantWhere<Prisma.CarbonSourcePeriodObligationWhereInput>(ctx, {
+      siteId: { in: [...siteIds] },
+      month: { gte: months[0], lte: months[months.length - 1] },
+    }),
+    select: { siteId: true, month: true, status: true, submittedActivityEntryId: true },
+  });
+  const obligationsByCell = new Map<string, typeof obligationRows>();
+  for (const row of obligationRows) {
+    const key = cellKey(row.siteId, row.month);
+    const list = obligationsByCell.get(key);
+    if (list) list.push(row);
+    else obligationsByCell.set(key, [row]);
+  }
+  const linkedEntryIds = obligationRows.map((o) => o.submittedActivityEntryId).filter((id): id is string => id !== null);
+  const linkedEntries = linkedEntryIds.length
+    ? await prisma.activityEntry.findMany({ where: { id: { in: linkedEntryIds } }, select: { id: true, status: true } })
+    : [];
+  const linkedEntryStatusById = new Map(linkedEntries.map((e) => [e.id, e.status]));
+
+  const cells = new Map<string, Coverage>();
+  for (const siteId of siteIds) {
+    for (const month of months) {
+      const key = cellKey(siteId, month);
+      const obligationsForCell = obligationsByCell.get(key);
+      const cell = emptyCoverage();
+      if (obligationsForCell && obligationsForCell.length > 0) {
+        cell.expected = 0;
+        for (const obligation of obligationsForCell) {
+          cell.expected += 1;
+          if (obligation.submittedActivityEntryId) cell.received += 1;
+          if (obligation.status === "REVIEWED") cell.reviewed += 1;
+          else if (obligation.status === "EXCLUDED") cell.excluded += 1;
+          const entryStatus = obligation.submittedActivityEntryId ? linkedEntryStatusById.get(obligation.submittedActivityEntryId) : undefined;
+          if (entryStatus === "AWAITING_FACTOR") cell.awaitingFactor += 1;
+          else if (entryStatus === "FLAGGED") cell.flagged += 1;
+        }
+      } else {
+        for (const row of entriesByCell.get(key) ?? []) {
+          cell.received += 1;
+          if (row.status === "APPROVED") cell.reviewed += 1;
+          else if (row.status === "REJECTED") cell.excluded += 1;
+          else if (row.status === "AWAITING_FACTOR") cell.awaitingFactor += 1;
+          else if (row.status === "FLAGGED") cell.flagged += 1;
+        }
       }
+      cells.set(key, cell);
     }
   }
+
+  for (const siteId of siteIds) siteCoverage[siteId] = sumCoverage(months.map((m) => cells.get(cellKey(siteId, m))!));
+  for (const month of months) monthCoverage[month] = sumCoverage(siteIds.map((s) => cells.get(cellKey(s, month))!));
+  const group = sumCoverage([...cells.values()]);
   return { group, sites: siteCoverage, months: monthCoverage };
 }
 
@@ -102,7 +174,18 @@ function toAnalyticsWindow(snapshot: AnalyticsSnapshot): AuthorizedAnalyticsWind
   };
 }
 
-/** Real Scope 3 category coverage from the emission-factor/data-point catalogue and this period's own calculations — never a fixture constant. */
+/**
+ * Real Scope 3 category coverage from the emission-factor/data-point
+ * catalogue and this period's own calculations — never a fixture constant.
+ *
+ * Grouped by `scope3Category` (the canonical GHG Protocol category label,
+ * e.g. "Cat 1 — Purchased goods & services"), never by the catalogue's
+ * free-text `category` display label: two data points legitimately share a
+ * generic display category while representing different canonical Scope 3
+ * categories (or, as BOARD-1 previously did, every data point regardless of
+ * scope shared the same display category), which would silently collapse
+ * or miscount canonical categories.
+ */
 async function computeScope3CategoryCoverage(
   context: OrganisationContext,
   siteIds: readonly string[],
@@ -110,22 +193,28 @@ async function computeScope3CategoryCoverage(
   periodEnd: Date,
 ): Promise<{ quantifiedCategories: number; screenedCategories: number }> {
   const screened = await prisma.activityDataPoint.findMany({
-    where: { scope: "SCOPE_3" },
-    select: { category: true },
-    distinct: ["category"],
+    where: { scope: "SCOPE_3", scope3Category: { not: null } },
+    select: { scope3Category: true },
+    distinct: ["scope3Category"],
   });
   if (siteIds.length === 0) return { quantifiedCategories: 0, screenedCategories: screened.length };
   const ctx = toTenantRepositoryContext(context);
   const quantified = await prisma.calculation.findMany({
     where: tenantWhere<Prisma.CalculationWhereInput>(ctx, {
       scope: "SCOPE_3",
+      scope3Category: { not: null },
       resultKgCo2e: { gt: 0 },
       activityEntry: { is: { siteId: { in: [...siteIds] }, periodStart: { gte: periodStart, lte: periodEnd } } },
     }),
-    select: { activityEntry: { select: { activityDataPoint: { select: { category: true } } } } },
-    distinct: ["activityEntryId"],
+    // Grouped on Calculation.scope3Category directly, never the entry's
+    // ActivityDataPoint — a derived Category 3 calculation (scope3-derived.ts)
+    // hangs off another data point's own entry (e.g. electricity) entirely,
+    // and copies its category onto the calculation for exactly this reason
+    // (schema comment on ActivityDataPoint.scope3Category).
+    select: { scope3Category: true },
+    distinct: ["scope3Category"],
   });
-  const categories = new Set(quantified.map((c) => c.activityEntry.activityDataPoint.category));
+  const categories = new Set(quantified.map((c) => c.scope3Category).filter((c): c is string => c !== null));
   return { quantifiedCategories: categories.size, screenedCategories: screened.length };
 }
 

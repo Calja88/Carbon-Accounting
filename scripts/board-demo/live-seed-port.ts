@@ -590,7 +590,11 @@ export class LiveSeedPort implements DemoSeedPort {
         create: {
           code: `BOARD1-${def.factorCategory}`,
           scope: def.scope,
-          category: "BOARD-1 demonstration",
+          // A real, distinct display category per source — never the same
+          // generic label across every data point regardless of scope,
+          // which would collapse Scope 3 "screened category" coverage into
+          // a single, meaningless bucket (Checkpoint B fix 2).
+          category: def.factorCategory.replace(/_/g, " "),
           dataPointName: `BOARD-1 ${sourceKey}`,
           promptTemplate: "Synthetic BOARD-1 fixture input.",
           unitOptions: ["kg"],
@@ -821,22 +825,51 @@ export class LiveSeedPort implements DemoSeedPort {
 
     trace("carbon 2025 window done");
 
-    // 192 real, independently reviewable source-period obligations — plain
-    // reference rows (no state machine of their own), so a single batched
-    // insert is appropriate.
-    await prisma.carbonSourcePeriodObligation.createMany({
-      data: obligations.map((obligation) => ({
+    // Checkpoint B fix 2: 192 real, independently reviewable source-period
+    // obligations for 2026, each genuinely bound (submittedActivityEntryId)
+    // to the exact ActivityEntry its review actually covers — never a
+    // dangling reference row the Overview's coverage metric can't trace
+    // back to real submitted/reviewed data.
+    async function linkedObligationRow(row: { siteKey: string; month: string; source: string; externalKey: string }) {
+      const site = siteById.get(row.siteKey)!;
+      const periodStart = new Date(`${row.month}-01T00:00:00Z`);
+      const entry = await prisma.activityEntry.findFirst({
+        where: { organisationId: owner.organisationId, siteId: site.id, periodStart, activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[row.source].factorCategory) },
+        select: { id: true },
+      });
+      return {
         organisationId: owner.organisationId,
-        siteId: siteById.get(obligation.siteKey)!.id,
-        month: obligation.month,
-        sourceKey: obligation.source,
-        externalKey: obligation.externalKey,
-        status: "REVIEWED",
-        reviewedByMembershipId: owner.membershipId,
-        reviewedAt: new Date(),
-      })),
-    });
+        siteId: site.id,
+        month: row.month,
+        sourceKey: row.source,
+        externalKey: row.externalKey,
+        status: entry ? "REVIEWED" : "REVIEW_REQUIRED",
+        reviewedByMembershipId: entry ? owner.membershipId : null,
+        reviewedAt: entry ? new Date() : null,
+        submittedActivityEntryId: entry?.id ?? null,
+      };
+    }
+    const currentObligationRows = await Promise.all(obligations.map(linkedObligationRow));
+    await prisma.carbonSourcePeriodObligation.createMany({ data: currentObligationRows });
     trace("carbon obligations createMany done");
+
+    // A genuine prior-comparable (2025) obligation set, at the coarser
+    // granularity 2025 was actually entered at (see the 2025 window above:
+    // one aggregate Scope 3 line, not the fine 2026 category split) — never
+    // invented at the 2026 granularity just to make two years look alike.
+    const priorObligationSourceRows: { siteKey: string; month: string; source: string; externalKey: string }[] = [];
+    for (const target of targets2025) {
+      const sources: string[] = [];
+      if (target.scope1Kg > 0) sources.push("gas", "fleet");
+      if (target.scope2LocationKg > 0) sources.push(...(target.siteKey === "central-digital" ? ["electricity-a", "electricity-b"] : ["electricity"]));
+      if (target.scope3Kg > 0) sources.push("substrate");
+      for (const source of sources) {
+        priorObligationSourceRows.push({ siteKey: target.siteKey, month: target.month, source, externalKey: `BOARD-1:2025:${target.siteKey}:${target.month}:${source}` });
+      }
+    }
+    const priorObligationRows = await Promise.all(priorObligationSourceRows.map(linkedObligationRow));
+    await prisma.carbonSourcePeriodObligation.createMany({ data: priorObligationRows });
+    trace("carbon prior-year obligations createMany done");
   }
 
   // -------------------------------------------------------------------
@@ -1365,6 +1398,25 @@ export class LiveSeedPort implements DemoSeedPort {
     const reviewedCount = await prisma.carbonSourcePeriodObligation.count({ where: { organisationId, month: { startsWith: "2026" }, status: "REVIEWED" } });
     if (obligationCount !== 192 || reviewedCount !== 192) {
       throw new Error(`Reconciliation failed: ${reviewedCount}/${obligationCount} source-period obligations reviewed, expected 192/192.`);
+    }
+    // Checkpoint B fix 2: 192/192 is only truthful if every one of those
+    // REVIEWED rows is genuinely bound to the real ActivityEntry it
+    // reviews — never a REVIEWED status floating free of any submission.
+    const linkedReviewedCount = await prisma.carbonSourcePeriodObligation.count({
+      where: { organisationId, month: { startsWith: "2026" }, status: "REVIEWED", submittedActivityEntryId: { not: null } },
+    });
+    if (linkedReviewedCount !== 192) {
+      throw new Error(`Reconciliation failed: only ${linkedReviewedCount}/192 REVIEWED obligations are bound to a real submitted activity entry.`);
+    }
+
+    // A genuine, comparable prior-year (2025) obligation set — never just
+    // the current year's coverage with nothing to compare it against.
+    const priorObligationCount = await prisma.carbonSourcePeriodObligation.count({ where: { organisationId, month: { startsWith: "2025" } } });
+    const priorLinkedReviewedCount = await prisma.carbonSourcePeriodObligation.count({
+      where: { organisationId, month: { startsWith: "2025" }, status: "REVIEWED", submittedActivityEntryId: { not: null } },
+    });
+    if (priorObligationCount === 0 || priorLinkedReviewedCount !== priorObligationCount) {
+      throw new Error(`Reconciliation failed: prior-year comparable obligations are ${priorLinkedReviewedCount}/${priorObligationCount} reviewed and linked, expected a fully reviewed, non-empty comparable set.`);
     }
 
     for (const [key, expectedSha] of (await import("./evidence")).buildSyntheticEvidence().map((f) => [f.key, f.sha256] as const)) {
