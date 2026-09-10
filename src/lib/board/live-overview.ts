@@ -223,9 +223,16 @@ async function header(context: OrganisationContext, scope: BoardScope): ReturnTy
 async function carbon(context: OrganisationContext, scope: BoardScope): ReturnType<OverviewPorts<OrganisationContext>["carbon"]> {
   const periodStart = monthStringToDate(scope.from, false), periodEnd = monthStringToDate(scope.to, true);
   const prior = priorYear(periodStart, periodEnd);
+  // A single explicitly-selected site must actually narrow every dataset
+  // below it, not just the hrefs buildCarbonSection stamps onto each metric
+  // — buildCarbonSection itself is a pure adapter that sums whatever site
+  // rows it's handed, so the narrowing has to happen at query time, here.
+  // getBoardOverview already ran requireSiteInScope on this id, so it can
+  // never widen past the caller's own accessible-site set.
+  const restrictToSiteIds = scope.siteIds.length === 1 ? scope.siteIds : undefined;
   const [currentSnapshot, previousSnapshot] = await Promise.all([
-    buildAnalyticsSnapshot(context, periodStart, periodEnd),
-    buildAnalyticsSnapshot(context, prior.periodStart, prior.periodEnd),
+    buildAnalyticsSnapshot(context, periodStart, periodEnd, restrictToSiteIds),
+    buildAnalyticsSnapshot(context, prior.periodStart, prior.periodEnd, restrictToSiteIds),
   ]);
   const current = toAnalyticsWindow(currentSnapshot), previous = toAnalyticsWindow(previousSnapshot);
   const permittedSiteIds = current.sites.map((s) => s.siteId);
@@ -251,12 +258,21 @@ async function carbon(context: OrganisationContext, scope: BoardScope): ReturnTy
 
 async function attention(context: OrganisationContext, scope: BoardScope): ReturnType<OverviewPorts<OrganisationContext>["attention"]> {
   const periodStart = monthStringToDate(scope.from, false), periodEnd = monthStringToDate(scope.to, true);
+  const restrictToSiteIds = scope.siteIds.length === 1 ? scope.siteIds : undefined;
+  // Nonconformity/ActionItem/CorrectiveAction/ComplianceObligation carry no
+  // site or entity attribution in the schema, so there is no truthful way
+  // to narrow them to a RESTRICTED member's site/entity allow-list — per
+  // Astra's instruction, when that support isn't safe the section is
+  // denied rather than shown organisation-wide. An ORGANISATION_WIDE
+  // member's standing access already covers the whole organisation, so
+  // their view is unaffected.
+  const emsAttentionAllowed = context.access.mode === "ORGANISATION_WIDE";
   const [analyticsWindow, coverage, obligations, effectivenessItems, actionResult] = await Promise.all([
-    buildAnalyticsSnapshot(context, periodStart, periodEnd).then(toAnalyticsWindow),
+    buildAnalyticsSnapshot(context, periodStart, periodEnd, restrictToSiteIds).then(toAnalyticsWindow),
     computeCoverageWindow(context, [], periodStart, periodEnd), // recomputed below once sites are known
-    hasPermission(context, "ems.view") ? listOverdueOrUnevaluatedObligations(context) : Promise.resolve([]),
-    hasPermission(context, "ems.view") ? effectivenessReviewAttention(context) : Promise.resolve([]),
-    hasPermission(context, "ems.corrective_action.manage") || hasPermission(context, "ems.view")
+    emsAttentionAllowed && hasPermission(context, "ems.view") ? listOverdueOrUnevaluatedObligations(context) : Promise.resolve([]),
+    emsAttentionAllowed && hasPermission(context, "ems.view") ? effectivenessReviewAttention(context) : Promise.resolve([]),
+    emsAttentionAllowed && (hasPermission(context, "ems.corrective_action.manage") || hasPermission(context, "ems.view"))
       ? correctiveActionAndActionItemAttention(context, scope.asOfDate)
       : Promise.resolve({ items: [], counts: { open: 0, awaitingVerification: 0 } }),
   ]);
@@ -297,9 +313,15 @@ const ports: OverviewPorts<OrganisationContext> = {
   },
 };
 
-/** Server entry point for `/` and `/attention`. Never call the adapters above directly from a page. */
-export async function getBoardOverview(searchParams: OverviewSearchParams): Promise<OverviewModel> {
-  const context = await requireOrganisationContext();
+/**
+ * The actual overview logic, taking an already-resolved OrganisationContext
+ * directly — same testability pattern as live-records.ts's exports — so
+ * Checkpoint B's restricted-actor/foreign-tenant/selected-site tests can
+ * drive it against a real Postgres membership without going through
+ * requireOrganisationContext()'s auth()/cookies() (unresolvable under
+ * Vitest's node environment, same documented exception as live-nav.ts).
+ */
+export async function loadOverviewForContext(context: OrganisationContext, searchParams: OverviewSearchParams): Promise<OverviewModel> {
   const parsed = resolveScopeParams(searchParams);
   if (parsed.siteId) await requireSiteInScope(context, parsed.siteId); // an invalid or foreign selected site is rejected, never broadened to all sites
   const scope: BoardScope = {
@@ -309,6 +331,12 @@ export async function getBoardOverview(searchParams: OverviewSearchParams): Prom
     asOfDate: new Date().toISOString().slice(0, 10), // no guarded synthetic environment is wired in any environment this branch has run in — the real date is always used
   };
   return loadOverview(ports, context, scope);
+}
+
+/** Server entry point for `/` and `/attention`. Never call the adapters above directly from a page. */
+export async function getBoardOverview(searchParams: OverviewSearchParams): Promise<OverviewModel> {
+  const context = await requireOrganisationContext();
+  return loadOverviewForContext(context, searchParams);
 }
 
 export { InvalidBoardScopeError };

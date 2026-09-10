@@ -8781,39 +8781,65 @@ model DemoDatabaseManifest {
   id            String   @id @default("singleton")
   databaseId    String
   environmentId String
-  createdAt     DateTime @default(now())
+  /// Written only by the out-of-band provisioning step that creates this
+  /// disposable database — never by the seed script itself. readConnectedIdentity
+  /// requires this to match BOARD_DEMO_PROVISIONING_TOKEN from the deployment's
+  /// own environment before ever trusting this row; a manifest row alone
+  /// (e.g. copied, stale, or planted) proves nothing without it.
+  provisioningToken String
+  createdAt         DateTime @default(now())
 }
 
-/// One row per fixture key (e.g. "BOARD-1"). A `SELECT ... FOR UPDATE
-/// NOWAIT` on this row inside a single transaction is the exclusive
-/// fixture-build lease `seed-orchestrator.ts` requires; `status` only ever
-/// moves BUILDING -> READY, and only after `verifyAllInvariants` succeeds.
+enum DemoFixtureLeaseStatus {
+  NONE
+  BUILDING
+  READY
+}
+
+/// One row per fixture key (e.g. "BOARD-1"). Exclusivity is an atomic CAS on
+/// `status` (`UPDATE ... WHERE status = 'NONE'`/`'BUILDING'`, not a held row
+/// lock — see live-seed-port.ts) so each transition commits and becomes
+/// durable immediately: a build that fails after BUILDING leaves BUILDING
+/// persisted (detectable, unavailable), never silently reverting to NONE
+/// while partial domain writes survive. `status` only ever moves
+/// NONE -> BUILDING -> READY, and only to READY after verifyAllInvariants
+/// succeeds; the enum constrains it to exactly those three valid states.
 model DemoFixtureLease {
-  id         String   @id @default(cuid())
-  fixtureKey String   @unique
-  status     String   @default("NONE")
-  digest     String   @default("")
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id         String                 @id @default(cuid())
+  fixtureKey String                 @unique
+  status     DemoFixtureLeaseStatus @default(NONE)
+  digest     String                 @default("")
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
 }
 
 /// One row per BOARD-1 named source-period return
 /// (`site:month:source`, e.g. "north-works:2026-01:gas"). Deliberately not
-/// related via Prisma `@relation` to Organisation/Site — a leaf-level
-/// fixture-bookkeeping table, scoped and filtered at the application layer
-/// like every other tenant-scoped read in this codebase, not a new
-/// FK-linked domain concept.
+/// related via Prisma `@relation` to Organisation/Site/OrganisationMembership/
+/// ActivityEntry — a leaf-level fixture-bookkeeping table, scoped and
+/// filtered/validated at the application layer like every other
+/// tenant-scoped read in this codebase, not a new FK-linked domain concept
+/// (an `@relation` here would need reverse-relation fields threaded onto
+/// those core models for a fixture-bookkeeping leaf, a disproportionate
+/// blast radius). Organisation/site/reviewer consistency is instead
+/// asserted in code before every write (see live-seed-port.ts), and
+/// `submittedActivityEntryId` traces each review decision to the real
+/// ActivityEntry it reviews.
 model CarbonSourcePeriodObligation {
-  id                     String    @id @default(cuid())
-  organisationId         String
-  siteId                 String
-  month                  String
-  sourceKey              String
-  externalKey            String    @unique
-  status                 String    @default("REVIEW_REQUIRED")
-  reviewedByMembershipId String?
-  reviewedAt             DateTime?
-  createdAt              DateTime  @default(now())
+  id                       String    @id @default(cuid())
+  organisationId           String
+  siteId                   String
+  month                    String
+  sourceKey                String
+  externalKey              String    @unique
+  status                   String    @default("REVIEW_REQUIRED")
+  reviewedByMembershipId   String?
+  reviewedAt               DateTime?
+  /// The actual ActivityEntry this obligation's review decision covers —
+  /// never populated without a real, persisted entry to point to.
+  submittedActivityEntryId String?
+  createdAt                DateTime  @default(now())
 
+  @@unique([organisationId, siteId, month, sourceKey])
   @@index([organisationId, siteId, month])
 }

@@ -20,6 +20,7 @@ assertDisposableDatabase();
 
 const environmentId = `board1-ci-${randomUUID()}`;
 const databaseId = `board1-ci-db-${randomUUID()}`;
+const provisioningToken = `board1-ci-token-${randomUUID()}`;
 
 const env = {
   dataMode: "synthetic",
@@ -30,13 +31,20 @@ const env = {
 };
 
 beforeAll(async () => {
+  // Checkpoint B fix 4: readConnectedIdentity now requires APP_DATA_MODE
+  // and a matching BOARD_DEMO_PROVISIONING_TOKEN independently of the
+  // manifest row — this disposable CI suite plays the role of a genuinely
+  // (and independently) provisioned target by setting both explicitly,
+  // the same way a real deployment's own environment would.
+  process.env.APP_DATA_MODE = "synthetic";
+  process.env.BOARD_DEMO_PROVISIONING_TOKEN = provisioningToken;
   // Independently-pinned identity, written once — the exact thing
   // readConnectedIdentity() must read back on its own, never inferred from
   // an env var or connection string.
   await prisma.demoDatabaseManifest.upsert({
     where: { id: "singleton" },
-    create: { id: "singleton", databaseId, environmentId },
-    update: { databaseId, environmentId },
+    create: { id: "singleton", databaseId, environmentId, provisioningToken },
+    update: { databaseId, environmentId, provisioningToken },
   });
 });
 

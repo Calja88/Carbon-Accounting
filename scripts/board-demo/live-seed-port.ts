@@ -19,7 +19,8 @@
  * invoked from an operator script.
  */
 
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import bcrypt from "bcryptjs";
 import {
   LcaAllocationMethod,
   LcaDataType,
@@ -27,7 +28,6 @@ import {
   LcaFactorSelectionMode,
   LcaItemType,
   LcaLifecycleStage,
-  type Prisma,
 } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resolveOrganisationContext, type OrganisationContext } from "@/lib/organisation/context";
@@ -62,6 +62,30 @@ function trace(label: string): void {
   process.stderr.write(`[bd08-seed-trace] ${new Date().toISOString()} ${label}\n`);
 }
 
+/**
+ * The same independent proof tests/checkpoint-a/disposable.ts requires
+ * before any real-Postgres test runs — CHECKPOINT_A_DISPOSABLE=1 alone
+ * proves nothing (any process could set it), so this also requires the
+ * connection to actually be a loopback host on the exact ca_checkpoint
+ * database name over a postgres protocol before treating the environment
+ * as CI's disposable database. A non-throwing boolean check (unlike
+ * disposable.ts's own assertion) because this seed script must run
+ * correctly against a real, non-disposable persistent target too.
+ */
+function isIndependentlyVerifiedDisposableDatabase(): boolean {
+  if (process.env.CHECKPOINT_A_DISPOSABLE !== "1") return false;
+  try {
+    const url = new URL(process.env.DATABASE_URL ?? "invalid:");
+    return (
+      ["localhost", "127.0.0.1", "::1"].includes(url.hostname) &&
+      url.pathname === "/ca_checkpoint" &&
+      ["postgres:", "postgresql:"].includes(url.protocol)
+    );
+  } catch {
+    return false;
+  }
+}
+
 const FIXTURE_KEY = BOARD1.fixtureVersion;
 const ORG_SLUG = "board-1-northstar-demonstration";
 
@@ -94,12 +118,6 @@ export class LiveSeedPort implements DemoSeedPort {
   private lcaScenarioId: string | null = null;
   private managementReviewId: string | null = null;
   private managementPackId: string | null = null;
-  // Set only while withExclusiveFixtureLease's own transaction holds the
-  // DemoFixtureLease row lock. Reads/writes to that same row must go through
-  // this same connection — routing them via the bare global `prisma` client
-  // instead would open a second connection that deadlocks waiting for a lock
-  // the first connection (this one) can never release until it returns.
-  private leaseTx: Prisma.TransactionClient | null = null;
 
   // -------------------------------------------------------------------
   // Identity / lease
@@ -108,6 +126,24 @@ export class LiveSeedPort implements DemoSeedPort {
   async readConnectedIdentity(): Promise<DemoDatabaseIdentity> {
     trace("readConnectedIdentity start");
     const manifest = await prisma.demoDatabaseManifest.findUnique({ where: { id: "singleton" } });
+    // Checkpoint B fix: a DemoDatabaseManifest row alone proves nothing — it
+    // is an ordinary table this same process could insert a row into, so
+    // its mere presence is not "independently verified provisioning
+    // provenance". Two independent, out-of-band signals are required before
+    // this identity can ever be reported as SYNTHETIC/disposable, neither
+    // derivable from data already sitting in this database:
+    //  1. APP_DATA_MODE=synthetic — the deployment's own environment must
+    //     explicitly opt in; unset/anything else always fails closed.
+    //  2. BOARD_DEMO_PROVISIONING_TOKEN must match the token the actual
+    //     provisioning step wrote into the manifest row at creation time
+    //     (never written by this seed script itself) — a stray or copied
+    //     manifest row without a matching environment secret is rejected.
+    const appDataModeIsSynthetic = process.env.APP_DATA_MODE === "synthetic";
+    const provisioningTokenMatches =
+      !!manifest &&
+      !!process.env.BOARD_DEMO_PROVISIONING_TOKEN &&
+      process.env.BOARD_DEMO_PROVISIONING_TOKEN === manifest.provisioningToken;
+
     // "Ordinary" means neither this fixture's own organisation nor another
     // repo test suite's own clearly-labelled synthetic fixture (the
     // disposable checkpoint-a-postgres CI job intentionally shares one
@@ -116,15 +152,18 @@ export class LiveSeedPort implements DemoSeedPort {
     // organisation "Synthetic ..." by established convention).
     //
     // This name-based leniency must NEVER influence the actual persistent-
-    // demo trust decision — it is gated on CHECKPOINT_A_DISPOSABLE=1, the
-    // exact same independent signal tests/checkpoint-a/disposable.ts already
-    // requires to prove "this is definitely the CI-only disposable loopback
-    // database" before anything runs. A real target never has that variable
-    // set, so a real environment always uses the strict, name-independent
-    // check — an organisation is "ordinary" there purely by not carrying
-    // this fixture's own slug prefix, exactly as the Astra guard contract
-    // requires (verified database identity, not organisation naming).
-    const isDisposableCiSuite = process.env.CHECKPOINT_A_DISPOSABLE === "1";
+    // demo trust decision. It is gated on independently PROVING this is the
+    // disposable CI database — not merely trusting the CHECKPOINT_A_DISPOSABLE
+    // flag by itself (a stray env var proves nothing on its own), but
+    // reusing the exact same full check tests/checkpoint-a/disposable.ts
+    // applies before any test runs: the flag AND a loopback host AND the
+    // exact ca_checkpoint database name AND a postgres protocol. A real
+    // target can never satisfy all four at once, so a real environment
+    // always uses the strict, name-independent check — an organisation is
+    // "ordinary" there purely by not carrying this fixture's own slug
+    // prefix, exactly as the Astra guard contract requires (verified
+    // database identity, not organisation naming).
+    const isDisposableCiSuite = isIndependentlyVerifiedDisposableDatabase();
     const ordinaryOrganisationCount = await prisma.organisation.count({
       where: isDisposableCiSuite
         ? {
@@ -135,9 +174,11 @@ export class LiveSeedPort implements DemoSeedPort {
           }
         : { NOT: { slug: { startsWith: FIXTURE_ORGANISATION_SLUG_PREFIX } } },
     });
-    if (!manifest) {
+    if (!manifest || !appDataModeIsSynthetic || !provisioningTokenMatches) {
       // Fails closed: assertDemoTarget will reject an empty actualDatabaseId/
-      // manifestEnvironmentId against any configured allow-list value.
+      // manifestEnvironmentId against any configured allow-list value. A
+      // manifest existing is not enough on its own — both independent
+      // signals above must also hold.
       return { actualDatabaseId: "", manifestEnvironmentId: "", dataClass: "OTHER", disposable: false, ordinaryOrganisationCount };
     }
     return {
@@ -149,6 +190,11 @@ export class LiveSeedPort implements DemoSeedPort {
     };
   }
 
+  /**
+   * No held transaction, no row lock spanning the build — see
+   * beginFixture/markFixtureReady below for why exclusivity now comes from
+   * an atomic status CAS instead. Only ensures the lease row exists.
+   */
   async withExclusiveFixtureLease<T>(key: string, operation: () => Promise<T>): Promise<T> {
     trace("withExclusiveFixtureLease start");
     await prisma.demoFixtureLease.upsert({
@@ -156,47 +202,62 @@ export class LiveSeedPort implements DemoSeedPort {
       create: { fixtureKey: key },
       update: {},
     });
-    return prisma.$transaction(
-      async (tx) => {
-        // A row-level lock held for the whole operation: a concurrent second
-        // seed/verify attempt on the same fixture key fails immediately
-        // instead of racing writes.
-        await tx.$queryRaw`SELECT id FROM "DemoFixtureLease" WHERE "fixtureKey" = ${key} FOR UPDATE NOWAIT`;
-        trace("lease row locked; calling operation()");
-        this.leaseTx = tx;
-        try {
-          const result = await operation();
-          trace("operation() resolved");
-          return result;
-        } finally {
-          this.leaseTx = null;
-        }
-      },
-      { timeout: 10 * 60 * 1000, maxWait: 5000 },
-    );
+    return operation();
   }
 
   async existingFixture(): Promise<{ version: string; digest: string } | null> {
-    const lease = await (this.leaseTx ?? prisma).demoFixtureLease.findUnique({ where: { fixtureKey: FIXTURE_KEY } });
+    const lease = await prisma.demoFixtureLease.findUnique({ where: { fixtureKey: FIXTURE_KEY } });
     if (!lease || lease.status === "NONE") return null;
     if (lease.status === "BUILDING") return { version: FIXTURE_KEY, digest: "" }; // deliberately invalid digest -> orchestrator refuses a partial fixture
     return { version: FIXTURE_KEY, digest: lease.digest };
   }
 
+  /**
+   * Checkpoint B fix: this CAS (`WHERE status: "NONE"`) is now the entire
+   * exclusivity mechanism — the previous design held a Postgres row lock
+   * for the whole build via a separate connection, which both self-
+   * deadlocked (fixed earlier as an ordinary bug) and meant this BUILDING
+   * write only became durable if the whole surrounding transaction
+   * eventually committed. A domain-write failure after this point now
+   * leaves BUILDING durably persisted — a detectable, unavailable,
+   * interrupted build — rather than silently reverting to NONE while
+   * partial domain records survive. A concurrent second caller's CAS
+   * affects zero rows and is refused immediately, matching the interface's
+   * documented "Refuse concurrent seed/reset" contract without needing a
+   * held lock at all.
+   */
   async beginFixture(version: string): Promise<void> {
     trace("beginFixture start");
-    await (this.leaseTx ?? prisma).demoFixtureLease.update({
-      where: { fixtureKey: version },
+    const { count } = await prisma.demoFixtureLease.updateMany({
+      where: { fixtureKey: version, status: "NONE" },
       data: { status: "BUILDING", digest: "" },
     });
+    if (count === 0) {
+      throw new Error(`Fixture "${version}" is already BUILDING or READY — refusing a concurrent or duplicate build.`);
+    }
     await this.resolveExistingOrganisation();
   }
 
+  /**
+   * Checkpoint B fix: previously discarded verifyAllInvariants' own
+   * recomputed digest, so a replay never actually proved the persisted
+   * fixture still matches what was issued — an incomplete or altered
+   * fixture (or one from a different code version with the same status)
+   * could pass silently. Now resolves the exact persisted ids, recomputes
+   * the digest from what's actually stored, and rejects any mismatch.
+   */
   async verifyExistingFixture(): Promise<void> {
+    const lease = await prisma.demoFixtureLease.findUniqueOrThrow({ where: { fixtureKey: FIXTURE_KEY } });
+    if (lease.status !== "READY") {
+      throw new Error(`Fixture "${FIXTURE_KEY}" is not READY (status=${lease.status}) — refusing to verify an incomplete or interrupted build.`);
+    }
     await this.resolveExistingOrganisation();
     if (!this.organisationId) throw new Error("Fixture is marked READY but its organisation cannot be found.");
     await this.resolveExistingFixtureState(this.organisationId);
-    await this.verifyAllInvariants();
+    const { digest } = await this.verifyAllInvariants();
+    if (digest !== lease.digest) {
+      throw new Error(`Fixture "${FIXTURE_KEY}" digest mismatch: recomputed ${digest} does not match the saved ${lease.digest} — refusing an altered or incomplete fixture.`);
+    }
   }
 
   /**
@@ -231,7 +292,16 @@ export class LiveSeedPort implements DemoSeedPort {
     const pack = await prisma.managementReviewPack.findFirst({ where: { organisationId } });
     this.managementPackId = pack?.id ?? null;
 
-    const nc = await prisma.nonconformity.findFirst({ where: { organisationId, reference: { startsWith: "BOARD1-NC-" } } });
+    // Deliberately the OLDEST matching row, ordered explicitly rather than
+    // left to an unspecified default: a genuine post-freeze live transition
+    // (e.g. a demonstration nonconformity created after the pack issues,
+    // proving the frozen pack doesn't move) can create another row whose
+    // reference also starts with "BOARD1-NC-" — the improvement chain's own
+    // nonconformity is always the first one created for this organisation.
+    const nc = await prisma.nonconformity.findFirst({
+      where: { organisationId, reference: { startsWith: "BOARD1-NC-" } },
+      orderBy: { createdAt: "asc" },
+    });
     this.nonconformityId = nc?.id ?? null;
   }
 
@@ -264,8 +334,20 @@ export class LiveSeedPort implements DemoSeedPort {
       this.sites.push({ key: site.key, id: row.id, name: site.name });
     }
 
+    // Checkpoint B fix 6: LCA permission codes exist in the catalogue but —
+    // confirmed by inspection — no service or page anywhere in this
+    // codebase currently calls requirePermission/hasPermission with any
+    // "lca.*" code; LCA access today is gated only by tenant/entity scoping
+    // (assertEntityAccess), not by a permission grant. Granting these codes
+    // to the right personas is still correct persona hygiene (and is what
+    // real enforcement, whenever added, will read), but it cannot today be
+    // proven as an access boundary — recorded honestly rather than
+    // implying a permission check exists where none does.
+    const lcaGrants = ["lca.view", "lca.product.manage", "lca.assessment.edit", "lca.assessment.calculate", "lca.assessment.approve", "lca.version.issue", "lca.evidence.manage"];
     const grants = [
       "carbon.view",
+      "carbon.entry.create",
+      "carbon.entry.review",
       "carbon.report.generate",
       "carbon.report.export",
       "ems.view",
@@ -276,6 +358,7 @@ export class LiveSeedPort implements DemoSeedPort {
       "ems.corrective_action.effectiveness_review",
       "ems.objective.manage",
       "ems.management_review.manage",
+      ...lcaGrants,
     ];
     for (const code of grants) {
       await prisma.permissionDefinition.upsert({
@@ -285,19 +368,24 @@ export class LiveSeedPort implements DemoSeedPort {
       });
     }
 
-    // Ephemeral synthetic credentials — never a fixed/shared password.
-    // These personas sign in through the normal auth path in a persistent
-    // environment; for the disposable Postgres CI proof, only the resolved
-    // OrganisationContext is used directly.
+    // Ephemeral synthetic credentials — a fresh random password per
+    // persona, bcrypt-hashed exactly the way src/auth.ts verifies logins
+    // (never the seed's own ad-hoc hash), so these personas can actually
+    // sign in through the real auth path in a persistent environment.
+    // Never a fixed/shared password, and never committed anywhere: the
+    // plaintext is emitted once, only to this process's own stderr
+    // (the same ephemeral, log-only channel trace() already uses), for
+    // whoever is operating this seed run to copy down.
     const persona = async (name: string, accessMode: "RESTRICTED" | "ORGANISATION_WIDE", status: "ACTIVE" | "SUSPENDED", permissionCodes: string[]) => {
+      const email = `board-1-${name}-${randomUUID()}@example.invalid`;
+      const plaintextPassword = randomBytes(18).toString("base64url");
+      const passwordHash = await bcrypt.hash(plaintextPassword, 10);
       const user = await prisma.user.create({
-        data: {
-          name: `BOARD-1 ${name}`,
-          email: `board-1-${name}-${randomUUID()}@example.invalid`,
-          passwordHash: createHash("sha256").update(randomUUID()).digest("hex"),
-          role: "DATA_OWNER",
-        },
+        data: { name: `BOARD-1 ${name}`, email, passwordHash, role: "DATA_OWNER" },
       });
+      if (status === "ACTIVE") {
+        trace(`persona credential (ephemeral, log-only, never committed) — ${email} / ${plaintextPassword}`);
+      }
       const membership = await prisma.organisationMembership.create({
         data: { organisationId: org.id, userId: user.id, status, accessMode },
       });
@@ -310,16 +398,17 @@ export class LiveSeedPort implements DemoSeedPort {
       return resolveOrganisationContext(prisma, { userId: user.id, requestedOrganisation: org.id });
     };
 
-    // Contributor / site manager — enters activity data (contract persona).
-    await persona("contributor", "ORGANISATION_WIDE", "ACTIVE", ["carbon.view"]);
-    // Sustainability lead — owns the carbon/EMS chain and the management pack.
+    // Contributor / site manager — the promised contribution journey needs
+    // carbon.entry.create (submit activity data), not carbon.view alone.
+    await persona("contributor", "ORGANISATION_WIDE", "ACTIVE", ["carbon.view", "carbon.entry.create"]);
+    // Sustainability lead — owns the carbon/EMS/LCA chain and the management pack.
     this.sustainabilityLead = await persona("sustainability-lead", "ORGANISATION_WIDE", "ACTIVE", grants);
-    // Independent reviewer — the separate four-eyes actor for effectiveness review and pack issuance oversight.
+    // Independent reviewer — the separate four-eyes actor for effectiveness review, pack issuance oversight, and LCA review.
     this.independentReviewer = await persona("independent-reviewer", "ORGANISATION_WIDE", "ACTIVE", grants);
-    // Read-only persona (contract).
-    await persona("read-only", "ORGANISATION_WIDE", "ACTIVE", ["carbon.view", "ems.view"]);
+    // Read-only persona (contract) — view-only, including LCA.
+    await persona("read-only", "ORGANISATION_WIDE", "ACTIVE", ["carbon.view", "ems.view", "lca.view"]);
     // Restricted-scope persona (contract) — RESTRICTED access mode, no site grants configured, proving denial by default.
-    await persona("restricted", "RESTRICTED", "ACTIVE", ["carbon.view", "ems.view"]);
+    await persona("restricted", "RESTRICTED", "ACTIVE", ["carbon.view", "ems.view", "lca.view"]);
     // Suspended persona (contract) — membership exists but cannot authenticate.
     await persona("suspended", "ORGANISATION_WIDE", "SUSPENDED", ["carbon.view"]);
 
@@ -1060,9 +1149,16 @@ export class LiveSeedPort implements DemoSeedPort {
     return { digest };
   }
 
+  /** CAS from BUILDING only — never overwrites an already-READY or somehow-reverted-to-NONE row. */
   async markFixtureReady(version: string, digest: string): Promise<void> {
     trace("markFixtureReady start");
-    await (this.leaseTx ?? prisma).demoFixtureLease.update({ where: { fixtureKey: version }, data: { status: "READY", digest } });
+    const { count } = await prisma.demoFixtureLease.updateMany({
+      where: { fixtureKey: version, status: "BUILDING" },
+      data: { status: "READY", digest },
+    });
+    if (count === 0) {
+      throw new Error(`Fixture "${version}" was not BUILDING when marking READY — refusing to overwrite an unexpected state.`);
+    }
   }
 }
 
