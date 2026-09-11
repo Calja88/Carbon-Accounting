@@ -309,6 +309,19 @@ async function header(context: OrganisationContext, scope: BoardScope): ReturnTy
 }
 
 async function carbon(context: OrganisationContext, scope: BoardScope): ReturnType<OverviewPorts<OrganisationContext>["carbon"]> {
+  try {
+    return await carbonInner(context, scope);
+  } catch (err) {
+    // TEMPORARY diagnostic — overview-service.ts's own section() wrapper
+    // deliberately swallows this exception before it ever reaches a log a
+    // client could see; this one is CI-only stderr to find the Checkpoint B
+    // fix 2 "unavailable" root cause, and must be removed once found.
+    console.error("[TEMP-DIAG] carbon() threw:", err);
+    throw err;
+  }
+}
+
+async function carbonInner(context: OrganisationContext, scope: BoardScope): ReturnType<OverviewPorts<OrganisationContext>["carbon"]> {
   const periodStart = monthStringToDate(scope.from, false), periodEnd = monthStringToDate(scope.to, true);
   const prior = priorYear(periodStart, periodEnd);
   // A single explicitly-selected site must actually narrow every dataset
