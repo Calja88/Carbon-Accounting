@@ -47,6 +47,7 @@ import {
   recordContainment,
   reviewContainmentAdequacy,
   closeNonconformity,
+  linkAdditionalSourceToNonconformity,
 } from "@/lib/ems/nonconformity/nonconformity-service";
 import { recordRootCauseAnalysis, approveRootCauseAnalysis } from "@/lib/ems/nonconformity/root-cause-service";
 import { createCorrectiveAction, completeCorrectiveAction } from "@/lib/ems/nonconformity/corrective-action-service";
@@ -1412,6 +1413,22 @@ export class LiveSeedPort implements DemoSeedPort {
     });
     this.nonconformityId = nc.id;
 
+    // Checkpoint B corrective handoff §6: the internal-requirement
+    // evaluation item independently surfaced the identical containment-
+    // inspection gap (see recordComplianceEvaluationItemResult's rationale
+    // above) — linked here as a further source on the SAME nonconformity
+    // (never spawning a second one, per linkAdditionalSourceToNonconformity's
+    // own documented contract) so that duplicate discovery is traceable
+    // rather than silently dropped. The reference note names the exact
+    // nonconformity id, not just its human-readable reference, so a reader
+    // holding only the evaluation item can locate the precise linked record.
+    await linkAdditionalSourceToNonconformity(owner, nc.id, {
+      sourceType: "COMPLIANCE_EVALUATION_ITEM",
+      sourceId: evaluationItem.id,
+      sourceReferenceNote: `Independently surfaced by internal compliance evaluation item ${evaluationItem.id}: the same containment-inspection gap nonconformity ${nc.id} already tracks — linked, not duplicated, for full source traceability.`,
+      actorUserId: owner.userId,
+    });
+
     const containment = await recordContainment(owner, nc.id, { actionTaken: "Interim manual sign-off sheet introduced at North Works.", actionTakenAt: new Date("2026-08-05"), ownerMembershipId: owner.membershipId, actorUserId: owner.userId });
     await reviewContainmentAdequacy(owner, containment.id, { adequate: true, notes: "Interim sign-off sheet is adequate pending the named-owner corrective action.", actorUserId: owner.userId });
     const rootCause = await recordRootCauseAnalysis(owner, nc.id, { method: "FIVE_WHYS", analysisPayload: { note: "No single named owner for the monthly check." }, conclusion: "Inspection ownership was never assigned to a named role.", actorUserId: owner.userId });
@@ -1419,6 +1436,23 @@ export class LiveSeedPort implements DemoSeedPort {
 
     const action = await createCorrectiveAction(owner, nc.id, { description: "Name a single inspection owner and record it in the procedure.", ownerMembershipId: owner.membershipId, dueDate: new Date("2026-09-01"), actorUserId: owner.userId });
     this.correctiveActionId = action.id;
+
+    // Checkpoint B corrective handoff §6: a second, explicitly identified
+    // corrective action on the same nonconformity, deliberately left OPEN
+    // when the fixture freezes (NonconformityClosurePolicy.
+    // requireCorrectiveActionsComplete defaults false for this
+    // organisation, so leaving it open never blocks closeNonconformity
+    // below) — retained on purpose for a real-Postgres test to complete and
+    // independently review live, after the pack has already been issued,
+    // proving the frozen pack's own content/hash never moves while the
+    // live domain state genuinely does.
+    await createCorrectiveAction(owner, nc.id, {
+      description: "BOARD1-CA-EXT: extend the containment inspection procedure and named ownership to East Cards.",
+      ownerMembershipId: owner.membershipId,
+      dueDate: new Date("2026-10-01"),
+      actorUserId: owner.userId,
+    });
+
     await completeCorrectiveAction(owner, action.id, { completionEvidenceNote: "Named owner recorded; inspection schedule confirmed.", actorUserId: owner.userId });
 
     const completionEvidenceId = this.evidenceIdByKey.get("completion");
@@ -1819,6 +1853,23 @@ export class LiveSeedPort implements DemoSeedPort {
     if (!this.nonconformityId) throw new Error("Reconciliation failed: EMS chain nonconformity is missing.");
     const nc = await prisma.nonconformity.findUniqueOrThrow({ where: { id: this.nonconformityId } });
     if (nc.status !== "CLOSED") throw new Error(`Reconciliation failed: EMS chain nonconformity should be CLOSED, is ${nc.status}.`);
+
+    // Checkpoint B corrective handoff §6: the additional-source link and the
+    // second, deliberately-OPEN corrective action must both genuinely
+    // exist — never silently dropped by an earlier step's own error
+    // swallowing.
+    const additionalSourceLink = await prisma.nonconformitySourceLink.findFirst({
+      where: { organisationId, nonconformityId: nc.id, sourceType: "COMPLIANCE_EVALUATION_ITEM", isPrimary: false },
+    });
+    if (!additionalSourceLink || !additionalSourceLink.sourceReferenceNote?.includes(nc.id)) {
+      throw new Error("Reconciliation failed: the compliance-evaluation-item additional source link is missing, or its reference note doesn't name the exact nonconformity id.");
+    }
+    const retainedOpenAction = await prisma.correctiveAction.findFirst({
+      where: { organisationId, nonconformityId: nc.id, description: { startsWith: "BOARD1-CA-EXT" } },
+    });
+    if (!retainedOpenAction || retainedOpenAction.status !== "OPEN") {
+      throw new Error(`Reconciliation failed: the retained corrective action for the live completion demonstration should be OPEN, is ${retainedOpenAction?.status ?? "missing"}.`);
+    }
 
     // Checkpoint B fix 7: the internal requirement genuinely carries an
     // obligation revision (ACTIVE, approved) and an issued evaluation

@@ -6,6 +6,9 @@ import { describe, it, expect } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { resolveOrganisationContext } from "@/lib/organisation/context";
 import { getAspectChainRecord, getControlChainRecord, getObligationChainRecord } from "@/lib/board/live-records";
+import { loadOverviewForContext } from "@/lib/board/live-overview";
+import { reopenNonconformity } from "@/lib/ems/nonconformity/nonconformity-service";
+import { completeCorrectiveAction, verifyCorrectiveAction } from "@/lib/ems/nonconformity/corrective-action-service";
 import { assertDisposableDatabase } from "../checkpoint-a/disposable";
 
 assertDisposableDatabase();
@@ -108,5 +111,71 @@ describe("Checkpoint B fix 7 — connected-record links select the exact record,
       if (rel.kind === "operational_control") expect(rel.href).toBe(`/ems/controls?record=${rel.id}`);
       if (rel.kind === "nonconformity") expect(rel.href).toBe(`/ems/nonconformities/${rel.id}`);
     }
+  });
+});
+
+describe("Checkpoint B corrective handoff §6 — additional-source link and observable live transition", () => {
+  it("the internal-requirement evaluation item is linked as a further source naming the exact nonconformity id, not spawning a duplicate", async () => {
+    const org = await prisma.organisation.findUniqueOrThrow({ where: { slug: "board-1-northstar-demonstration" } });
+    const nc = await prisma.nonconformity.findFirstOrThrow({ where: { organisationId: org.id, reference: { startsWith: "BOARD1-NC-" } }, orderBy: { createdAt: "asc" } });
+    const link = await prisma.nonconformitySourceLink.findFirstOrThrow({
+      where: { organisationId: org.id, nonconformityId: nc.id, sourceType: "COMPLIANCE_EVALUATION_ITEM", isPrimary: false },
+    });
+    expect(link.sourceReferenceNote).toContain(nc.id);
+    const item = await prisma.complianceEvaluationItem.findUniqueOrThrow({ where: { id: link.sourceId! } });
+    expect(item.organisationId).toBe(org.id);
+    // Never a second nonconformity — the whole point of "additional source" is not spawning one.
+    const ncCount = await prisma.nonconformity.count({ where: { organisationId: org.id, sourceType: "COMPLIANCE_EVALUATION_ITEM" } });
+    expect(ncCount).toBe(0);
+  });
+
+  it("a retained OPEN corrective action can be completed and independently reviewed live, after the pack has already been issued, without moving the frozen pack", async () => {
+    const org = await prisma.organisation.findUniqueOrThrow({ where: { slug: "board-1-northstar-demonstration" } });
+    const nc = await prisma.nonconformity.findFirstOrThrow({ where: { organisationId: org.id, reference: { startsWith: "BOARD1-NC-" } }, orderBy: { createdAt: "asc" } });
+    expect(nc.status).toBe("CLOSED"); // the primary chain's own frozen state, per fix 7 — untouched by what follows
+    const action = await prisma.correctiveAction.findFirstOrThrow({
+      where: { organisationId: org.id, nonconformityId: nc.id, description: { startsWith: "BOARD1-CA-EXT" } },
+    });
+    expect(action.status).toBe("OPEN"); // explicitly retained, never completed during the build itself
+
+    const pack = await prisma.managementReviewPack.findFirstOrThrow({ where: { organisationId: org.id } });
+    const beforePack = { payload: pack.payload, checksum: pack.checksumSha256 };
+
+    const owner = await boardOwnerContext();
+    const reviewer = await resolveOrganisationContext(prisma, {
+      userId: (await prisma.user.findFirstOrThrow({ where: { name: "BOARD-1 independent-reviewer" } })).id,
+      requestedOrganisation: org.id,
+    });
+
+    const before = await loadOverviewForContext(owner, {});
+    expect(before.attention.state).toBe("ready");
+
+    // The real state machine: a CLOSED nonconformity must be reopened before
+    // any of its corrective actions can change — an observable live
+    // transition, not a direct stamp.
+    const reopened = await reopenNonconformity(owner, nc.id, "Live demonstration: complete and independently review the retained corrective action.", owner.userId);
+    expect(reopened.status).toBe("REOPENED");
+
+    const completed = await completeCorrectiveAction(owner, action.id, {
+      completionEvidenceNote: "Named owner and inspection schedule extended to East Cards.",
+      actorUserId: owner.userId,
+    });
+    expect(completed.status).toBe("COMPLETED");
+
+    // A distinct reviewer — four-eyes is enforced server-side, non-overridable.
+    const verified = await verifyCorrectiveAction(reviewer, action.id, { actorUserId: reviewer.userId });
+    expect(verified.status).toBe("VERIFIED");
+    expect(verified.verifiedByMembershipId).toBe(reviewer.membershipId);
+
+    const after = await loadOverviewForContext(owner, {});
+    expect(after.attention.state).toBe("ready");
+    if (before.attention.state === "ready" && after.attention.state === "ready") {
+      expect(after.attention.data.openActions).toBeLessThan(before.attention.data.openActions);
+    }
+
+    // The frozen pack's own content/hash never moved, across both stages.
+    const reloadedPack = await prisma.managementReviewPack.findUniqueOrThrow({ where: { id: pack.id } });
+    expect(reloadedPack.checksumSha256).toBe(beforePack.checksum);
+    expect(reloadedPack.payload).toEqual(beforePack.payload);
   });
 });
