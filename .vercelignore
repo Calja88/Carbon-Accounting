@@ -1,0 +1,20 @@
+# Files/folders excluded from the Vercel deployment upload.
+#
+# These are dev-only / documentation / one-off operational scripts that are
+# never imported by the Next.js app (src/, public/, prisma/ schema +
+# migrations) and are not needed to run `next build` or `next start`.
+# See Docs/deployment/VERCEL_USAGE_CONTROLS.md for context.
+
+Docs/
+docs/
+e2e/
+tests/
+playwright.config.ts
+playwright-report/
+test-results/
+vitest.config.mts
+vitest.checkpoint-a.config.mts
+
+scripts/handoff/
+scripts/load-test/
+scripts/rls-spike/
