@@ -73,7 +73,11 @@ describe("Checkpoint B fix 2 — Scope 3 quantified/screened counts come from ca
     expect(model.carbon.state).toBe("ready");
     if (model.carbon.state !== "ready") throw new Error("unreachable");
     expect(model.carbon.data.quantifiedCategories).toBe(4); // Cat 1, Cat 3 (derived), Cat 6, Cat 7
-    expect(model.carbon.data.screenedCategories).toBeGreaterThanOrEqual(model.carbon.data.quantifiedCategories);
+    // Checkpoint B corrective handoff §2: no Scope 3 screening subsystem
+    // exists, so screenedCategories is an honest null with a reason —
+    // never a fabricated count merely constrained to be >= quantified.
+    expect(model.carbon.data.screenedCategories).toBeNull();
+    expect(model.carbon.data.screenedCategoriesReason).toMatch(/not recorded/);
   });
 
   it("every BOARD-1 activity data point carries its own real display category, never one generic label shared across every scope", async () => {

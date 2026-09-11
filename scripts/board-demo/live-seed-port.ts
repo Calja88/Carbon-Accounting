@@ -631,18 +631,25 @@ export class LiveSeedPort implements DemoSeedPort {
       entryIdBySourcePeriod.set(key, entryId);
     }
 
-    // Phase 1: real Scope 1/2 entries + calculations for 2026 only — the
-    // year the derived Category 3 mechanism and the 192 obligations cover.
-    // 2025 (prior comparable) only needs to reconcile its own total, so it
-    // is seeded as Scope-1/2/3 lines directly without a derive pass.
-    const targets2026 = targets.filter((t) => t.year === 2026);
-    const targets2025 = targets.filter((t) => t.year === 2025);
+    // Checkpoint B corrective handoff §2: both years go through the exact
+    // same real per-source pipeline — Scope 1/2 entries, then the real
+    // derived-Category-3 mechanism (prepareReportingData) read back per
+    // site/month, then Scope 3 category 1/6/7 via scope3Allocation against
+    // the *actual* derived Category 3 for that year. The prior (2025)
+    // comparable window is never a coarser one-line stand-in invented just
+    // to make the two years look alike — it is built, and independently
+    // reviewable, exactly like the current year.
+    const { scope3Allocation } = await import("./board1");
 
-    // Each site-month's entries touch disjoint ActivityEntry rows, so
-    // building them concurrently across targets is safe (real-Postgres CI
-    // proved the fully sequential version correct but far too slow —
-    // ~300 sequential real-service round trips exceeded a 5-minute budget).
-    await mapWithConcurrency(targets2026, 4, async (target) => {
+    for (const year of [2026, 2025] as const) {
+      const yearTargets = targets.filter((t) => t.year === year);
+
+      // Phase A: Scope 1/2 entries + calculations. Each site-month's
+      // entries touch disjoint ActivityEntry rows, so building them
+      // concurrently across targets is safe (real-Postgres CI proved the
+      // fully sequential version correct but far too slow — ~300
+      // sequential real-service round trips exceeded a 5-minute budget).
+      await mapWithConcurrency(yearTargets, 4, async (target) => {
         const site = siteById.get(target.siteKey)!;
         const periodStart = new Date(`${target.month}-01T00:00:00Z`);
         const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
@@ -693,12 +700,150 @@ export class LiveSeedPort implements DemoSeedPort {
         }
       });
 
-    trace("carbon phase 1 done");
+      trace(`carbon phase A (${year}) done`);
 
-    // Checkpoint B fix 7: a real invoice and a real meter reading, each a
-    // genuine SourceDocument linked to the exact ActivityEntry it
-    // documents (never a floating evidence file with placeholder text
-    // that admits its own quantity is unfilled).
+      if (year === 2026) {
+        await this.createInvoiceAndMeterDocuments(owner, siteById);
+      }
+
+      // Phase B: run the real derived-Category-3 mechanism over this
+      // year's own window, then read its actual persisted result per
+      // site/month — never reused across years, never invented.
+      await prepareReportingData(owner, new Date(`${year}-01-01`), new Date(`${year}-08-31`));
+      trace(`carbon phase B (${year}) done`);
+
+      const derivedRows = await prisma.calculation.findMany({
+        where: {
+          organisationId: owner.organisationId,
+          scope3Category: "Cat 3 — Fuel- and energy-related activities",
+          activityEntry: { periodStart: { gte: new Date(`${year}-01-01`), lte: new Date(`${year}-08-31`) } },
+        },
+        include: { activityEntry: true },
+      });
+      const derivedCat3BySiteMonth = new Map<string, number>();
+      for (const row of derivedRows) {
+        const key = `${row.activityEntry.siteId}:${monthOf(row.activityEntry.periodStart)}`;
+        derivedCat3BySiteMonth.set(key, (derivedCat3BySiteMonth.get(key) ?? 0) + Number(row.resultKgCo2e));
+      }
+
+      // Phase C: Scope 3 category 1/6/7 entries — category1 is whatever
+      // scope3Allocation says is left after the *actual* derived category
+      // 3, never an independently invented number. Independent per
+      // site-month, so built concurrently for the same reason as Phase A.
+      await mapWithConcurrency(
+        yearTargets.filter((t) => t.scope3Kg > 0),
+        4,
+        async (target) => {
+          const site = siteById.get(target.siteKey)!;
+          const periodStart = new Date(`${target.month}-01T00:00:00Z`);
+          const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
+          const derivedCat3Kg = derivedCat3BySiteMonth.get(`${site.id}:${target.month}`) ?? 0;
+          const parts = scope3Allocation(target.scope3Kg, round4(derivedCat3Kg));
+
+          const writes: Promise<void>[] = [];
+          if (parts.category6Kg > 0) {
+            writes.push(
+              createActivityEntryWithCalculations(ctx, {
+                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.travel.factorCategory)!,
+                siteId: site.id, periodStart, periodEnd, rawValue: parts.category6Kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+              }).then((result) => recordSubmission(target.siteKey, target.month, "travel", result.entry.id)),
+            );
+          }
+          if (parts.category7Kg > 0) {
+            writes.push(
+              createActivityEntryWithCalculations(ctx, {
+                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.commuting.factorCategory)!,
+                siteId: site.id, periodStart, periodEnd, rawValue: parts.category7Kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+              }).then((result) => recordSubmission(target.siteKey, target.month, "commuting", result.entry.id)),
+            );
+          }
+          if (parts.category1Kg > 0) {
+            const purchasedKeys = target.siteKey === "central-digital" ? ["services-a", "services-b", "services-c", "services-d"] : ["substrate", "services", "consumables"];
+            const share = parts.category1Kg / purchasedKeys.length;
+            for (const source of purchasedKeys) {
+              writes.push(
+                createActivityEntryWithCalculations(ctx, {
+                  activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
+                  siteId: site.id, periodStart, periodEnd, rawValue: round4(share), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+                }).then((result) => recordSubmission(target.siteKey, target.month, source, result.entry.id)),
+              );
+            }
+          }
+          await Promise.all(writes);
+        },
+      );
+
+      trace(`carbon phase C (${year}) done`);
+    }
+
+    // Checkpoint B corrective handoff §1: every one of both years'
+    // obligations (buildSubmissionObligations() now returns both years at
+    // the same fine per-source granularity — see board1.ts) is created
+    // REVIEW_REQUIRED with its submittedActivityEntryId bound only after a
+    // revalidated org/site/period/source match, then explicitly reviewed
+    // below through the real service.
+    async function boundObligationRow(row: { siteKey: string; month: string; source: string; externalKey: string }) {
+      const site = siteById.get(row.siteKey)!;
+      const entryId = entryIdBySourcePeriod.get(`${row.siteKey}:${row.month}:${row.source}`) ?? null;
+      // Re-verify against the database (not just trust the in-memory map)
+      // that a bound entry genuinely matches this obligation's own
+      // organisation, site, full reporting period and source identity —
+      // exactly what a foreign key alone cannot express.
+      let submittedActivityEntryId: string | null = null;
+      if (entryId) {
+        const periodStart = new Date(`${row.month}-01T00:00:00Z`);
+        const matched = await prisma.activityEntry.findFirst({
+          where: {
+            id: entryId,
+            organisationId: owner.organisationId,
+            siteId: site.id,
+            periodStart,
+            activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[row.source].factorCategory),
+          },
+          select: { id: true },
+        });
+        if (!matched) {
+          throw new Error(`BOARD-1 submission identity mismatch: entry ${entryId} for ${row.siteKey}:${row.month}:${row.source} does not match its own claimed org/site/period/source.`);
+        }
+        submittedActivityEntryId = matched.id;
+      }
+      return {
+        organisationId: owner.organisationId,
+        siteId: site.id,
+        month: row.month,
+        sourceKey: row.source,
+        externalKey: row.externalKey,
+        status: "REVIEW_REQUIRED" as const,
+        submittedActivityEntryId,
+      };
+    }
+    const obligationRows = await Promise.all(obligations.map(boundObligationRow));
+    await prisma.carbonSourcePeriodObligation.createMany({ data: obligationRows });
+    trace("carbon obligations createMany done");
+
+    // Explicitly review every obligation a real submission was bound to —
+    // the seed's own synthetic reviewer persona, through the same
+    // permission-checked, fingerprinted service a real reviewer would use.
+    // An obligation with no bound submission stays REVIEW_REQUIRED: leaving
+    // a gap unreviewed is honest; reviewing something that doesn't exist
+    // would not be.
+    if (!this.independentReviewer) throw new Error("Independent reviewer persona must exist before obligation review.");
+    const reviewer = this.independentReviewer;
+    const boundObligationIds = await prisma.carbonSourcePeriodObligation.findMany({
+      where: { organisationId: owner.organisationId, status: "REVIEW_REQUIRED", submittedActivityEntryId: { not: null } },
+      select: { id: true },
+    });
+    await mapWithConcurrency(boundObligationIds, 8, async ({ id }) => {
+      await reviewSourcePeriodObligation(reviewer, id, { note: "BOARD-1 seed: reviewed against its genuine bound submission." });
+    });
+    trace("carbon obligation review done");
+  }
+
+  // Checkpoint B fix 7: a real invoice and a real meter reading, each a
+  // genuine SourceDocument linked to the exact ActivityEntry it documents
+  // (never a floating evidence file with placeholder text that admits its
+  // own quantity is unfilled). 2026-specific evidence narrative only.
+  private async createInvoiceAndMeterDocuments(owner: OrganisationContext, siteById: Map<string, { key: string; id: string; name: string }>): Promise<void> {
     const invoiceEntry = await prisma.activityEntry.findFirstOrThrow({
       where: {
         organisationId: owner.organisationId,
@@ -747,199 +892,6 @@ export class LiveSeedPort implements DemoSeedPort {
     await prisma.activityEntry.update({ where: { id: meterEntry.id }, data: { sourceDocumentId: meterDoc.id } });
     this.meterReadingSourceDocumentId = meterDoc.id;
     trace("carbon invoice/meter documents done");
-
-    // Phase 2: run the real derived-Category-3 mechanism over the whole
-    // 2026 window, then read its actual persisted result per site/month.
-    await prepareReportingData(owner, new Date("2026-01-01"), new Date("2026-08-31"));
-    trace("carbon phase 2 (prepareReportingData) done");
-
-    const derivedRows = await prisma.calculation.findMany({
-      where: { organisationId: owner.organisationId, scope3Category: "Cat 3 — Fuel- and energy-related activities" },
-      include: { activityEntry: true },
-    });
-    const derivedCat3BySiteMonth = new Map<string, number>();
-    for (const row of derivedRows) {
-      const key = `${row.activityEntry.siteId}:${monthOf(row.activityEntry.periodStart)}`;
-      derivedCat3BySiteMonth.set(key, (derivedCat3BySiteMonth.get(key) ?? 0) + Number(row.resultKgCo2e));
-    }
-
-    // Phase 3: Scope 3 category 1/6/7 entries — category1 is whatever
-    // scope3Allocation says is left after the *actual* derived category 3,
-    // never an independently invented number. Independent per site-month,
-    // so built concurrently for the same reason as Phase 1.
-    const { scope3Allocation } = await import("./board1");
-    await mapWithConcurrency(
-      targets2026.filter((t) => t.scope3Kg > 0),
-      4,
-      async (target) => {
-          const site = siteById.get(target.siteKey)!;
-          const periodStart = new Date(`${target.month}-01T00:00:00Z`);
-          const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
-          const derivedCat3Kg = derivedCat3BySiteMonth.get(`${site.id}:${target.month}`) ?? 0;
-          const parts = scope3Allocation(target.scope3Kg, round4(derivedCat3Kg));
-
-          const writes: Promise<void>[] = [];
-          if (parts.category6Kg > 0) {
-            writes.push(
-              createActivityEntryWithCalculations(ctx, {
-                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.travel.factorCategory)!,
-                siteId: site.id, periodStart, periodEnd, rawValue: parts.category6Kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-              }).then((result) => recordSubmission(target.siteKey, target.month, "travel", result.entry.id)),
-            );
-          }
-          if (parts.category7Kg > 0) {
-            writes.push(
-              createActivityEntryWithCalculations(ctx, {
-                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.commuting.factorCategory)!,
-                siteId: site.id, periodStart, periodEnd, rawValue: parts.category7Kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-              }).then((result) => recordSubmission(target.siteKey, target.month, "commuting", result.entry.id)),
-            );
-          }
-          if (parts.category1Kg > 0) {
-            const purchasedKeys = target.siteKey === "central-digital" ? ["services-a", "services-b", "services-c", "services-d"] : ["substrate", "services", "consumables"];
-            const share = parts.category1Kg / purchasedKeys.length;
-            for (const source of purchasedKeys) {
-              writes.push(
-                createActivityEntryWithCalculations(ctx, {
-                  activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
-                  siteId: site.id, periodStart, periodEnd, rawValue: round4(share), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-                }).then((result) => recordSubmission(target.siteKey, target.month, source, result.entry.id)),
-              );
-            }
-          }
-          await Promise.all(writes);
-      },
-    );
-
-    trace("carbon phase 3 done");
-
-    // 2025 comparable window: same construction, but scope3 is entered as a
-    // single "board1_purchased_goods" line per site-month (only the total
-    // needs to reconcile; the fine category split is a 2026-only claim).
-    await mapWithConcurrency(targets2025, 4, async (target) => {
-        const site = siteById.get(target.siteKey)!;
-        const periodStart = new Date(`${target.month}-01T00:00:00Z`);
-        const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
-        const writes: Promise<void>[] = [];
-        if (target.scope1Kg > 0) {
-          const [gasKg, fleetKg] = [round4(target.scope1Kg * 0.8), round4(target.scope1Kg * 0.2)];
-          for (const [source, kg] of [["gas", gasKg], ["fleet", fleetKg]] as const) {
-            if (kg <= 0) continue;
-            writes.push(
-              createActivityEntryWithCalculations(ctx, {
-                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
-                siteId: site.id, periodStart, periodEnd, rawValue: kg, rawUnit: source === "gas" ? "kWh" : "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-              }).then((result) => recordSubmission(target.siteKey, target.month, source, result.entry.id)),
-            );
-          }
-        }
-        if (target.scope2LocationKg > 0) {
-          const electricityKeys = target.siteKey === "central-digital" ? ["electricity-a", "electricity-b"] : ["electricity"];
-          const share = target.scope2LocationKg / electricityKeys.length;
-          for (const source of electricityKeys) {
-            writes.push(
-              createActivityEntryWithCalculations(ctx, {
-                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
-                siteId: site.id, periodStart, periodEnd, rawValue: round4(share), rawUnit: "kWh", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-              }).then((result) => recordSubmission(target.siteKey, target.month, source, result.entry.id)),
-            );
-          }
-        }
-        if (target.scope3Kg > 0) {
-          writes.push(
-            createActivityEntryWithCalculations(ctx, {
-              activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.substrate.factorCategory)!,
-              siteId: site.id, periodStart, periodEnd, rawValue: round4(target.scope3Kg), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-            }).then((result) => recordSubmission(target.siteKey, target.month, "substrate", result.entry.id)),
-          );
-        }
-        await Promise.all(writes);
-      });
-
-    trace("carbon 2025 window done");
-
-    // Checkpoint B corrective handoff §1: 192 real, independently reviewable
-    // source-period obligations for 2026, each genuinely bound
-    // (submittedActivityEntryId) to the exact ActivityEntry its review
-    // actually covers — never a dangling reference row the Overview's
-    // coverage metric can't trace back to real submitted/reviewed data, and
-    // never stamped REVIEWED merely because a submission exists. Every
-    // obligation is created REVIEW_REQUIRED; the explicit
-    // reviewSourcePeriodObligation service (below) is the only thing that
-    // ever moves one to REVIEWED.
-    async function boundObligationRow(row: { siteKey: string; month: string; source: string; externalKey: string }) {
-      const site = siteById.get(row.siteKey)!;
-      const entryId = entryIdBySourcePeriod.get(`${row.siteKey}:${row.month}:${row.source}`) ?? null;
-      // Re-verify against the database (not just trust the in-memory map)
-      // that a bound entry genuinely matches this obligation's own
-      // organisation, site, full reporting period and source identity —
-      // exactly what a foreign key alone cannot express.
-      let submittedActivityEntryId: string | null = null;
-      if (entryId) {
-        const periodStart = new Date(`${row.month}-01T00:00:00Z`);
-        const matched = await prisma.activityEntry.findFirst({
-          where: {
-            id: entryId,
-            organisationId: owner.organisationId,
-            siteId: site.id,
-            periodStart,
-            activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[row.source].factorCategory),
-          },
-          select: { id: true },
-        });
-        if (!matched) {
-          throw new Error(`BOARD-1 submission identity mismatch: entry ${entryId} for ${row.siteKey}:${row.month}:${row.source} does not match its own claimed org/site/period/source.`);
-        }
-        submittedActivityEntryId = matched.id;
-      }
-      return {
-        organisationId: owner.organisationId,
-        siteId: site.id,
-        month: row.month,
-        sourceKey: row.source,
-        externalKey: row.externalKey,
-        status: "REVIEW_REQUIRED" as const,
-        submittedActivityEntryId,
-      };
-    }
-    const currentObligationRows = await Promise.all(obligations.map(boundObligationRow));
-    await prisma.carbonSourcePeriodObligation.createMany({ data: currentObligationRows });
-    trace("carbon obligations createMany done");
-
-    // A genuine prior-comparable (2025) obligation set, at the coarser
-    // granularity 2025 was actually entered at (see the 2025 window above:
-    // one aggregate Scope 3 line, not the fine 2026 category split) — never
-    // invented at the 2026 granularity just to make two years look alike.
-    const priorObligationSourceRows: { siteKey: string; month: string; source: string; externalKey: string }[] = [];
-    for (const target of targets2025) {
-      const sources: string[] = [];
-      if (target.scope1Kg > 0) sources.push("gas", "fleet");
-      if (target.scope2LocationKg > 0) sources.push(...(target.siteKey === "central-digital" ? ["electricity-a", "electricity-b"] : ["electricity"]));
-      if (target.scope3Kg > 0) sources.push("substrate");
-      for (const source of sources) {
-        priorObligationSourceRows.push({ siteKey: target.siteKey, month: target.month, source, externalKey: `BOARD-1:2025:${target.siteKey}:${target.month}:${source}` });
-      }
-    }
-    const priorObligationRows = await Promise.all(priorObligationSourceRows.map(boundObligationRow));
-    await prisma.carbonSourcePeriodObligation.createMany({ data: priorObligationRows });
-    trace("carbon prior-year obligations createMany done");
-
-    // Explicitly review every obligation a real submission was bound to —
-    // the seed's own synthetic reviewer persona, through the same
-    // permission-checked, fingerprinted service a real reviewer would use.
-    // An obligation with no bound submission stays REVIEW_REQUIRED: leaving
-    // a gap unreviewed is honest; reviewing something that doesn't exist
-    // would not be.
-    if (!this.independentReviewer) throw new Error("Independent reviewer persona must exist before obligation review.");
-    const reviewer = this.independentReviewer;
-    const boundObligationIds = await prisma.carbonSourcePeriodObligation.findMany({
-      where: { organisationId: owner.organisationId, status: "REVIEW_REQUIRED", submittedActivityEntryId: { not: null } },
-      select: { id: true },
-    });
-    await mapWithConcurrency(boundObligationIds, 4, async ({ id }) => {
-      await reviewSourcePeriodObligation(reviewer, id, { note: "BOARD-1 seed: reviewed against its genuine bound submission." });
-    });
-    trace("carbon obligation review done");
   }
 
   // -------------------------------------------------------------------
@@ -1456,10 +1408,18 @@ export class LiveSeedPort implements DemoSeedPort {
       throw new Error(`Reconciliation failed: Scope 2 market-based companion is ${marketCompanion} kgCO2e, expected ${BOARD1.marketBasedScope2Kg}.`);
     }
 
-    const priorCalcs = await prisma.calculation.findMany({
+    // Checkpoint B corrective handoff §2: the prior year now goes through
+    // the same real derived-Category-3 mechanism as the current year (see
+    // createAndCalculateCarbon's shared per-year pipeline), so its own
+    // derived rows must be added back exactly like the current year's —
+    // never omitted, which would silently undercount the prior headline.
+    const priorPrimaryCalcs = await prisma.calculation.findMany({
       where: { organisationId, derivedFromCalculationId: null, activityEntry: { periodStart: { gte: new Date("2025-01-01"), lte: new Date("2025-08-31") } } },
     });
-    const priorTotal = round4(sum(priorCalcs.filter((c) => c.basis !== "RESIDUAL_MIX" && c.basis !== "MARKET_BASED")));
+    const priorDerivedCalcs = await prisma.calculation.findMany({
+      where: { organisationId, derivedFromCalculationId: { not: null }, activityEntry: { periodStart: { gte: new Date("2025-01-01"), lte: new Date("2025-08-31") } } },
+    });
+    const priorTotal = round4(sum(priorPrimaryCalcs.filter((c) => c.basis !== "RESIDUAL_MIX" && c.basis !== "MARKET_BASED")) + sum(priorDerivedCalcs));
     if (Math.abs(priorTotal - BOARD1.previousKg) > 1) {
       throw new Error(`Reconciliation failed: prior headline is ${priorTotal} kgCO2e, expected ${BOARD1.previousKg}.`);
     }

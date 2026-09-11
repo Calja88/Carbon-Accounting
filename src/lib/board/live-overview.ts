@@ -8,7 +8,6 @@ import { tenantWhere } from "@/lib/repositories/tenant-scope";
 import { buildAnalyticsSnapshot, type AnalyticsSnapshot } from "@/lib/analytics-service";
 import { monthInputValue, formatRangeLabel } from "@/lib/report-period";
 import { listOverdueOrUnevaluatedObligations } from "@/lib/ems/legal/evaluation-service";
-import { SCOPE3_CAT3_LABEL } from "@/lib/scope3-derived";
 import { computeReviewFingerprint } from "@/lib/carbon/source-period-obligation-service";
 import { boardPeriodSchema } from "./schemas";
 import { loadOverview, type OverviewPorts, type BoardScope } from "./overview-service";
@@ -229,8 +228,8 @@ function toAnalyticsWindow(snapshot: AnalyticsSnapshot): AuthorizedAnalyticsWind
 }
 
 /**
- * Real Scope 3 category coverage from the emission-factor/data-point
- * catalogue and this period's own calculations — never a fixture constant.
+ * Real Scope 3 quantified-category count from this period's own
+ * calculations — never a fixture constant.
  *
  * Grouped by `scope3Category` (the canonical GHG Protocol category label,
  * e.g. "Cat 1 — Purchased goods & services"), never by the catalogue's
@@ -239,29 +238,26 @@ function toAnalyticsWindow(snapshot: AnalyticsSnapshot): AuthorizedAnalyticsWind
  * categories (or, as BOARD-1 previously did, every data point regardless of
  * scope shared the same display category), which would silently collapse
  * or miscount canonical categories.
+ *
+ * Checkpoint B corrective handoff §2: `screenedCategories` is honestly
+ * `null` — no Scope 3 screening decision/record exists anywhere in this
+ * codebase (confirmed by inspection: there is no screening subsystem, only
+ * the `ActivityDataPoint` catalogue and the standing Category 3 derivation
+ * mechanism, neither of which is an actual screening decision). The
+ * previous implementation inferred "screened" from which catalogue
+ * categories happen to exist plus an unconditional Category 3 insertion —
+ * that is catalogue/derivation-mechanism presence, not a screening record,
+ * and is removed rather than carried forward as if it were one. Building a
+ * real screening subsystem is out of this checkpoint's scope.
  */
 async function computeScope3CategoryCoverage(
   context: OrganisationContext,
   siteIds: readonly string[],
   periodStart: Date,
   periodEnd: Date,
-): Promise<{ quantifiedCategories: number; screenedCategories: number }> {
-  const screenedRows = await prisma.activityDataPoint.findMany({
-    where: { scope: "SCOPE_3", scope3Category: { not: null } },
-    select: { scope3Category: true },
-    distinct: ["scope3Category"],
-  });
-  // Category 3 structurally has no data point of its own (schema comment on
-  // ActivityDataPoint.scope3Category) — it is always screened via the
-  // standing derivation mechanism (scope3-derived.ts), never via a
-  // catalogue entry, so it would never appear in screenedRows above despite
-  // genuinely being screened (and, once a positive value derives, genuinely
-  // quantified) every period.
-  const screenedCategories = new Set([
-    ...screenedRows.map((r) => r.scope3Category).filter((c): c is string => c !== null),
-    SCOPE3_CAT3_LABEL,
-  ]);
-  if (siteIds.length === 0) return { quantifiedCategories: 0, screenedCategories: screenedCategories.size };
+): Promise<{ quantifiedCategories: number; screenedCategories: null; screenedCategoriesReason: string }> {
+  const screenedCategoriesReason = "Scope 3 screening is not recorded for this reporting boundary.";
+  if (siteIds.length === 0) return { quantifiedCategories: 0, screenedCategories: null, screenedCategoriesReason };
   const ctx = toTenantRepositoryContext(context);
   const quantified = await prisma.calculation.findMany({
     where: tenantWhere<Prisma.CalculationWhereInput>(ctx, {
@@ -279,7 +275,7 @@ async function computeScope3CategoryCoverage(
     distinct: ["scope3Category"],
   });
   const categories = new Set(quantified.map((c) => c.scope3Category).filter((c): c is string => c !== null));
-  return { quantifiedCategories: categories.size, screenedCategories: screenedCategories.size };
+  return { quantifiedCategories: categories.size, screenedCategories: null, screenedCategoriesReason };
 }
 
 /** True only when a real Scope 2 market-based/residual-mix companion calculation exists for this window — never assumed available. */
@@ -403,7 +399,7 @@ async function carbon(context: OrganisationContext, scope: BoardScope): ReturnTy
     from: scope.from, to: scope.to, previousFrom: monthInputValue(prior.periodStart), previousTo: monthInputValue(prior.periodEnd),
     permittedSiteIds, selectedSiteId: scope.siteIds.length === 1 ? scope.siteIds[0] : undefined,
     currentComparisonKey: comparisonKey, previousComparisonKey: comparisonKey,
-    quantifiedCategories: scope3.quantifiedCategories, screenedCategories: scope3.screenedCategories, asOf: new Date().toISOString(),
+    quantifiedCategories: scope3.quantifiedCategories, screenedCategories: scope3.screenedCategories, screenedCategoriesReason: scope3.screenedCategoriesReason, asOf: new Date().toISOString(),
     marketBasedAvailable,
   });
 }

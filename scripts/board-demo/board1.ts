@@ -39,8 +39,24 @@ export function scope3Allocation(totalKg: number, derivedCategory3Kg: number) {
   if (![totalKg, derivedCategory3Kg, category1Kg].every(Number.isFinite) || derivedCategory3Kg < 0 || category1Kg < 0) throw new Error("Engine result cannot fit the agreed synthetic category envelope");
   return { category1Kg, category3Kg: derivedCategory3Kg, category6Kg, category7Kg };
 }
+/**
+ * Both years' obligations, at the SAME fine per-source granularity —
+ * Checkpoint B corrective handoff §2: the prior (2025) comparable window
+ * now goes through the identical real per-source construction as the
+ * current (2026) window (see live-seed-port.ts's shared per-year carbon
+ * pipeline), so its reviewable obligation set is genuinely comparable in
+ * shape, not a coarser stand-in invented just to make the two years look
+ * alike. 192 obligations per year (3 sites x 8 sources x 8 months) = 384
+ * total.
+ */
 export function buildSubmissionObligations() {
-  return BOARD1.sites.flatMap(site => Array.from({ length: 8 }, (_, i) => `${2026}-${String(i+1).padStart(2,"0")}`).flatMap(month => BOARD1.sourceKeys[site.key].map(source => ({ externalKey: `BOARD-1:${site.key}:${month}:${source}`, siteKey: site.key, month, source, status: "REVIEW_REQUIRED" as const }))));
+  return ([2026, 2025] as const).flatMap(year =>
+    BOARD1.sites.flatMap(site =>
+      Array.from({ length: 8 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`).flatMap(month =>
+        BOARD1.sourceKeys[site.key].map(source => ({ externalKey: `BOARD-1:${site.key}:${month}:${source}`, siteKey: site.key, month, source, status: "REVIEW_REQUIRED" as const })),
+      ),
+    ),
+  );
 }
 export function buildActionPlan() {
   return Array.from({ length: 13 }, (_, i) => ({

@@ -41,7 +41,16 @@ export interface OverviewModel {
   synthetic: boolean; capturedAt: string;
   carbon: Section<{
     current: CarbonMetric; previous: CarbonMetric; marketBasedKg: number | null;
-    quantifiedCategories: number; screenedCategories: number; sites: SiteRow[]; trend: TrendPoint[];
+    quantifiedCategories: number;
+    /**
+     * Null when no Scope 3 screening decision has actually been recorded
+     * for this organisation (no screening subsystem exists yet) — never a
+     * fabricated 0 or an inference from the quantified count. See
+     * `screenedCategoriesReason` for why.
+     */
+    screenedCategories: number | null;
+    screenedCategoriesReason: string | null;
+    sites: SiteRow[]; trend: TrendPoint[];
   }>;
   attention: Section<{
     items: AttentionItem[]; total: number; openActions: number; awaitingVerification: number;

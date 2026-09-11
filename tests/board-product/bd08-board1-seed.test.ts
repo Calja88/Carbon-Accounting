@@ -84,16 +84,23 @@ describe("BD08 BOARD-1 seed (real Postgres, end to end)", () => {
       expect(Math.round(sum(lbAndScope13) + sum(derived))).toBeCloseTo(BOARD1.currentKg, -1);
       expect(Math.round(sum(marketCompanion))).toBeCloseTo(BOARD1.marketBasedScope2Kg, -1);
 
-      const prior = await prisma.calculation.findMany({
+      // Checkpoint B corrective handoff §2: the prior year goes through the
+      // same real derived-Category-3 mechanism as the current year, so its
+      // own derived rows must be added back, exactly like the current
+      // year's above.
+      const priorPrimary = await prisma.calculation.findMany({
         where: { organisationId: org.id, derivedFromCalculationId: null, activityEntry: { periodStart: { gte: new Date("2025-01-01"), lte: new Date("2025-08-31") } }, basis: { notIn: ["RESIDUAL_MIX", "MARKET_BASED"] } },
       });
-      expect(Math.round(sum(prior))).toBeCloseTo(BOARD1.previousKg, -1);
+      const priorDerived = await prisma.calculation.findMany({
+        where: { organisationId: org.id, derivedFromCalculationId: { not: null }, activityEntry: { periodStart: { gte: new Date("2025-01-01"), lte: new Date("2025-08-31") } } },
+      });
+      expect(Math.round(sum(priorPrimary) + sum(priorDerived))).toBeCloseTo(BOARD1.previousKg, -1);
 
       const obligationCount = await prisma.carbonSourcePeriodObligation.count({ where: { organisationId: org.id, month: { startsWith: "2026" } } });
       const reviewedCount = await prisma.carbonSourcePeriodObligation.count({ where: { organisationId: org.id, month: { startsWith: "2026" }, status: "REVIEWED" } });
       expect(obligationCount).toBe(192);
       expect(reviewedCount).toBe(192);
-      expect(buildSubmissionObligations()).toHaveLength(192); // the fixture builder's own contract, independently
+      expect(buildSubmissionObligations().filter((r) => r.month.startsWith("2026"))).toHaveLength(192); // the fixture builder's own contract, independently
 
       const evidenceRows = await prisma.evidenceObject.findMany({ where: { organisationId: org.id } });
       expect(evidenceRows.length).toBeGreaterThanOrEqual(8);
@@ -109,7 +116,12 @@ describe("BD08 BOARD-1 seed (real Postgres, end to end)", () => {
       expect(packs).toHaveLength(1);
       expect(packs[0].status).toBe("ISSUED");
     },
-    300_000,
+    // Checkpoint B corrective handoff §2 roughly doubled the real-service
+    // round trips this build performs (the prior year now goes through the
+    // same full per-source construction as the current year) — widened
+    // from 300s accordingly; the job-level CI timeout (25 min) has ample
+    // headroom.
+    480_000,
   );
 
   it(
