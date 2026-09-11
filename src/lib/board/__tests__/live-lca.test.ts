@@ -10,7 +10,10 @@ import { describe, expect, it, vi } from "vitest";
 import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 
 const canViewLca = vi.fn((..._args: unknown[]) => true);
-vi.mock("@/lib/lca/permissions", () => ({ canViewLca: (...args: unknown[]) => canViewLca(...args) }));
+vi.mock("@/lib/rbac/authorize", async (original) => ({
+  ...await original<typeof import("@/lib/rbac/authorize")>(),
+  hasPermission: (...args: unknown[]) => canViewLca(...args),
+}));
 
 const requireAssessmentInScope = vi.fn((..._args: unknown[]): unknown => undefined);
 vi.mock("@/lib/repositories/lca-repository", () => ({

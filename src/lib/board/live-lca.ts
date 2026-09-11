@@ -25,8 +25,7 @@ import { requireAssessmentInScope, accessibleAssessmentFilter } from "@/lib/repo
 import { tenantWhere } from "@/lib/repositories/tenant-scope";
 import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
 import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
-import { PermissionDeniedError } from "@/lib/rbac/authorize";
-import { canViewLca } from "@/lib/lca/permissions";
+import { PermissionDeniedError, hasPermission } from "@/lib/rbac/authorize";
 import { getLatestRun, isCalculationStale, resultsToAnalysisRows, runTotals } from "@/lib/lca/calculation-service";
 import { contributionsByStage, compareScenario, type ScenarioComparison as LegacyScenarioComparison } from "@/lib/lca/analysis";
 import { D } from "@/lib/lca/decimal";
@@ -67,7 +66,7 @@ async function resolveScenarioComparison(
   scenarioAssessmentId: string,
   db: Prisma.TransactionClient = prisma,
 ): Promise<ResolvedScenarioComparison | null> {
-  if (!canViewLca(context)) return null;
+  if (!hasPermission(context, "lca.view")) return null;
 
   let scenario;
   try {

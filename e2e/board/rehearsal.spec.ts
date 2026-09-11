@@ -18,7 +18,7 @@ test.beforeAll(async () => {
 test.afterAll(() => prisma.$disconnect());
 
 async function login(page: Page, persona: string) {
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: manifest.ids.personaUserIds[persona] } });
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: manifest.personas[persona].userId } });
   const secrets = JSON.parse(readFileSync(process.env.BOARD_DEMO_CREDENTIALS_FILE!, "utf8"));
   await page.goto("/login");
   await page.getByLabel("Email").fill(user.email);

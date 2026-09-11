@@ -25,10 +25,12 @@ async function main() {
   const pack = await prisma.managementReviewPack.findFirstOrThrow({ where: { id: ids.managementPackId, organisationId: org, status: "ISSUED" } });
   const nc = await prisma.nonconformity.findFirstOrThrow({ where: { id: ids.nonconformityId, organisationId: org }, include: { sourceLinks: true, correctiveActions: true } });
   const links = await prisma.managementReviewInputSnapshot.findMany({ where: { packId: pack.id } });
+  const members = await prisma.organisationMembership.findMany({ where: { organisationId: org }, include: { user: true } });
+  const personas = Object.fromEntries(members.map((m) => [m.user.name!.replace("BOARD-1 ", ""), { userId: m.userId, membershipId: m.id, email: m.user.email, status: m.status }]));
   const manifest = {
     fixture: "BOARD-1", environmentId: env.configuredEnvironmentId, databaseId: env.configuredDatabaseId,
     applicationCommit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
-    generatedAt: new Date().toISOString(), status: "READY", digest: lease.digest, ids: lease.identityMap,
+    generatedAt: new Date().toISOString(), status: "READY", digest: lease.digest, ids: lease.identityMap, personas,
     routes: { overview: "/?from=2026-01&to=2026-08", carbon: "/carbon?from=2026-01&to=2026-08", attention: "/attention?from=2026-01&to=2026-08", nonconformity: `/ems/nonconformities/${nc.id}`, lca: `/assessments/${ids.lcaAssessmentId}/scenarios`, pack: `/ems/management-reviews/${ids.managementReviewId}/pack`, download: `/ems/management-reviews/${ids.managementReviewId}/pack/download` },
     sources: nc.sourceLinks.map((s) => ({ type: s.sourceType, id: s.sourceId })),
     reviewInputs: links.map((s) => ({ definition: s.inputDefinitionKey, type: s.sourceType, id: s.sourceRecordId, revision: s.sourceVersionLabel })),
@@ -41,6 +43,6 @@ async function main() {
 
 main().catch((error: unknown) => {
   // Avoid dumping Prisma errors/connection details; private operator diagnostics only.
-  console.error("BOARD-1 verification failed.", error instanceof Error ? error.name : "Unknown error");
+  console.error("BOARD-1 verification failed.", error instanceof Error ? error.name : "Unknown error", (error as { code?: string })?.code ?? "");
   process.exitCode = 1;
 }).finally(() => prisma.$disconnect());

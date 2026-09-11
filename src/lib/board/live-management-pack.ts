@@ -22,7 +22,6 @@
 import type { Prisma } from "@prisma/client";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
-import { canViewLca } from "@/lib/lca/permissions";
 import { getLcaScenarioModel } from "./live-lca";
 import { getLatestRun } from "@/lib/lca/calculation-service";
 import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
@@ -138,7 +137,8 @@ function parseBoardSection(payload: unknown): StoredBoardSection | null {
 export async function getBoardManagementPack(context: OrganisationContext, reviewId: string): Promise<FrozenBoardPack | null> {
   requirePermission(context, VIEW_PERMISSION);
   requirePermission(context, "carbon.view");
-  if (context.access.mode !== "ORGANISATION_WIDE" || !canViewLca(context)) throw new PermissionDeniedError("MISSING_PERMISSION");
+  requirePermission(context, "lca.view");
+  if (context.access.mode !== "ORGANISATION_WIDE") throw new PermissionDeniedError("ENTITY_NOT_IN_SCOPE");
   const pack = await getManagementReviewPack(context, reviewId);
   if (!pack) return null;
   const board = parseBoardSection(pack.payload);

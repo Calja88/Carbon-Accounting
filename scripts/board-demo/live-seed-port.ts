@@ -1108,7 +1108,8 @@ export class LiveSeedPort implements DemoSeedPort {
       where: { organisationId: owner.organisationId, status: "REVIEW_REQUIRED", submittedActivityEntryId: { not: null } },
       select: { id: true },
     });
-    await mapWithConcurrency(boundObligationIds, 8, async ({ id }) => {
+    // ponytail: two reviewers bound remote audit-lock contention; increase only after profiling.
+    await mapWithConcurrency(boundObligationIds, 2, async ({ id }) => {
       await reviewSourcePeriodObligation(reviewer, id, { note: "BOARD-1 seed: reviewed against its genuine bound submission." });
     });
     trace("carbon obligation review done");

@@ -56,6 +56,13 @@ export { TenantOwnershipError };
 
 export class ManagementReviewPackError extends Error {}
 
+function packConflict(error: unknown): never {
+  if (error instanceof Error && "code" in error && error.code === "P2034") {
+    throw new ManagementReviewPackError("Review inputs changed concurrently; reload before generating or issuing again.");
+  }
+  throw error;
+}
+
 const MANAGE_PERMISSION = "ems.management_review.manage" as const;
 const VIEW_PERMISSION = "ems.view" as const;
 
@@ -242,7 +249,7 @@ export async function generateManagementReviewPack(context: OrganisationContext,
     });
 
     return pack;
-  }, { isolationLevel: "RepeatableRead", timeout: 30000 });
+  }, { isolationLevel: "RepeatableRead", timeout: 30000 }).catch(packConflict);
 }
 
 export async function issueManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string, board?: BoardPackSource) {
@@ -327,7 +334,7 @@ export async function issueManagementReviewPack(context: OrganisationContext, re
     });
 
     return issued;
-  }, { isolationLevel: "RepeatableRead", timeout: 30000 });
+  }, { isolationLevel: "RepeatableRead", timeout: 30000 }).catch(packConflict);
 }
 
 export async function getManagementReviewPack(context: OrganisationContext, reviewId: string) {
