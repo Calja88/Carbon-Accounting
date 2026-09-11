@@ -1,0 +1,262 @@
+{
+  "fixture": "BOARD-1",
+  "environmentId": "board-demo-local-2026-09-11",
+  "databaseId": "cool-cake-20837205",
+  "applicationCommit": "a7e12e1f502a0d11d4a8c02eb2a40e0a1b158654",
+  "generatedAt": "2026-09-11T16:43:53.991Z",
+  "status": "READY",
+  "digest": "1d10d10deef89d6e76b52caf1e8268480465c1a088a5ee44cdb3cbf9df910932",
+  "ids": {
+    "siteIds": {
+      "east-cards": "cmtx6736c0007hnq4gdxizgzk",
+      "north-works": "cmtx672v10005hnq486bt8ten",
+      "central-digital": "cmtx673c20009hnq4fck9mls2"
+    },
+    "entityId": "cmtx672jq0003hnq4ey07i9yn",
+    "evidenceIds": {
+      "invoice": "cmtx6kmb402f6hnq4dgkmadd7",
+      "procedure": "cmtx6ko1n02fihnq43zk7lkts",
+      "completion": "cmtx6kpih02fuhnq4px8bv5ti",
+      "evaluation": "cmtx6koog02fmhnq4ompgf3ay",
+      "inspection": "cmtx6knmi02fehnq4b4350dvg",
+      "effectiveness": "cmtx6kpy802fyhnq4andgv49d",
+      "meter-reading": "cmtx6kn9702fahnq4k1beueup",
+      "audit-observation": "cmtx6kp1o02fqhnq4vza26mpk"
+    },
+    "lcaScenarioId": "cmtx6oeny02mchnq4djy2woum",
+    "schemaVersion": 1,
+    "organisationId": "cmtx670xd0001hnq4bvrhq1y1",
+    "personaUserIds": {
+      "sustainability-lead": "cmtx67t8n000fhnq4ngmm75k4",
+      "independent-reviewer": "cmtx67vg7000khnq44c3nkhip"
+    },
+    "lcaAssessmentId": "cmtx6nx9p02l9hnq4h1ecbu33",
+    "nonconformityId": "cmtx6mhv602jehnq4p7er4jsl",
+    "managementPackId": "cmtx6pimu02nxhnq4sl4zmyj2",
+    "correctiveActionId": "cmtx6n07102k4hnq4imlrgc86",
+    "managementReviewId": "cmtx6ongc02n9hnq4moxglhpb",
+    "invoiceSourceDocumentId": "cmtx6965s00amhnq47ssc1dxx",
+    "meterReadingSourceDocumentId": "cmtx696y700aohnq4pogkljqk"
+  },
+  "personas": {
+    "contributor": {
+      "userId": "cmtx67pkc000ahnq451l02e5n",
+      "membershipId": "cmtx67pxn000chnq4q6oqepx4",
+      "email": "board-1-contributor-05dcd9e8-c05f-4d8f-a829-0947d6092631@example.invalid",
+      "status": "ACTIVE"
+    },
+    "sustainability-lead": {
+      "userId": "cmtx67t8n000fhnq4ngmm75k4",
+      "membershipId": "cmtx67td4000hhnq44ca4law9",
+      "email": "board-1-sustainability-lead-0d335e79-1d0c-4e37-994d-e2a54898ffc5@example.invalid",
+      "status": "ACTIVE"
+    },
+    "independent-reviewer": {
+      "userId": "cmtx67vg7000khnq44c3nkhip",
+      "membershipId": "cmtx67vlz000mhnq4kddazwma",
+      "email": "board-1-independent-reviewer-c33f9855-f3b4-4f2b-bdec-ea6590415f14@example.invalid",
+      "status": "ACTIVE"
+    },
+    "read-only": {
+      "userId": "cmtx67xob000phnq4a2zxkx1x",
+      "membershipId": "cmtx67xu1000rhnq4el9zd3sz",
+      "email": "board-1-read-only-b72ba1ac-6e3f-429d-a696-07e568ab36bc@example.invalid",
+      "status": "ACTIVE"
+    },
+    "restricted": {
+      "userId": "cmtx67zvz000uhnq40p7by275",
+      "membershipId": "cmtx6800q000whnq46r3y0wa5",
+      "email": "board-1-restricted-be9b482e-5ba6-4f84-8578-9d588afb22b9@example.invalid",
+      "status": "ACTIVE"
+    },
+    "suspended": {
+      "userId": "cmtx681sc000zhnq4ilcoh4ml",
+      "membershipId": "cmtx681xy0011hnq4dw4uylva",
+      "email": "board-1-suspended-1d51f6c6-f5ab-48fc-b35d-513bbe025928@example.invalid",
+      "status": "SUSPENDED"
+    }
+  },
+  "routes": {
+    "overview": "/?from=2026-01&to=2026-08",
+    "carbon": "/carbon?from=2026-01&to=2026-08",
+    "attention": "/attention?from=2026-01&to=2026-08",
+    "nonconformity": "/ems/nonconformities/cmtx6mhv602jehnq4p7er4jsl",
+    "lca": "/assessments/cmtx6nx9p02l9hnq4h1ecbu33/scenarios",
+    "pack": "/ems/management-reviews/cmtx6ongc02n9hnq4moxglhpb/pack",
+    "download": "/ems/management-reviews/cmtx6ongc02n9hnq4moxglhpb/pack/download"
+  },
+  "sources": [
+    {
+      "type": "AUDIT_FINDING",
+      "id": "cmtx6m7ct02iyhnq44ku06le9"
+    },
+    {
+      "type": "COMPLIANCE_EVALUATION_ITEM",
+      "id": "cmtx6lgyq02hphnq40qidlpdj"
+    }
+  ],
+  "connectedChain": {
+    "aspectIds": [
+      "cmtx6kr8k02g6hnq48zsmmn5j"
+    ],
+    "controlId": "cmtx6kv6602gehnq42evnb37z",
+    "requirementId": "cmtx6kt0x02gahnq4lpq8kt3w",
+    "obligationId": "cmtx6l97z02h6hnq42eut7r7h",
+    "obligationVersionId": "cmtx6l9h802h8hnq4fgc3kx9h",
+    "evaluationId": "cmtx6lgox02hohnq4e1k2jrqb",
+    "evaluationItemId": "cmtx6lgyq02hphnq40qidlpdj",
+    "auditId": "cmtx6lu0402ibhnq4ubcckuhw",
+    "findingId": "cmtx6m7ct02iyhnq44ku06le9"
+  },
+  "evidence": [
+    {
+      "id": "cmtx6kmb402f6hnq4dgkmadd7",
+      "filename": "BOARD-1-invoice.txt",
+      "mimeType": "text/plain",
+      "byteSize": 255,
+      "checksumSha256": "51ad48c3de3f527758d217cbf95109b0b87379281a119189266f8f6c741a8351"
+    },
+    {
+      "id": "cmtx6kn9702fahnq4k1beueup",
+      "filename": "BOARD-1-meter-reading.txt",
+      "mimeType": "text/plain",
+      "byteSize": 228,
+      "checksumSha256": "0264d05fdc1386e72e8b5adab80d4d8932c4880c6b56762c5f484bc2651d8ec7"
+    },
+    {
+      "id": "cmtx6knmi02fehnq4b4350dvg",
+      "filename": "BOARD-1-inspection.txt",
+      "mimeType": "text/plain",
+      "byteSize": 271,
+      "checksumSha256": "85d23c61251dc92502677dd1dcec0cc5aae68e6edf261ae69e97b9f5099a1e91"
+    },
+    {
+      "id": "cmtx6ko1n02fihnq43zk7lkts",
+      "filename": "BOARD-1-procedure.txt",
+      "mimeType": "text/plain",
+      "byteSize": 279,
+      "checksumSha256": "1c8f344bd70790d2569f946c2a680d5443f959e5b91e3cf9786a5970602655c4"
+    },
+    {
+      "id": "cmtx6koog02fmhnq4ompgf3ay",
+      "filename": "BOARD-1-evaluation.txt",
+      "mimeType": "text/plain",
+      "byteSize": 304,
+      "checksumSha256": "d9fcdef32408886c13f536c404d6162bea16edb2d8a811c2392416a9f348de8c"
+    },
+    {
+      "id": "cmtx6kp1o02fqhnq4vza26mpk",
+      "filename": "BOARD-1-audit-observation.txt",
+      "mimeType": "text/plain",
+      "byteSize": 259,
+      "checksumSha256": "bde854d96de172194cf7f3da81706df649c53a02d236ed74dfe1d187ab1c014a"
+    },
+    {
+      "id": "cmtx6kpih02fuhnq4px8bv5ti",
+      "filename": "BOARD-1-completion.txt",
+      "mimeType": "text/plain",
+      "byteSize": 315,
+      "checksumSha256": "6c0a472403bb6cda56b7161f36395fcddf1203e3c27de6818f4e308abde99457"
+    },
+    {
+      "id": "cmtx6kpy802fyhnq4andgv49d",
+      "filename": "BOARD-1-effectiveness.txt",
+      "mimeType": "text/plain",
+      "byteSize": 355,
+      "checksumSha256": "6b3453b3583f614ff9bbae6557b9dd63a7cbc42f3a9f0148d3c4f69a6d1a75ff"
+    },
+    {
+      "id": "cmtx6kyh402gnhnq42jzu139e",
+      "filename": "BOARD-1-inspection-checklist.txt",
+      "mimeType": "text/plain",
+      "byteSize": 280,
+      "checksumSha256": "459f3d9db8f6666ebc554b36f1473faced9cff5ab68cbda0937d81cf9d1bdfa5"
+    }
+  ],
+  "sourceDocuments": [
+    {
+      "id": "cmtx6965s00amhnq47ssc1dxx",
+      "filename": "BOARD-1-invoice.txt",
+      "mimeType": "text/plain",
+      "byteSize": 241,
+      "sha256": "18c597495abc47d3555c7fe38dd5ce31cc5b85f25834e4e3dda0748d43237cce",
+      "activityEntries": [
+        {
+          "id": "cmtx68g4g002uhnq4tudcv58w",
+          "calculations": [
+            {
+              "id": "cmtx68i280036hnq450g6sxyj"
+            },
+            {
+              "id": "cmtx68i80003chnq495ti4auj"
+            },
+            {
+              "id": "cmtx69dcl00bahnq4ndpl9v7d"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmtx696y700aohnq4pogkljqk",
+      "filename": "BOARD-1-meter-reading.txt",
+      "mimeType": "text/plain",
+      "byteSize": 253,
+      "sha256": "749a7c600c1de81e842fbc1114aa231e52017ecd066ccd4ac34954abf4206b81",
+      "activityEntries": [
+        {
+          "id": "cmtx68j4f003ohnq4yxncjbx1",
+          "calculations": [
+            {
+              "id": "cmtx68kxg004ahnq4f9qjmn4i"
+            },
+            {
+              "id": "cmtx68l1u004chnq4fjlaxjub"
+            },
+            {
+              "id": "cmtx69n6000ckhnq41gwjaypf"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reviewInputs": [
+    {
+      "definition": "board-audit",
+      "type": "AUDIT_REPORT",
+      "id": "cmtx6mb8502j6hnq4f5ziujnv",
+      "revision": "revision 1"
+    },
+    {
+      "definition": "board-capa",
+      "type": "CORRECTIVE_ACTION",
+      "id": "cmtx6n07102k4hnq4imlrgc86",
+      "revision": "COMPLETED @ 2026-09-11T16:40:37.205Z"
+    },
+    {
+      "definition": "board-compliance",
+      "type": "COMPLIANCE_EVALUATION",
+      "id": "cmtx6lgox02hohnq4e1k2jrqb",
+      "revision": "2026-09-11T16:39:31.690Z"
+    }
+  ],
+  "frozenChecksum": "6a697835c5337fd7543a1aba0a3092133586283f8fbc12fb71554c36686dfd8f",
+  "cutoffDate": "2026-09-11T16:41:48.101Z",
+  "liveTransition": {
+    "nonconformityStatus": "ACTIONS_IN_PROGRESS",
+    "reviewCycle": 1,
+    "actions": [
+      {
+        "id": "cmtx6n07102k4hnq4imlrgc86",
+        "description": "Name a single inspection owner and record it in the procedure.",
+        "status": "COMPLETED"
+      },
+      {
+        "id": "cmtx6nt1702l0hnq4mynj5d3l",
+        "description": "BOARD1-CA-EXT: extend the containment inspection procedure and named ownership to East Cards.",
+        "status": "OPEN"
+      }
+    ]
+  }
+}

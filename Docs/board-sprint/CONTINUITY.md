@@ -2,6 +2,15 @@
 
 Keep this to ~1-2 pages. Update at the end of every package.
 
+## Finish-mode handoff — 2026-09-11 (supersedes status below)
+
+- **READY:** persistent BOARD-1 in disposable Neon project `cool-cake-20837205`, branch `br-young-haze-arjtwhkj`, database `board_demo`. Preserve this starting state; use a child branch for live-transition rehearsals. Production was not used.
+- Actual IDs, source documents/calculations, EMS chain, personas and frozen checksum: `Docs/board-sprint/rehearsal-manifest.json`. Application revision: `a7e12e1f502a0d11d4a8c02eb2a40e0a1b158654`.
+- Seed, independent reconciliation and replay passed. Issued pack has three pinned inputs. SHA-256: `6a697835c5337fd7543a1aba0a3092133586283f8fbc12fb71554c36686dfd8f`. Live NC is `ACTIONS_IN_PROGRESS`, review cycle 1; first action COMPLETED, follow-up action OPEN. Seed log: `artifacts/board-seed4.log`.
+- Start from any directory: `powershell -NoProfile -ExecutionPolicy Bypass -File C:\Carbon-Accounting\scripts\board-demo\start.ps1`. Opens the production app at `http://localhost:3000` after read-only READY/replay verification. Keep the lid open and use mains power. Private credentials remain in `.env.board-personas.json`; configuration is `.env.board-demo`. Neither is committed.
+- Browser rehearsal, tunnel and final H00 bundling were not executed: user explicitly stopped further work once READY. PR #64 remains draft/unmerged; authoritative Astra APPROVE MERGE is still required. Both CI runs for application revision a7e12e1 passed: 34622189549 and 34622189501. The production build and 2,091 local unit tests passed (11 skipped; lint: 0 errors, 9 existing warnings).
+
+
 ## Current state
 
 - **Foundation window merged.** Astra's final Checkpoint A re-review APPROVED MERGE at HEAD `ae402d0d71c52a4da9c2d53470de0c26af9997ef`. PR [#63](https://github.com/Calja88/Carbon-Accounting/pull/63) merged into `claude/paragon-id-uk-carbon-mvp-1h1uvb` as merge commit `6b0138a7b25b71b55ffe4215cba14d0f526a785c` (standard merge, no squash/rebase — `git merge-base --is-ancestor` confirmed). `board/foundations-2026-09-22` gets no further commits.

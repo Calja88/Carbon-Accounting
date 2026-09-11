@@ -26,9 +26,9 @@ implicit-project Neon command from this directory.
 pnpm install --frozen-lockfile
 pnpm build
 node --env-file=.env.board-demo --import tsx scripts/board-demo/run.ts
-powershell -File scripts/board-demo/start.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/board-demo/start.ps1
 # Optional HTTPS sharing, after the local rehearsal passes:
-powershell -File scripts/board-demo/start.ps1 -Tunnel
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/board-demo/start.ps1 -Tunnel
 ```
 
 The launcher verifies the manifest, READY state, replay, source relations and
@@ -36,7 +36,7 @@ evidence bytes before opening a port. Next starts in production mode on
 127.0.0.1 only. Cloudflared, when requested, forwards HTTPS to that loopback
 server; its generated origin is passed to authentication before Next starts.
 The launcher owns its child processes and stops them on exit. Logs are in
-`artifacts/board-runtime/`. Keep the host awake during the meeting.
+`artifacts/board-runtime/`. The launcher keeps the system and display awake for its lifetime without changing Windows power settings. The process-only execution-policy flag permits this reviewed local script on the Windows host; it changes no permanent policy. Keep the laptop lid open and connected to power.
 
 `cloudflared.exe` was downloaded from the official Cloudflare GitHub release
 into `artifacts/board-tools/`; it requires no administrator installation.

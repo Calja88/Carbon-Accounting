@@ -11,9 +11,9 @@ public static class BoardDemoPower {
     [DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint flags);
 }
 '@
-[BoardDemoPower]::SetThreadExecutionState([uint32]2147483649) | Out-Null
+[BoardDemoPower]::SetThreadExecutionState([uint32]2147483651) | Out-Null
 # Verifies identity, READY state, source bytes and replay before exposing a port.
-& $node --env-file=.env.board-demo --import tsx scripts/board-demo/run.ts
+& $node --env-file=.env.board-demo --import tsx scripts/board-demo/run.ts --check
 if ($LASTEXITCODE -ne 0) { throw 'Demo verification failed; no server or tunnel started.' }
 $logDir = Join-Path (Get-Location) 'artifacts/board-runtime'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null

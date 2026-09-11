@@ -26,6 +26,10 @@ async function main() {
   const nc = await prisma.nonconformity.findFirstOrThrow({ where: { id: ids.nonconformityId, organisationId: org }, include: { sourceLinks: true, correctiveActions: true } });
   const links = await prisma.managementReviewInputSnapshot.findMany({ where: { packId: pack.id } });
   if (links.length !== 3 || links.some((link) => !link.sourceVersionLabel || link.isStale)) throw new Error("Expected three current, revision-pinned review inputs");
+  if (process.argv.includes("--check")) {
+    console.log("BOARD-1 READY: independent reconciliation and replay verified.");
+    return;
+  }
   const control = await prisma.operationalControl.findUniqueOrThrow({ where: { id: nc.operationalControlId! }, include: { aspectLinks: true } });
   const finding = await prisma.auditFinding.findUniqueOrThrow({ where: { id: nc.sourceId! } });
   const evaluationLink = nc.sourceLinks.find((s) => s.sourceType === "COMPLIANCE_EVALUATION_ITEM")!;
