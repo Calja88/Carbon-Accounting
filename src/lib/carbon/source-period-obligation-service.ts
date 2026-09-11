@@ -90,8 +90,8 @@ export async function reviewSourcePeriodObligation(
     const obligation = await loadOwnedObligation(tx, txCtx, obligationId);
     assertSiteAccess(context, obligation.siteId);
 
-    if (obligation.status === "EXCLUDED") {
-      throw new SourcePeriodObligationError("An excluded obligation cannot be reviewed.");
+    if (obligation.status !== "REVIEW_REQUIRED") {
+      throw new SourcePeriodObligationError(`Obligation is ${obligation.status}, not REVIEW_REQUIRED, and cannot be reviewed.`);
     }
     if (!obligation.submittedActivityEntryId) {
       throw new SourcePeriodObligationError("No submission is bound to this obligation yet.");
@@ -122,8 +122,15 @@ export async function reviewSourcePeriodObligation(
     const reviewFingerprint = computeReviewFingerprint(owned, calculations);
     const reviewedAt = new Date();
 
+    // The CAS precondition is the fixed required starting state
+    // (REVIEW_REQUIRED), never "whatever status this transaction happened
+    // to read" — a concurrent duplicate call that reads AFTER a winner has
+    // already committed sees status already REVIEWED, and a WHERE clause
+    // built from that stale-but-current read (`status: obligation.status`)
+    // would trivially match its own already-REVIEWED value and "succeed"
+    // a second time. Hardcoding REVIEW_REQUIRED here closes that race.
     const cas = await tx.carbonSourcePeriodObligation.updateMany({
-      where: { id: obligation.id, organisationId: txCtx.organisationId, status: obligation.status },
+      where: { id: obligation.id, organisationId: txCtx.organisationId, status: "REVIEW_REQUIRED" },
       data: {
         status: "REVIEWED",
         reviewedByMembershipId: context.membershipId,
@@ -174,9 +181,16 @@ export async function excludeSourcePeriodObligation(
     const obligation = await loadOwnedObligation(tx, txCtx, obligationId);
     assertSiteAccess(context, obligation.siteId);
 
+    if (obligation.status === "EXCLUDED") {
+      throw new SourcePeriodObligationError("Obligation is already excluded.");
+    }
     const excludedAt = new Date();
+    // Same fixed-precondition CAS as reviewSourcePeriodObligation: the
+    // WHERE clause excludes the already-terminal EXCLUDED state
+    // explicitly, never matching on "whatever status was last read" (which
+    // could already be a concurrent winner's new value).
     const cas = await tx.carbonSourcePeriodObligation.updateMany({
-      where: { id: obligation.id, organisationId: txCtx.organisationId, status: obligation.status },
+      where: { id: obligation.id, organisationId: txCtx.organisationId, status: { not: "EXCLUDED" } },
       data: {
         status: "EXCLUDED",
         excludedByMembershipId: context.membershipId,

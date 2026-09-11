@@ -139,6 +139,22 @@ describe("Checkpoint B corrective handoff §1 — explicit obligation review/exc
     await expect(excludeSourcePeriodObligation(approver, ob.id, { reason: "   " })).rejects.toBeInstanceOf(SourcePeriodObligationError);
   });
 
+  it("refuses to exclude an obligation that is already excluded", async () => {
+    const ob = await obligation("exclude-twice", null);
+    await excludeSourcePeriodObligation(approver, ob.id, { reason: "First exclusion." });
+    await expect(excludeSourcePeriodObligation(approver, ob.id, { reason: "Second exclusion." })).rejects.toBeInstanceOf(SourcePeriodObligationError);
+  });
+
+  it("a duplicate concurrent exclusion only succeeds once (CAS)", async () => {
+    const ob = await obligation("exclude-race", null);
+    const results = await Promise.allSettled([
+      excludeSourcePeriodObligation(approver, ob.id, { reason: "Race A." }),
+      excludeSourcePeriodObligation(approver, ob.id, { reason: "Race B." }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((r) => r.status === "rejected")).toHaveLength(1);
+  });
+
   it("a stale fingerprint (calculation changed after review) is no longer counted as reviewed by the live coverage read", async () => {
     const { entry, calc } = await entryWithCalc(300);
     const ob = await obligation("stale", entry.id);
