@@ -88,7 +88,7 @@ export function buildScenarioComparability(input: {
   const baselineDescription = effectiveDescription(baseline)?.trim() ?? "";
   const scenarioDescription = effectiveDescription(scenario)?.trim() ?? "";
   if (!baselineDescription || !scenarioDescription) {
-    return { comparable: false, reason: "One side has no functional/declared unit description recorded; not comparable.", unitLabel };
+    return { comparable: false, reason: "The functional unit description is not recorded on one side; not comparable.", unitLabel };
   }
 
   // 3. Quantity is finite, positive and numerically equal (Decimal).

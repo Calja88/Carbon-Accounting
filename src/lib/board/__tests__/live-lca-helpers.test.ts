@@ -95,7 +95,7 @@ describe("buildScenarioComparability", () => {
       scenario: fresh(),
     });
     expect(result.comparable).toBe(false);
-    expect(result.reason).toMatch(/no functional\/declared unit description/i);
+    expect(result.reason).toMatch(/functional unit description is not recorded/i);
   });
 
   it("treats Decimal-equivalent quantities as equal, not string-equal", () => {
