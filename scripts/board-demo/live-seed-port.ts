@@ -48,6 +48,7 @@ import {
   reviewContainmentAdequacy,
   closeNonconformity,
   linkAdditionalSourceToNonconformity,
+  reopenNonconformity,
 } from "@/lib/ems/nonconformity/nonconformity-service";
 import { recordRootCauseAnalysis, approveRootCauseAnalysis } from "@/lib/ems/nonconformity/root-cause-service";
 import { createCorrectiveAction, completeCorrectiveAction } from "@/lib/ems/nonconformity/corrective-action-service";
@@ -1436,23 +1437,6 @@ export class LiveSeedPort implements DemoSeedPort {
 
     const action = await createCorrectiveAction(owner, nc.id, { description: "Name a single inspection owner and record it in the procedure.", ownerMembershipId: owner.membershipId, dueDate: new Date("2026-09-01"), actorUserId: owner.userId });
     this.correctiveActionId = action.id;
-
-    // Checkpoint B corrective handoff §6: a second, explicitly identified
-    // corrective action on the same nonconformity, deliberately left OPEN
-    // when the fixture freezes (NonconformityClosurePolicy.
-    // requireCorrectiveActionsComplete defaults false for this
-    // organisation, so leaving it open never blocks closeNonconformity
-    // below) — retained on purpose for a real-Postgres test to complete and
-    // independently review live, after the pack has already been issued,
-    // proving the frozen pack's own content/hash never moves while the
-    // live domain state genuinely does.
-    await createCorrectiveAction(owner, nc.id, {
-      description: "BOARD1-CA-EXT: extend the containment inspection procedure and named ownership to East Cards.",
-      ownerMembershipId: owner.membershipId,
-      dueDate: new Date("2026-10-01"),
-      actorUserId: owner.userId,
-    });
-
     await completeCorrectiveAction(owner, action.id, { completionEvidenceNote: "Named owner recorded; inspection schedule confirmed.", actorUserId: owner.userId });
 
     const completionEvidenceId = this.evidenceIdByKey.get("completion");
@@ -1474,6 +1458,31 @@ export class LiveSeedPort implements DemoSeedPort {
       await linkEvidence(owner, { evidenceId: effectivenessEvidenceId, resourceType: "corrective_action", resourceId: action.id, purpose: "effectiveness-review-evidence", linkedByUserId: owner.userId });
     }
     await closeNonconformity(owner, nc.id, owner.userId);
+
+    // Checkpoint B corrective handoff §6: a second, explicitly identified
+    // action scenario on the SAME nonconformity, genuinely reopened through
+    // the real state machine (requestEffectivenessReview requires every
+    // non-cancelled corrective action to already be complete, so this
+    // second action can only exist once the nonconformity is reopened, not
+    // alongside the first) and deliberately left OPEN when the fixture
+    // freezes — retained on purpose for a real-Postgres test to complete
+    // and independently review live, after the pack has already been
+    // issued, proving the frozen pack's own content/hash never moves while
+    // the live domain state genuinely does.
+    await reopenNonconformity(owner, nc.id, "A second, distinct containment gap (East Cards) surfaced after closure.", owner.userId);
+    const secondRootCause = await recordRootCauseAnalysis(owner, nc.id, {
+      method: "FIVE_WHYS",
+      analysisPayload: { note: "Named ownership was never extended to East Cards." },
+      conclusion: "The corrective action only covered North Works; East Cards needs the same named ownership.",
+      actorUserId: owner.userId,
+    });
+    await approveRootCauseAnalysis(owner, secondRootCause.id, { actorUserId: owner.userId });
+    await createCorrectiveAction(owner, nc.id, {
+      description: "BOARD1-CA-EXT: extend the containment inspection procedure and named ownership to East Cards.",
+      ownerMembershipId: owner.membershipId,
+      dueDate: new Date("2026-10-01"),
+      actorUserId: owner.userId,
+    });
     trace("createImprovementChain done");
   }
 
@@ -1852,7 +1861,18 @@ export class LiveSeedPort implements DemoSeedPort {
 
     if (!this.nonconformityId) throw new Error("Reconciliation failed: EMS chain nonconformity is missing.");
     const nc = await prisma.nonconformity.findUniqueOrThrow({ where: { id: this.nonconformityId } });
-    if (nc.status !== "CLOSED") throw new Error(`Reconciliation failed: EMS chain nonconformity should be CLOSED, is ${nc.status}.`);
+    // Checkpoint B corrective handoff §6: the primary chain (audit finding
+    // -> containment -> root cause -> corrective action -> effectiveness
+    // review) genuinely reached CLOSED first — fix 7's own demonstrated
+    // closure is untouched — but the nonconformity is then genuinely
+    // reopened for a second, distinct action scenario (see
+    // createImprovementChain), so its frozen state is ACTIONS_IN_PROGRESS,
+    // not CLOSED: a live, still-open follow-up, not a stale one.
+    if (nc.status !== "ACTIONS_IN_PROGRESS") {
+      throw new Error(`Reconciliation failed: EMS chain nonconformity should be ACTIONS_IN_PROGRESS (reopened for its second action scenario), is ${nc.status}.`);
+    }
+    const closure = await prisma.nonconformityClosure.findFirst({ where: { organisationId, nonconformityId: nc.id } });
+    if (!closure) throw new Error("Reconciliation failed: the nonconformity's own first closure was never genuinely recorded before it was reopened.");
 
     // Checkpoint B corrective handoff §6: the additional-source link and the
     // second, deliberately-OPEN corrective action must both genuinely

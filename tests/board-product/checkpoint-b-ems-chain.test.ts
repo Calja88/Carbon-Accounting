@@ -7,8 +7,9 @@ import { prisma } from "@/lib/prisma";
 import { resolveOrganisationContext } from "@/lib/organisation/context";
 import { getAspectChainRecord, getControlChainRecord, getObligationChainRecord } from "@/lib/board/live-records";
 import { loadOverviewForContext } from "@/lib/board/live-overview";
-import { reopenNonconformity } from "@/lib/ems/nonconformity/nonconformity-service";
-import { completeCorrectiveAction, verifyCorrectiveAction } from "@/lib/ems/nonconformity/corrective-action-service";
+import { closeNonconformity } from "@/lib/ems/nonconformity/nonconformity-service";
+import { completeCorrectiveAction } from "@/lib/ems/nonconformity/corrective-action-service";
+import { requestEffectivenessReview, performEffectivenessReview } from "@/lib/ems/nonconformity/effectiveness-service";
 import { assertDisposableDatabase } from "../checkpoint-a/disposable";
 
 assertDisposableDatabase();
@@ -132,7 +133,13 @@ describe("Checkpoint B corrective handoff §6 — additional-source link and obs
   it("a retained OPEN corrective action can be completed and independently reviewed live, after the pack has already been issued, without moving the frozen pack", async () => {
     const org = await prisma.organisation.findUniqueOrThrow({ where: { slug: "board-1-northstar-demonstration" } });
     const nc = await prisma.nonconformity.findFirstOrThrow({ where: { organisationId: org.id, reference: { startsWith: "BOARD1-NC-" } }, orderBy: { createdAt: "asc" } });
-    expect(nc.status).toBe("CLOSED"); // the primary chain's own frozen state, per fix 7 — untouched by what follows
+    // The primary chain genuinely closed once (fix 7's own demonstrated
+    // closure — see the NonconformityClosure assertion below), then was
+    // genuinely reopened for this second, distinct action scenario: the
+    // frozen state is ACTIONS_IN_PROGRESS, not CLOSED.
+    expect(nc.status).toBe("ACTIONS_IN_PROGRESS");
+    const firstClosure = await prisma.nonconformityClosure.findFirstOrThrow({ where: { organisationId: org.id, nonconformityId: nc.id } });
+    expect(firstClosure).toBeTruthy();
     const action = await prisma.correctiveAction.findFirstOrThrow({
       where: { organisationId: org.id, nonconformityId: nc.id, description: { startsWith: "BOARD1-CA-EXT" } },
     });
@@ -150,22 +157,35 @@ describe("Checkpoint B corrective handoff §6 — additional-source link and obs
     const before = await loadOverviewForContext(owner, {});
     expect(before.attention.state).toBe("ready");
 
-    // The real state machine: a CLOSED nonconformity must be reopened before
-    // any of its corrective actions can change — an observable live
-    // transition, not a direct stamp.
-    const reopened = await reopenNonconformity(owner, nc.id, "Live demonstration: complete and independently review the retained corrective action.", owner.userId);
-    expect(reopened.status).toBe("REOPENED");
-
     const completed = await completeCorrectiveAction(owner, action.id, {
       completionEvidenceNote: "Named owner and inspection schedule extended to East Cards.",
       actorUserId: owner.userId,
     });
     expect(completed.status).toBe("COMPLETED");
 
-    // A distinct reviewer — four-eyes is enforced server-side, non-overridable.
-    const verified = await verifyCorrectiveAction(reviewer, action.id, { actorUserId: reviewer.userId });
-    expect(verified.status).toBe("VERIFIED");
-    expect(verified.verifiedByMembershipId).toBe(reviewer.membershipId);
+    // The real state machine: requesting effectiveness review moves the
+    // nonconformity to EFFECTIVENESS_REVIEW; a distinct reviewer (four-eyes
+    // is enforced server-side, non-overridable, since the action's own
+    // owner is the sustainability-lead) then performs it, and only then can
+    // it close again — an observable live transition, not a direct stamp.
+    const reviewable = await requestEffectivenessReview(owner, nc.id, { actorUserId: owner.userId });
+    const inReview = await prisma.nonconformity.findUniqueOrThrow({ where: { id: nc.id } });
+    expect(inReview.status).toBe("EFFECTIVENESS_REVIEW");
+
+    await performEffectivenessReview(reviewer, nc.id, {
+      reviewCycle: reviewable.reviewCycle,
+      criteria: "Named ownership and inspection schedule are now recorded for East Cards.",
+      reviewDate: new Date(),
+      result: "EFFECTIVE",
+      decision: "Independent review confirms the East Cards containment gap is closed.",
+      actorUserId: reviewer.userId,
+    });
+
+    await closeNonconformity(owner, nc.id, owner.userId);
+    const reclosed = await prisma.nonconformity.findUniqueOrThrow({ where: { id: nc.id } });
+    expect(reclosed.status).toBe("CLOSED");
+    const secondClosure = await prisma.nonconformityClosure.findFirstOrThrow({ where: { organisationId: org.id, nonconformityId: nc.id, id: { not: firstClosure.id } } });
+    expect(secondClosure).toBeTruthy();
 
     const after = await loadOverviewForContext(owner, {});
     expect(after.attention.state).toBe("ready");
@@ -173,7 +193,7 @@ describe("Checkpoint B corrective handoff §6 — additional-source link and obs
       expect(after.attention.data.openActions).toBeLessThan(before.attention.data.openActions);
     }
 
-    // The frozen pack's own content/hash never moved, across both stages.
+    // The frozen pack's own content/hash never moved, across every stage above.
     const reloadedPack = await prisma.managementReviewPack.findUniqueOrThrow({ where: { id: pack.id } });
     expect(reloadedPack.checksumSha256).toBe(beforePack.checksum);
     expect(reloadedPack.payload).toEqual(beforePack.payload);

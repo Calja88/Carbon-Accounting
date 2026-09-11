@@ -117,7 +117,12 @@ describe("BD08 BOARD-1 seed (real Postgres, end to end)", () => {
       }
 
       const nc = await prisma.nonconformity.findFirstOrThrow({ where: { organisationId: org.id, reference: { startsWith: "BOARD1-NC-" } } });
-      expect(nc.status).toBe("CLOSED");
+      // Checkpoint B corrective handoff §6: the primary chain genuinely
+      // closed once (a real NonconformityClosure row exists — see
+      // checkpoint-b-ems-chain.test.ts), then was genuinely reopened for a
+      // second, distinct, deliberately-retained OPEN action scenario — the
+      // frozen state is ACTIONS_IN_PROGRESS, not CLOSED.
+      expect(nc.status).toBe("ACTIONS_IN_PROGRESS");
 
       const packs = await prisma.managementReviewPack.findMany({ where: { organisationId: org.id } });
       expect(packs).toHaveLength(1);
