@@ -44,10 +44,14 @@ describe("Checkpoint B fix 4 — trustworthy seed identity", () => {
     const databaseId = `cb-guard-db-${randomUUID()}`;
     const environmentId = `cb-guard-env-${randomUUID()}`;
     const token = `cb-real-token-${randomUUID()}`;
+    // Checkpoint B corrective handoff §4: the manifest must also record the
+    // ACTUAL connection's own current_database()/current_user for
+    // readConnectedIdentity's connection-identity check to pass.
+    const [{ db, usr }] = await prisma.$queryRaw<{ db: string; usr: string }[]>`SELECT current_database() as db, current_user as usr`;
     await prisma.demoDatabaseManifest.upsert({
       where: { id: "singleton" },
-      create: { id: "singleton", databaseId, environmentId, provisioningToken: token },
-      update: { databaseId, environmentId, provisioningToken: token },
+      create: { id: "singleton", databaseId, environmentId, provisioningToken: token, approvedDatabaseName: db, approvedRole: usr },
+      update: { databaseId, environmentId, provisioningToken: token, approvedDatabaseName: db, approvedRole: usr },
     });
     const savedAppDataMode = process.env.APP_DATA_MODE;
     const savedToken = process.env.BOARD_DEMO_PROVISIONING_TOKEN;
@@ -62,6 +66,29 @@ describe("Checkpoint B fix 4 — trustworthy seed identity", () => {
       expect(withBoth.dataClass).toBe("SYNTHETIC");
       expect(withBoth.disposable).toBe(true);
       expect(withBoth.actualDatabaseId).toBe(databaseId);
+    } finally {
+      if (savedAppDataMode === undefined) delete process.env.APP_DATA_MODE; else process.env.APP_DATA_MODE = savedAppDataMode;
+      if (savedToken === undefined) delete process.env.BOARD_DEMO_PROVISIONING_TOKEN; else process.env.BOARD_DEMO_PROVISIONING_TOKEN = savedToken;
+    }
+  });
+
+  it("a manifest whose approved database name/role does not match the actual live connection is never trusted as disposable — current_database() alone is not enough", async () => {
+    const databaseId = `cb-guard-db-${randomUUID()}`;
+    const environmentId = `cb-guard-env-${randomUUID()}`;
+    const token = `cb-real-token-${randomUUID()}`;
+    await prisma.demoDatabaseManifest.upsert({
+      where: { id: "singleton" },
+      create: { id: "singleton", databaseId, environmentId, provisioningToken: token, approvedDatabaseName: "not-the-real-database", approvedRole: "not-the-real-role" },
+      update: { databaseId, environmentId, provisioningToken: token, approvedDatabaseName: "not-the-real-database", approvedRole: "not-the-real-role" },
+    });
+    const savedAppDataMode = process.env.APP_DATA_MODE;
+    const savedToken = process.env.BOARD_DEMO_PROVISIONING_TOKEN;
+    try {
+      process.env.APP_DATA_MODE = "synthetic";
+      process.env.BOARD_DEMO_PROVISIONING_TOKEN = token;
+      const identity = await new LiveSeedPort().readConnectedIdentity();
+      expect(identity.dataClass).toBe("OTHER");
+      expect(identity.disposable).toBe(false);
     } finally {
       if (savedAppDataMode === undefined) delete process.env.APP_DATA_MODE; else process.env.APP_DATA_MODE = savedAppDataMode;
       if (savedToken === undefined) delete process.env.BOARD_DEMO_PROVISIONING_TOKEN; else process.env.BOARD_DEMO_PROVISIONING_TOKEN = savedToken;
@@ -103,6 +130,39 @@ describe("Checkpoint B fix 4 — trustworthy seed identity", () => {
     } finally {
       if (savedFlag === undefined) delete process.env.CHECKPOINT_A_DISPOSABLE; else process.env.CHECKPOINT_A_DISPOSABLE = savedFlag;
     }
+  });
+
+  it("a foreign organisation carrying the fixture's own 'board-1-' slug prefix is never treated as fixture-owned — a name/prefix is not proof of ownership", async () => {
+    // Runs after bd08-board1-seed.test.ts, so the real fixture's exact
+    // fixtureOrganisationId is already recorded on the lease. A foreign
+    // tenant imitating the slug prefix must still count as ordinary.
+    const before = await new LiveSeedPort().readConnectedIdentity();
+    const impostor = await prisma.organisation.create({ data: { name: "Impostor", slug: `board-1-impostor-${randomUUID()}` } });
+    try {
+      const withImpostor = await new LiveSeedPort().readConnectedIdentity();
+      expect(withImpostor.ordinaryOrganisationCount).toBe(before.ordinaryOrganisationCount + 1);
+    } finally {
+      await prisma.organisation.delete({ where: { id: impostor.id } });
+    }
+  });
+
+  it("beginFixture never binds a fixture organisation for a synthetic (non-BOARD-1) lease key — organisation binding is scoped to the real fixture only", async () => {
+    // The empty-target requirement (a real persistent target must have no
+    // tenant organisations before its very first build) is exercised
+    // implicitly every real CI run of bd08-board1-seed.test.ts's own
+    // beginFixture(FIXTURE_KEY) call, gated off inside the proven-disposable
+    // suite the same way readConnectedIdentity's naming leniency is — it
+    // cannot be independently re-tested here without a second, genuinely
+    // fresh database this sandbox doesn't have. What IS provable here: a
+    // synthetic key (as the CAS-durability tests above use) never triggers
+    // organisation creation at all, so those tests never pollute the
+    // organisation table as a side effect.
+    const key = `checkpoint-b-no-org-binding-${randomUUID()}`;
+    await prisma.demoFixtureLease.create({ data: { fixtureKey: key } });
+    const port = new LiveSeedPort();
+    await port.beginFixture(key);
+    const lease = await prisma.demoFixtureLease.findUniqueOrThrow({ where: { fixtureKey: key } });
+    expect(lease.fixtureOrganisationId).toBeNull();
   });
 });
 

@@ -8794,7 +8794,18 @@ model DemoDatabaseManifest {
   /// own environment before ever trusting this row; a manifest row alone
   /// (e.g. copied, stale, or planted) proves nothing without it.
   provisioningToken String
-  createdAt         DateTime @default(now())
+  /// Checkpoint B corrective handoff §4: the provisioning token is a trust
+  /// root binding this manifest to the ACTUAL Postgres identity of the
+  /// approved target, not just an operator-assigned label — readConnectedIdentity
+  /// additionally runs `SELECT current_database(), current_user` on the live
+  /// connection and requires an exact match against these two fields before
+  /// ever reporting disposable/SYNTHETIC. `current_database()` alone never
+  /// identifies a Neon project (many databases can share a name); this is one
+  /// signal among the token/databaseId/environmentId set, never sufficient
+  /// by itself.
+  approvedDatabaseName String?
+  approvedRole         String?
+  createdAt            DateTime @default(now())
 }
 
 enum DemoFixtureLeaseStatus {
@@ -8816,6 +8827,14 @@ model DemoFixtureLease {
   fixtureKey String                 @unique
   status     DemoFixtureLeaseStatus @default(NONE)
   digest     String                 @default("")
+  /// The exact Organisation id this fixture build created, bound atomically
+  /// with the NONE -> BUILDING transition (see live-seed-port.ts's
+  /// beginFixture). Checkpoint B corrective handoff §4: a name/slug prefix
+  /// (e.g. "board-1-") is never proof of fixture ownership — any tenant
+  /// could create an organisation with that slug. Every later identity
+  /// check counts "ordinary" (non-fixture) organisations against this exact
+  /// recorded id, never a naming convention.
+  fixtureOrganisationId String?
   createdAt  DateTime               @default(now())
   updatedAt  DateTime               @updatedAt
 }

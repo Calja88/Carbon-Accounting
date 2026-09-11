@@ -20,6 +20,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import bcrypt from "bcryptjs";
 import {
   LcaAllocationMethod,
@@ -115,6 +116,37 @@ function isIndependentlyVerifiedDisposableDatabase(): boolean {
   }
 }
 
+/**
+ * Checkpoint B corrective handoff §4: persona secrets are never logged in
+ * plaintext anywhere (this includes this process's own stderr — a prior
+ * version emitted them there via trace(), which is exactly the "credential
+ * echoed to an ordinary log" pattern this removes). When
+ * `BOARD_DEMO_PROVISIONING_TOKEN`'s sibling `BOARD_DEMO_CREDENTIALS_FILE`
+ * env var points at a private, operator-supplied JSON file
+ * (`{ "<persona-name>": "<password>" }`), an ACTIVE persona's password
+ * comes from that file — parsed once, before any domain write — and a
+ * persona with no entry fails the build rather than silently falling back
+ * to an unrecorded, unusable random password. Without the env var (the
+ * disposable-CI case, where no human ever needs to actually log in), each
+ * persona still gets a fresh random password, kept only in memory for this
+ * process's own runtime use and never written or logged anywhere.
+ */
+function loadPersonaCredentials(): Map<string, string> | null {
+  const path = process.env.BOARD_DEMO_CREDENTIALS_FILE;
+  if (!path) return null;
+  const raw = readFileSync(path, "utf8");
+  const parsed: unknown = JSON.parse(raw);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("BOARD_DEMO_CREDENTIALS_FILE must contain a JSON object mapping persona name -> password.");
+  }
+  const map = new Map<string, string>();
+  for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof value !== "string" || !value) throw new Error(`BOARD_DEMO_CREDENTIALS_FILE entry for "${name}" must be a non-empty string.`);
+    map.set(name, value);
+  }
+  return map;
+}
+
 const FIXTURE_KEY = BOARD1.fixtureVersion;
 const ORG_SLUG = "board-1-northstar-demonstration";
 
@@ -162,8 +194,8 @@ export class LiveSeedPort implements DemoSeedPort {
     // Checkpoint B fix: a DemoDatabaseManifest row alone proves nothing — it
     // is an ordinary table this same process could insert a row into, so
     // its mere presence is not "independently verified provisioning
-    // provenance". Two independent, out-of-band signals are required before
-    // this identity can ever be reported as SYNTHETIC/disposable, neither
+    // provenance". Independent, out-of-band signals are required before
+    // this identity can ever be reported as SYNTHETIC/disposable, none
     // derivable from data already sitting in this database:
     //  1. APP_DATA_MODE=synthetic — the deployment's own environment must
     //     explicitly opt in; unset/anything else always fails closed.
@@ -171,47 +203,57 @@ export class LiveSeedPort implements DemoSeedPort {
     //     provisioning step wrote into the manifest row at creation time
     //     (never written by this seed script itself) — a stray or copied
     //     manifest row without a matching environment secret is rejected.
+    //  3. Checkpoint B corrective handoff §4: when the manifest records an
+    //     approved database name/role, the ACTUAL live connection's own
+    //     `current_database()`/`current_user` must match exactly — binding
+    //     the provisioning token to the real Postgres identity, not just an
+    //     operator-assigned label. current_database() alone never proves a
+    //     specific Neon project (a name can repeat across projects); this is
+    //     one signal among the set, never sufficient alone, and a manifest
+    //     with no approved values recorded fails this check closed rather
+    //     than skipping it.
     const appDataModeIsSynthetic = process.env.APP_DATA_MODE === "synthetic";
     const provisioningTokenMatches =
       !!manifest &&
       !!process.env.BOARD_DEMO_PROVISIONING_TOKEN &&
       process.env.BOARD_DEMO_PROVISIONING_TOKEN === manifest.provisioningToken;
 
-    // "Ordinary" means neither this fixture's own organisation nor another
-    // repo test suite's own clearly-labelled synthetic fixture (the
-    // disposable checkpoint-a-postgres CI job intentionally shares one
-    // database across every real-Postgres test file; every one of those
-    // fixtures — Checkpoint A, BD06, BD08's own concurrency test — names its
-    // organisation "Synthetic ..." by established convention).
-    //
-    // This name-based leniency must NEVER influence the actual persistent-
-    // demo trust decision. It is gated on independently PROVING this is the
-    // disposable CI database — not merely trusting the CHECKPOINT_A_DISPOSABLE
-    // flag by itself (a stray env var proves nothing on its own), but
-    // reusing the exact same full check tests/checkpoint-a/disposable.ts
-    // applies before any test runs: the flag AND a loopback host AND the
-    // exact ca_checkpoint database name AND a postgres protocol. A real
-    // target can never satisfy all four at once, so a real environment
-    // always uses the strict, name-independent check — an organisation is
-    // "ordinary" there purely by not carrying this fixture's own slug
-    // prefix, exactly as the Astra guard contract requires (verified
-    // database identity, not organisation naming).
+    let connectionIdentityMatches = false;
+    if (manifest && manifest.approvedDatabaseName && manifest.approvedRole) {
+      const [row] = await prisma.$queryRaw<{ db: string; usr: string }[]>`SELECT current_database() as db, current_user as usr`;
+      connectionIdentityMatches = !!row && row.db === manifest.approvedDatabaseName && row.usr === manifest.approvedRole;
+    }
+
+    const lease = await prisma.demoFixtureLease.findUnique({ where: { fixtureKey: FIXTURE_KEY } });
+    const fixtureOrganisationId = lease?.fixtureOrganisationId ?? null;
+
+    // "Ordinary" means any organisation other than this fixture's own exact
+    // recorded organisation id (never a name/slug prefix — a foreign tenant
+    // could create an organisation carrying the "board-1-" prefix or a
+    // "Synthetic ..." name, so neither proves fixture ownership on its own),
+    // plus — ONLY inside the independently-proven disposable CI database —
+    // another repo test suite's own clearly-labelled synthetic fixture (the
+    // disposable checkpoint-a-postgres job intentionally shares one database
+    // across every real-Postgres test file, each naming its organisation
+    // "Synthetic ..." by established convention). That leniency never
+    // influences the actual persistent-demo trust decision: it is gated on
+    // independently PROVING this is the disposable CI database — the exact
+    // same full check tests/checkpoint-a/disposable.ts applies before any
+    // test runs (flag AND loopback host AND exact ca_checkpoint database
+    // name AND postgres protocol). A real target can never satisfy all four
+    // at once, so it always uses the strict, id-exact check alone.
     const isDisposableCiSuite = isIndependentlyVerifiedDisposableDatabase();
+    const notFixtureOrg = fixtureOrganisationId ? { NOT: { id: fixtureOrganisationId } } : {};
     const ordinaryOrganisationCount = await prisma.organisation.count({
       where: isDisposableCiSuite
-        ? {
-            AND: [
-              { NOT: { slug: { startsWith: FIXTURE_ORGANISATION_SLUG_PREFIX } } },
-              { NOT: { name: { startsWith: "Synthetic " } } },
-            ],
-          }
-        : { NOT: { slug: { startsWith: FIXTURE_ORGANISATION_SLUG_PREFIX } } },
+        ? { AND: [notFixtureOrg, { NOT: { name: { startsWith: "Synthetic " } } }] }
+        : notFixtureOrg,
     });
-    if (!manifest || !appDataModeIsSynthetic || !provisioningTokenMatches) {
+    if (!manifest || !appDataModeIsSynthetic || !provisioningTokenMatches || !connectionIdentityMatches) {
       // Fails closed: assertDemoTarget will reject an empty actualDatabaseId/
       // manifestEnvironmentId against any configured allow-list value. A
-      // manifest existing is not enough on its own — both independent
-      // signals above must also hold.
+      // manifest existing is not enough on its own — every signal above
+      // must also hold.
       return { actualDatabaseId: "", manifestEnvironmentId: "", dataClass: "OTHER", disposable: false, ordinaryOrganisationCount };
     }
     return {
@@ -259,15 +301,56 @@ export class LiveSeedPort implements DemoSeedPort {
    * documented "Refuse concurrent seed/reset" contract without needing a
    * held lock at all.
    */
+  /**
+   * Checkpoint B corrective handoff §4: the fixture organisation itself is
+   * now created here, bound atomically to the winning BUILDING CAS in one
+   * short transaction — never a bare slug-prefix convention a foreign
+   * tenant could imitate. Before the very first build, the target must
+   * genuinely have no tenant organisations at all (a real persistent
+   * target is provisioned empty; a stray pre-existing organisation there
+   * means this is not the target it was verified to be). A replay
+   * (lease already carries fixtureOrganisationId) reuses the exact
+   * recorded id rather than creating a second organisation.
+   */
   async beginFixture(version: string): Promise<void> {
     trace("beginFixture start");
-    const { count } = await prisma.demoFixtureLease.updateMany({
-      where: { fixtureKey: version, status: "NONE" },
-      data: { status: "BUILDING", digest: "" },
+    // Org-binding only applies to the real BOARD-1 fixture key — the
+    // pure-CAS regression tests exercise this method with their own
+    // synthetic keys purely to prove the lease state machine in isolation,
+    // never intending a domain organisation to be created as a side effect.
+    const isRealFixture = version === FIXTURE_KEY;
+    const organisationId = await prisma.$transaction(async (tx) => {
+      const lease = await tx.demoFixtureLease.findUniqueOrThrow({ where: { fixtureKey: version } });
+      if (lease.status !== "NONE") {
+        throw new Error(`Fixture "${version}" is already BUILDING or READY — refusing a concurrent or duplicate build.`);
+      }
+      const { count } = await tx.demoFixtureLease.updateMany({
+        where: { fixtureKey: version, status: "NONE" },
+        data: { status: "BUILDING", digest: "" },
+      });
+      if (count === 0) {
+        throw new Error(`Fixture "${version}" is already BUILDING or READY — refusing a concurrent or duplicate build.`);
+      }
+      if (!isRealFixture) return null;
+      if (lease.fixtureOrganisationId) return lease.fixtureOrganisationId;
+      // Outside the independently-proven disposable CI database (which
+      // intentionally shares one Postgres instance across every
+      // real-Postgres test file's own fixture), a real persistent target is
+      // provisioned empty — a stray pre-existing organisation there means
+      // this is not the target it was verified to be.
+      if (!isIndependentlyVerifiedDisposableDatabase()) {
+        const preExistingOrgCount = await tx.organisation.count();
+        if (preExistingOrgCount > 0) {
+          throw new Error(
+            `Refusing to create the fixture organisation: the connected target already has ${preExistingOrgCount} organisation(s) present, but a first build requires a genuinely empty target.`,
+          );
+        }
+      }
+      const org = await tx.organisation.create({ data: { name: BOARD1.organisation, slug: ORG_SLUG } });
+      await tx.demoFixtureLease.update({ where: { fixtureKey: version }, data: { fixtureOrganisationId: org.id } });
+      return org.id;
     });
-    if (count === 0) {
-      throw new Error(`Fixture "${version}" is already BUILDING or READY — refusing a concurrent or duplicate build.`);
-    }
+    if (organisationId) this.organisationId = organisationId;
     await this.resolveExistingOrganisation();
   }
 
@@ -364,8 +447,15 @@ export class LiveSeedPort implements DemoSeedPort {
 
   async createSyntheticOrganisationAndActors(): Promise<void> {
     trace("createSyntheticOrganisationAndActors start");
-    const org = await prisma.organisation.create({ data: { name: BOARD1.organisation, slug: ORG_SLUG } });
-    this.organisationId = org.id;
+    // Checkpoint B corrective handoff §4: the bare organisation row itself
+    // is created atomically with the BUILDING transition in beginFixture
+    // (bound to the lease's fixtureOrganisationId), never here — this only
+    // adds the entity/sites/personas onto that already-created, already-
+    // recorded organisation.
+    if (!this.organisationId) throw new Error("Organisation must be created by beginFixture before actors.");
+    const org = { id: this.organisationId };
+    // Parsed once, before any domain write — see loadPersonaCredentials.
+    const personaCredentials = loadPersonaCredentials();
 
     const entity = await prisma.entity.create({ data: { organisationId: org.id, name: BOARD1.organisation } });
     this.entityId = entity.id;
@@ -419,24 +509,28 @@ export class LiveSeedPort implements DemoSeedPort {
       });
     }
 
-    // Ephemeral synthetic credentials — a fresh random password per
-    // persona, bcrypt-hashed exactly the way src/auth.ts verifies logins
-    // (never the seed's own ad-hoc hash), so these personas can actually
-    // sign in through the real auth path in a persistent environment.
-    // Never a fixed/shared password, and never committed anywhere: the
-    // plaintext is emitted once, only to this process's own stderr
-    // (the same ephemeral, log-only channel trace() already uses), for
-    // whoever is operating this seed run to copy down.
+    // Checkpoint B corrective handoff §4: persona secrets are bcrypt-hashed
+    // exactly the way src/auth.ts verifies logins (never the seed's own
+    // ad-hoc hash), so these personas can actually sign in through the real
+    // auth path in a persistent environment — but the plaintext is never
+    // logged anywhere (this process's own stderr included). It comes from
+    // BOARD_DEMO_CREDENTIALS_FILE when an operator has supplied one
+    // (required entry per ACTIVE persona name, parsed once above before any
+    // domain write); without that file, each persona still gets a fresh
+    // random password, kept only in this closure's memory for bcrypt.hash
+    // and never written or logged — acceptable for the disposable-CI case,
+    // where no human ever needs to actually log in with it.
     const persona = async (name: string, accessMode: "RESTRICTED" | "ORGANISATION_WIDE", status: "ACTIVE" | "SUSPENDED", permissionCodes: string[]) => {
       const email = `board-1-${name}-${randomUUID()}@example.invalid`;
-      const plaintextPassword = randomBytes(18).toString("base64url");
+      const suppliedPassword = personaCredentials?.get(name);
+      if (personaCredentials && status === "ACTIVE" && !suppliedPassword) {
+        throw new Error(`BOARD_DEMO_CREDENTIALS_FILE has no entry for persona "${name}" — refusing to invent and silently discard a password no operator can retrieve.`);
+      }
+      const plaintextPassword = suppliedPassword ?? randomBytes(18).toString("base64url");
       const passwordHash = await bcrypt.hash(plaintextPassword, 10);
       const user = await prisma.user.create({
         data: { name: `BOARD-1 ${name}`, email, passwordHash, role: "DATA_OWNER" },
       });
-      if (status === "ACTIVE") {
-        trace(`persona credential (ephemeral, log-only, never committed) — ${email} / ${plaintextPassword}`);
-      }
       const membership = await prisma.organisationMembership.create({
         data: { organisationId: org.id, userId: user.id, status, accessMode },
       });

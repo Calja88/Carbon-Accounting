@@ -38,13 +38,20 @@ beforeAll(async () => {
   // the same way a real deployment's own environment would.
   process.env.APP_DATA_MODE = "synthetic";
   process.env.BOARD_DEMO_PROVISIONING_TOKEN = provisioningToken;
+  // Checkpoint B corrective handoff §4: readConnectedIdentity additionally
+  // requires the manifest's approvedDatabaseName/approvedRole to match the
+  // ACTUAL live connection's own current_database()/current_user — read
+  // the real values here (never hardcoded) so this disposable CI database
+  // genuinely proves the mechanism, the same way a real provisioning step
+  // would record the target's real identity.
+  const [{ db, usr }] = await prisma.$queryRaw<{ db: string; usr: string }[]>`SELECT current_database() as db, current_user as usr`;
   // Independently-pinned identity, written once — the exact thing
   // readConnectedIdentity() must read back on its own, never inferred from
   // an env var or connection string.
   await prisma.demoDatabaseManifest.upsert({
     where: { id: "singleton" },
-    create: { id: "singleton", databaseId, environmentId, provisioningToken },
-    update: { databaseId, environmentId, provisioningToken },
+    create: { id: "singleton", databaseId, environmentId, provisioningToken, approvedDatabaseName: db, approvedRole: usr },
+    update: { databaseId, environmentId, provisioningToken, approvedDatabaseName: db, approvedRole: usr },
   });
 });
 
