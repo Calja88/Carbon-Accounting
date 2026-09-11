@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { localDatabaseUrl } from "../local-database-url";
 
+// URLs carry no credentials: the guard decides on hostname alone, and a
+// credential-shaped literal here would (correctly) trip handoff:secret-audit.
+const at = (host: string) => `postgresql://${host}/appdb`;
+
 describe("localDatabaseUrl", () => {
   it("returns a local URL so the live integration tests can run", () => {
-    expect(localDatabaseUrl({ DATABASE_URL: "postgresql://paragon:paragon@localhost:5432/paragon_carbon" })).toContain("localhost");
+    expect(localDatabaseUrl({ DATABASE_URL: at("localhost:5432") })).toContain("localhost");
+    expect(localDatabaseUrl({ DATABASE_URL: at("127.0.0.1:5432") })).toContain("127.0.0.1");
   });
 
   it("refuses a hosted database — a set DATABASE_URL is not consent to write to it", () => {
-    expect(localDatabaseUrl({ DATABASE_URL: "postgresql://u:p@ep-synthetic-example-pooler.eu-west-2.aws.neon.tech/appdb" })).toBeUndefined();
-    expect(localDatabaseUrl({ DIRECT_URL: "postgresql://u:p@db.example.com:5432/app", DATABASE_URL: "postgresql://u:p@localhost:5432/app" })).toBeUndefined();
+    expect(localDatabaseUrl({ DATABASE_URL: at("ep-synthetic-example-pooler.eu-west-2.aws.neon.tech") })).toBeUndefined();
+    // DIRECT_URL wins, so a hosted DIRECT_URL is refused even beside a local DATABASE_URL.
+    expect(localDatabaseUrl({ DIRECT_URL: at("db.example.com:5432"), DATABASE_URL: at("localhost:5432") })).toBeUndefined();
   });
 
   it("is undefined when nothing is configured, or when the URL cannot be parsed", () => {
