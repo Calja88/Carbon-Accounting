@@ -2,7 +2,17 @@
 
 Keep this to ~1-2 pages. Update at the end of every package.
 
-## Finish-mode handoff — 2026-09-11 (supersedes status below)
+## Product realignment — 2026-09-11 (supersedes the finish-mode handoff below)
+
+**Carbon Ledger is the product; BOARD-1 is an optional synthetic sample workspace.** Commit `86c3d44` on `board/product-2026-09-22` (PR #64, still draft/unmerged).
+
+- The ordinary Overview no longer renders the "Section unavailable" error card for expected no-data. A new `SetupState` primitive separates a failed section (error card + per-section recovery message) from "no sites yet" and from "sites but nothing submitted in either period". Missing stays missing, never zero.
+- `overview-service.ts` no longer swallows the exception: `sectionFailure(section, error)` receives the real error and `live-overview.ts` logs name/message/stack through `logEvent`. Only a generic message reaches the browser.
+- `isVerifiedSyntheticOrganisation` fails closed. `APP_DATA_MODE=synthetic` against a database without the fixture tables previously threw inside `(app)/layout.tsx` and 500'd every signed-in page.
+- `contracts.ts` is untouched, so the frozen pack payload and its checksum cannot drift. BOARD-1 verified read-only and unchanged: lease READY, disclosure on, Jan–Aug 2026 = 1,248.0 tCO2e vs 1,560.0 tCO2e prior (−20.0%), pack checksum `6a697835c5337fd7543a1aba0a3092133586283f8fbc12fb71554c36686dfd8f`.
+- **Test-database hazard, fixed.** The T81/T83 live integration tests guarded only on `DATABASE_URL` being set, so on a machine whose shell exports a hosted `DATABASE_URL` an ordinary test run wrote into it. One such row set exists in that hosted database (`org-t81-trigger-1789160220463-sgnkpj` plus its user, 1 AuditEvent, 2 LegalHold, created 2026-09-11T20:57:01Z). It **cannot be removed**: `audit_event_deny_delete` and `legal_hold_deny_delete` block the deletes at the database itself, and the Organisation/User foreign keys are RESTRICT — removing it would mean disabling a T81 append-only control. New `src/lib/testing/local-database-url.ts` makes hosted hosts skip instead.
+
+## Finish-mode handoff — 2026-09-11
 
 - **READY:** persistent BOARD-1 in disposable Neon project `cool-cake-20837205`, branch `br-young-haze-arjtwhkj`, database `board_demo`. Preserve this starting state; use a child branch for live-transition rehearsals. Production was not used.
 - Actual IDs, source documents/calculations, EMS chain, personas and frozen checksum: `Docs/board-sprint/rehearsal-manifest.json`. Application revision: `a7e12e1f502a0d11d4a8c02eb2a40e0a1b158654`.
