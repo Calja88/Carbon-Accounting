@@ -26,7 +26,15 @@ vi.mock("@/lib/lca/calculation-service", () => ({
   runTotals: (run: { totals: { headlinePerFunctionalUnitKgCo2e: number } }) => run.totals,
 }));
 
-vi.mock("@/lib/lca/analysis", () => ({ contributionsByStage: () => [] }));
+vi.mock("@/lib/lca/analysis", () => ({ contributionsByStage: () => [], compareScenario: vi.fn() }));
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    lcaProcess: { findMany: vi.fn(async () => []) },
+    lcaInventoryItem: { count: vi.fn(async () => 0) },
+    lcaAssessment: { findMany: vi.fn(async () => []) },
+  },
+}));
 
 const { getLcaScenarioModel } = await import("@/lib/board/live-lca");
 
@@ -79,8 +87,8 @@ describe("getLcaScenarioModel", () => {
   it("builds a comparable model from matching, fresh baseline/scenario runs", async () => {
     requireAssessmentInScope.mockResolvedValueOnce(scenarioAssessment).mockResolvedValueOnce(baseAssessment);
     getLatestRun
-      .mockResolvedValueOnce({ totals: { headlinePerFunctionalUnitKgCo2e: 0.12 }, results: [] })
-      .mockResolvedValueOnce({ totals: { headlinePerFunctionalUnitKgCo2e: 0.102 }, results: [] });
+      .mockResolvedValueOnce({ totals: { headlinePerFunctionalUnitKgCo2e: 0.12 }, results: [], engineVersion: "1.0.0", methodologyVersion: null, methodologySnapshot: { mode: "AUTOMATIC" } })
+      .mockResolvedValueOnce({ totals: { headlinePerFunctionalUnitKgCo2e: 0.102 }, results: [], engineVersion: "1.0.0", methodologyVersion: null, methodologySnapshot: { mode: "AUTOMATIC" } });
     isCalculationStale.mockResolvedValueOnce({ stale: false, reason: null }).mockResolvedValueOnce({ stale: false, reason: null });
 
     const model = await getLcaScenarioModel(context, scenarioAssessment.id);
@@ -104,5 +112,17 @@ describe("getLcaScenarioModel", () => {
     const model = await getLcaScenarioModel(context, scenarioAssessment.id);
     expect(model!.comparable).toBe(false);
     expect(model!.reason).toMatch(/System boundaries differ/);
+  });
+
+  it("marks an engine-version mismatch not comparable — real wiring, not just the pure helper", async () => {
+    requireAssessmentInScope.mockResolvedValueOnce(scenarioAssessment).mockResolvedValueOnce(baseAssessment);
+    getLatestRun
+      .mockResolvedValueOnce({ totals: { headlinePerFunctionalUnitKgCo2e: 0.12 }, results: [], engineVersion: "1.0.0", methodologyVersion: null, methodologySnapshot: { mode: "AUTOMATIC" } })
+      .mockResolvedValueOnce({ totals: { headlinePerFunctionalUnitKgCo2e: 0.102 }, results: [], engineVersion: "2.0.0", methodologyVersion: null, methodologySnapshot: { mode: "AUTOMATIC" } });
+    isCalculationStale.mockResolvedValueOnce({ stale: false, reason: null }).mockResolvedValueOnce({ stale: false, reason: null });
+
+    const model = await getLcaScenarioModel(context, scenarioAssessment.id);
+    expect(model!.comparable).toBe(false);
+    expect(model!.reason).toMatch(/engine versions differ/i);
   });
 });

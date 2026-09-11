@@ -9,6 +9,10 @@ function fresh(overrides: Partial<AssessmentComparabilityInput> = {}): Assessmen
     isDeclaredUnit: false,
     functionalUnitQuantity: "1",
     boundary: "CRADLE_TO_GATE",
+    includedLifecycleStages: ["RAW_MATERIALS", "MANUFACTURING"],
+    engineVersion: "1.0.0",
+    methodologyVersion: null,
+    methodologySnapshot: { factorSelectionMode: "AUTOMATIC" },
     hasRun: true,
     stale: false,
     staleReason: null,
@@ -83,6 +87,101 @@ describe("buildScenarioComparability", () => {
       scenario: fresh({ functionalUnitDescription: "1 card" }),
     });
     expect(result.unitLabel).toBe("1 card");
+  });
+
+  it("is not comparable when the effective description is empty on either side", () => {
+    const result = buildScenarioComparability({
+      baseline: fresh({ functionalUnitDescription: "  ", functionalUnitUnit: null }),
+      scenario: fresh(),
+    });
+    expect(result.comparable).toBe(false);
+    expect(result.reason).toMatch(/no functional\/declared unit description/i);
+  });
+
+  it("treats Decimal-equivalent quantities as equal, not string-equal", () => {
+    const result = buildScenarioComparability({
+      baseline: fresh({ functionalUnitQuantity: "1" }),
+      scenario: fresh({ functionalUnitQuantity: "1.0" }),
+    });
+    expect(result.comparable).toBe(true);
+  });
+
+  it("rejects a non-positive functional unit quantity", () => {
+    const result = buildScenarioComparability({
+      baseline: fresh({ functionalUnitQuantity: "0" }),
+      scenario: fresh(),
+    });
+    expect(result.comparable).toBe(false);
+    expect(result.reason).toMatch(/finite and positive/i);
+  });
+
+  it("rejects a non-numeric functional unit quantity", () => {
+    const result = buildScenarioComparability({
+      baseline: fresh({ functionalUnitQuantity: "not-a-number" }),
+      scenario: fresh(),
+    });
+    expect(result.comparable).toBe(false);
+    expect(result.reason).toMatch(/not a valid number/i);
+  });
+
+  it("is not comparable when included lifecycle stages differ", () => {
+    const result = buildScenarioComparability({
+      baseline: fresh({ includedLifecycleStages: ["RAW_MATERIALS", "MANUFACTURING"] }),
+      scenario: fresh({ includedLifecycleStages: ["RAW_MATERIALS"] }),
+    });
+    expect(result.comparable).toBe(false);
+    expect(result.reason).toMatch(/lifecycle stages differ/i);
+  });
+
+  it("is not comparable when engine versions differ", () => {
+    const result = buildScenarioComparability({
+      baseline: fresh({ engineVersion: "1.0.0" }),
+      scenario: fresh({ engineVersion: "1.1.0" }),
+    });
+    expect(result.comparable).toBe(false);
+    expect(result.reason).toMatch(/engine versions differ/i);
+  });
+
+  it("is not comparable when engine version is unrecorded on either side — absence is never equality", () => {
+    const result = buildScenarioComparability({
+      baseline: fresh({ engineVersion: null }),
+      scenario: fresh({ engineVersion: null }),
+    });
+    expect(result.comparable).toBe(false);
+    expect(result.reason).toMatch(/engine version is not recorded/i);
+  });
+
+  it("is not comparable when methodology configuration differs", () => {
+    const result = buildScenarioComparability({
+      baseline: fresh({ methodologySnapshot: { factorSelectionMode: "AUTOMATIC" } }),
+      scenario: fresh({ methodologySnapshot: { factorSelectionMode: "MANUAL" } }),
+    });
+    expect(result.comparable).toBe(false);
+    expect(result.reason).toMatch(/methodology configuration differs/i);
+  });
+
+  it("is not comparable when methodology configuration is unrecorded on either side", () => {
+    const result = buildScenarioComparability({
+      baseline: fresh({ methodologySnapshot: null }),
+      scenario: fresh({ methodologySnapshot: null }),
+    });
+    expect(result.comparable).toBe(false);
+    expect(result.reason).toMatch(/methodology configuration is not recorded/i);
+  });
+
+  it("ignores key order in the methodology snapshot comparison", () => {
+    const result = buildScenarioComparability({
+      baseline: fresh({ methodologySnapshot: { a: 1, b: 2 } }),
+      scenario: fresh({ methodologySnapshot: { b: 2, a: 1 } }),
+    });
+    expect(result.comparable).toBe(true);
+  });
+
+  it("does not demand identical inventory, supplier factors or factor values — only compares method/unit/boundary/stage config", () => {
+    // buildScenarioComparability's input never carries inventory/factor
+    // fields at all — this test documents that omission is deliberate.
+    const result = buildScenarioComparability({ baseline: fresh(), scenario: fresh() });
+    expect(result.comparable).toBe(true);
   });
 });
 
