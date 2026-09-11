@@ -23,6 +23,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import bcrypt from "bcryptjs";
 import {
+  Prisma,
   LcaAllocationMethod,
   LcaDataType,
   LcaEmissionClassification,
@@ -35,6 +36,9 @@ import { resolveOrganisationContext, type OrganisationContext } from "@/lib/orga
 import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
 import { createActivityEntryWithCalculations, prepareReportingData } from "@/lib/entries-service";
 import { reviewSourcePeriodObligation } from "@/lib/carbon/source-period-obligation-service";
+import { canonicalStringify } from "@/lib/audit/integrity";
+import { readEvidenceObjectBytes } from "@/lib/documents/evidence-service";
+import { getDocumentContent } from "@/lib/documents-service";
 import { createEnvironmentalAspect } from "@/lib/ems/aspects/aspect-service";
 import { createOperationalControl, recordControlCheck, uploadEvidenceToControlCheck } from "@/lib/ems/controls/control-service";
 import { createEnvironmentalObjective } from "@/lib/ems/objectives/objective-service";
@@ -152,6 +156,92 @@ const ORG_SLUG = "board-1-northstar-demonstration";
 
 /** Every organisation this seed itself creates must carry this slug prefix — the only rule `readConnectedIdentity`'s ordinary-organisation count uses to tell "this fixture" apart from "an ordinary tenant that must never exist in a demo database". */
 export const FIXTURE_ORGANISATION_SLUG_PREFIX = "board-1-";
+
+/**
+ * Checkpoint B corrective handoff §5: bumped whenever this file's own
+ * persisted-identity/verification contract changes shape, independently of
+ * BOARD1.fixtureVersion (the demo's public label). See the
+ * `DemoFixtureLease.implementationRevision` schema comment and
+ * `existingFixture()` below for how a mismatch is handled — never by
+ * resetting or reinterpreting the old fixture, only by refusing it.
+ */
+const FIXTURE_IMPLEMENTATION_REVISION = 1;
+
+/**
+ * Every id `verifyAllInvariants`/`createImprovementChain`/etc. need to
+ * re-derive a replayed fixture's full state, persisted atomically with the
+ * final BUILDING -> READY CAS. See `buildIdentityMap` (write side, a fresh
+ * build) and `resolveExistingFixtureState`/`parseIdentityMap` (read side, a
+ * replay) below.
+ */
+interface FixtureIdentityMapV1 {
+  schemaVersion: 1;
+  organisationId: string;
+  entityId: string;
+  /** BOARD1 site key -> Site id. */
+  siteIds: Record<string, string>;
+  /** Persona name (e.g. "sustainability-lead") -> User id. */
+  personaUserIds: Record<string, string>;
+  /** buildSyntheticEvidence() key -> EvidenceObject id. */
+  evidenceIds: Record<string, string>;
+  invoiceSourceDocumentId: string;
+  meterReadingSourceDocumentId: string;
+  nonconformityId: string;
+  correctiveActionId: string;
+  lcaAssessmentId: string;
+  lcaScenarioId: string;
+  managementReviewId: string;
+  managementPackId: string;
+  boardManagementPackId: string;
+}
+
+/**
+ * Parses and shape-validates a lease's persisted `identityMap` — an
+ * operator-writable JSON column, never trusted as proof on its own; every id
+ * it yields is re-checked against its expected tenant/relation by the caller
+ * before use (see `resolveExistingFixtureState`).
+ */
+function parseIdentityMap(value: unknown): FixtureIdentityMapV1 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Fixture is marked READY but has no persisted identity map — refusing to verify with heuristic lookups.");
+  }
+  const v = value as Record<string, unknown>;
+  if (v.schemaVersion !== 1) {
+    throw new Error(`Fixture identity map has unrecognised schemaVersion ${JSON.stringify(v.schemaVersion)}.`);
+  }
+  const str = (key: string): string => {
+    const val = v[key];
+    if (typeof val !== "string" || !val) throw new Error(`Fixture identity map is missing required field "${key}".`);
+    return val;
+  };
+  const strMap = (key: string): Record<string, string> => {
+    const val = v[key];
+    if (!val || typeof val !== "object" || Array.isArray(val)) throw new Error(`Fixture identity map field "${key}" must be an object.`);
+    const out: Record<string, string> = {};
+    for (const [entryKey, entryValue] of Object.entries(val as Record<string, unknown>)) {
+      if (typeof entryValue !== "string" || !entryValue) throw new Error(`Fixture identity map field "${key}.${entryKey}" must be a non-empty string.`);
+      out[entryKey] = entryValue;
+    }
+    return out;
+  };
+  return {
+    schemaVersion: 1,
+    organisationId: str("organisationId"),
+    entityId: str("entityId"),
+    siteIds: strMap("siteIds"),
+    personaUserIds: strMap("personaUserIds"),
+    evidenceIds: strMap("evidenceIds"),
+    invoiceSourceDocumentId: str("invoiceSourceDocumentId"),
+    meterReadingSourceDocumentId: str("meterReadingSourceDocumentId"),
+    nonconformityId: str("nonconformityId"),
+    correctiveActionId: str("correctiveActionId"),
+    lcaAssessmentId: str("lcaAssessmentId"),
+    lcaScenarioId: str("lcaScenarioId"),
+    managementReviewId: str("managementReviewId"),
+    managementPackId: str("managementPackId"),
+    boardManagementPackId: str("boardManagementPackId"),
+  };
+}
 
 interface SiteRow {
   key: string;
@@ -284,6 +374,15 @@ export class LiveSeedPort implements DemoSeedPort {
     const lease = await prisma.demoFixtureLease.findUnique({ where: { fixtureKey: FIXTURE_KEY } });
     if (!lease || lease.status === "NONE") return null;
     if (lease.status === "BUILDING") return { version: FIXTURE_KEY, digest: "" }; // deliberately invalid digest -> orchestrator refuses a partial fixture
+    // Checkpoint B corrective handoff §5: a READY lease recorded under a
+    // different implementation revision is never silently reinterpreted as
+    // a fixture this code version actually knows how to verify — reporting
+    // an invalid digest here makes seedBoardDemo's own fixed orchestrator
+    // contract (seed-orchestrator.ts, verbatim) refuse it with "Fixture
+    // identity differs; provision a fresh empty demo database", the same
+    // path a version/digest mismatch already takes. No reset/repair/reseed
+    // happens in this file either way.
+    if (lease.implementationRevision !== FIXTURE_IMPLEMENTATION_REVISION) return { version: FIXTURE_KEY, digest: "" };
     return { version: FIXTURE_KEY, digest: lease.digest };
   }
 
@@ -384,53 +483,92 @@ export class LiveSeedPort implements DemoSeedPort {
    * assumes port state survives between calls), so verifyExistingFixture
    * must re-derive every one of them from what's actually persisted.
    */
+  /**
+   * Checkpoint B corrective handoff §5: re-derives every id from the
+   * lease's own persisted, schema-versioned identity map — never by
+   * guessing which row is "the" row from a friendly name, row ordering, or
+   * a filename/checksum pairing. A genuine post-freeze live transition
+   * (§6's own demonstration nonconformity, a re-upload sharing a filename)
+   * can create another row that would defeat any such heuristic; a stored,
+   * validated id cannot be. Every id read from the map is re-checked
+   * against its expected tenant/relation before being trusted — the column
+   * is operator-writable data, not a proof on its own.
+   */
   private async resolveExistingFixtureState(organisationId: string): Promise<void> {
-    // createImprovementChain deliberately re-links some of these same
-    // filenames onto separate control-check/nonconformity evidence records
-    // with their own distinct bytes (e.g. "BOARD-1-inspection.txt" is
-    // linked again via uploadEvidenceToControlCheck as inspection-checklist
-    // evidence) — so filename alone doesn't uniquely identify the row
-    // storeEvidence originally created. Matching by filename AND checksum
-    // together does, since buildSyntheticEvidence()'s bytes are
-    // deterministic and every collision above intentionally uses different
-    // content.
-    const evidenceRows = await prisma.evidenceObject.findMany({ where: { organisationId } });
-    for (const file of buildSyntheticEvidence()) {
-      const row = evidenceRows.find((r) => r.filename === file.name && r.checksumSha256 === file.sha256);
-      if (row) this.evidenceIdByKey.set(file.key, row.id);
+    const lease = await prisma.demoFixtureLease.findUniqueOrThrow({ where: { fixtureKey: FIXTURE_KEY } });
+    const map = parseIdentityMap(lease.identityMap);
+    if (map.organisationId !== organisationId) {
+      throw new Error(`Fixture identity map organisation id ${map.organisationId} does not match the resolved fixture organisation ${organisationId}.`);
     }
 
-    const baseline = await prisma.lcaAssessment.findFirst({ where: { organisationId, reference: "BOARD1-LCA-001" } });
-    this.lcaAssessmentId = baseline?.id ?? null;
-    const scenario = await prisma.lcaAssessment.findFirst({ where: { organisationId, reference: "BOARD1-LCA-001-S1" } });
-    this.lcaScenarioId = scenario?.id ?? null;
+    const entity = await prisma.entity.findFirstOrThrow({ where: { id: map.entityId, organisationId } });
+    this.entityId = entity.id;
 
-    const pack = await prisma.managementReviewPack.findFirst({ where: { organisationId } });
-    this.managementPackId = pack?.id ?? null;
-
-    const boardPack = await prisma.boardManagementPack.findFirst({ where: { organisationId, reference: LiveSeedPort.BOARD_MANAGEMENT_PACK_REFERENCE } });
-    this.boardManagementPackId = boardPack?.id ?? null;
-
-    const invoiceDoc = await prisma.sourceDocument.findFirst({ where: { organisationId, filename: "BOARD-1-invoice.txt" } });
-    this.invoiceSourceDocumentId = invoiceDoc?.id ?? null;
-    const meterDoc = await prisma.sourceDocument.findFirst({ where: { organisationId, filename: "BOARD-1-meter-reading.txt" } });
-    this.meterReadingSourceDocumentId = meterDoc?.id ?? null;
-
-    // Deliberately the OLDEST matching row, ordered explicitly rather than
-    // left to an unspecified default: a genuine post-freeze live transition
-    // (e.g. a demonstration nonconformity created after the pack issues,
-    // proving the frozen pack doesn't move) can create another row whose
-    // reference also starts with "BOARD1-NC-" — the improvement chain's own
-    // nonconformity is always the first one created for this organisation.
-    const nc = await prisma.nonconformity.findFirst({
-      where: { organisationId, reference: { startsWith: "BOARD1-NC-" } },
-      orderBy: { createdAt: "asc" },
+    const siteRows = await prisma.site.findMany({ where: { organisationId, id: { in: Object.values(map.siteIds) } } });
+    const siteById = new Map(siteRows.map((row) => [row.id, row]));
+    this.sites = Object.entries(map.siteIds).map(([key, id]) => {
+      const row = siteById.get(id);
+      if (!row) throw new Error(`Reconciliation failed: identity map site "${key}" (${id}) is not a real site of this organisation.`);
+      return { key, id: row.id, name: row.name };
     });
-    this.nonconformityId = nc?.id ?? null;
+
+    const personaUserIds = Object.values(map.personaUserIds);
+    const memberships = await prisma.organisationMembership.findMany({ where: { organisationId, userId: { in: personaUserIds } } });
+    const membershipByUser = new Set(memberships.map((m) => m.userId));
+    for (const [name, userId] of Object.entries(map.personaUserIds)) {
+      if (!membershipByUser.has(userId)) throw new Error(`Reconciliation failed: identity map persona "${name}" (${userId}) has no membership in this organisation.`);
+    }
+    const sustainabilityLeadUserId = map.personaUserIds["sustainability-lead"];
+    const independentReviewerUserId = map.personaUserIds["independent-reviewer"];
+    if (!sustainabilityLeadUserId || !independentReviewerUserId) {
+      throw new Error("Reconciliation failed: identity map is missing the sustainability-lead/independent-reviewer persona ids.");
+    }
+    this.sustainabilityLead = await resolveOrganisationContext(prisma, { userId: sustainabilityLeadUserId, requestedOrganisation: organisationId });
+    this.independentReviewer = await resolveOrganisationContext(prisma, { userId: independentReviewerUserId, requestedOrganisation: organisationId });
+    this.owner = this.sustainabilityLead;
+
+    const evidenceRows = await prisma.evidenceObject.findMany({ where: { organisationId, id: { in: Object.values(map.evidenceIds) } } });
+    const evidenceById = new Set(evidenceRows.map((row) => row.id));
+    for (const [key, id] of Object.entries(map.evidenceIds)) {
+      if (!evidenceById.has(id)) throw new Error(`Reconciliation failed: identity map evidence "${key}" (${id}) is not a real evidence object of this organisation.`);
+      this.evidenceIdByKey.set(key, id);
+    }
+
+    const invoiceDoc = await prisma.sourceDocument.findFirstOrThrow({ where: { id: map.invoiceSourceDocumentId, organisationId } });
+    this.invoiceSourceDocumentId = invoiceDoc.id;
+    const meterDoc = await prisma.sourceDocument.findFirstOrThrow({ where: { id: map.meterReadingSourceDocumentId, organisationId } });
+    this.meterReadingSourceDocumentId = meterDoc.id;
+
+    const baseline = await prisma.lcaAssessment.findFirstOrThrow({ where: { id: map.lcaAssessmentId, organisationId } });
+    this.lcaAssessmentId = baseline.id;
+    const scenario = await prisma.lcaAssessment.findFirstOrThrow({ where: { id: map.lcaScenarioId, organisationId } });
+    this.lcaScenarioId = scenario.id;
+
+    const review = await prisma.managementReview.findFirstOrThrow({ where: { id: map.managementReviewId, organisationId } });
+    this.managementReviewId = review.id;
+    const pack = await prisma.managementReviewPack.findFirstOrThrow({ where: { id: map.managementPackId, organisationId } });
+    this.managementPackId = pack.id;
+    const boardPack = await prisma.boardManagementPack.findFirstOrThrow({ where: { id: map.boardManagementPackId, organisationId } });
+    this.boardManagementPackId = boardPack.id;
+
+    const nc = await prisma.nonconformity.findFirstOrThrow({ where: { id: map.nonconformityId, organisationId } });
+    this.nonconformityId = nc.id;
+    const action = await prisma.correctiveAction.findFirstOrThrow({ where: { id: map.correctiveActionId, organisationId } });
+    this.correctiveActionId = action.id;
   }
 
+  /**
+   * Checkpoint B corrective handoff §5: resolves the organisation from the
+   * lease's own exact `fixtureOrganisationId` (the §4 mechanism) rather
+   * than the well-known slug — consistent with treating an id recorded at
+   * creation as the only trustworthy signal, never a naming convention,
+   * even one this same fixture itself chose.
+   */
   private async resolveExistingOrganisation(): Promise<void> {
-    const org = await prisma.organisation.findUnique({ where: { slug: ORG_SLUG } });
+    const lease = await prisma.demoFixtureLease.findUnique({ where: { fixtureKey: FIXTURE_KEY } });
+    const organisationId = lease?.fixtureOrganisationId;
+    if (!organisationId) return;
+    const org = await prisma.organisation.findUnique({ where: { id: organisationId } });
     if (org) {
       this.organisationId = org.id;
       const entity = await prisma.entity.findFirst({ where: { organisationId: org.id } });
@@ -439,6 +577,44 @@ export class LiveSeedPort implements DemoSeedPort {
         rows.map((r) => ({ key: BOARD1.sites.find((s) => s.name === r.name)?.key ?? r.name, id: r.id, name: r.name })),
       );
     }
+  }
+
+  /**
+   * Checkpoint B corrective handoff §5: the write side of the durable
+   * identity map — built purely from this instance's own state at the end
+   * of a fresh build (every field below is set by that build's own earlier
+   * steps), never re-queried. See `resolveExistingFixtureState` for the
+   * read side and `parseIdentityMap` for the persisted shape.
+   */
+  private buildIdentityMap(): FixtureIdentityMapV1 {
+    if (!this.organisationId || !this.entityId) throw new Error("Cannot build the fixture identity map before the organisation/entity exist.");
+    if (this.sites.length === 0) throw new Error("Cannot build the fixture identity map before sites exist.");
+    if (!this.sustainabilityLead || !this.independentReviewer) throw new Error("Cannot build the fixture identity map before personas exist.");
+    if (this.evidenceIdByKey.size === 0) throw new Error("Cannot build the fixture identity map before evidence exists.");
+    if (!this.invoiceSourceDocumentId || !this.meterReadingSourceDocumentId) throw new Error("Cannot build the fixture identity map before the invoice/meter-reading documents exist.");
+    if (!this.nonconformityId || !this.correctiveActionId) throw new Error("Cannot build the fixture identity map before the EMS chain nonconformity/corrective action exist.");
+    if (!this.lcaAssessmentId || !this.lcaScenarioId) throw new Error("Cannot build the fixture identity map before the LCA baseline/scenario exist.");
+    if (!this.managementReviewId || !this.managementPackId || !this.boardManagementPackId) throw new Error("Cannot build the fixture identity map before the management review/packs exist.");
+    return {
+      schemaVersion: 1,
+      organisationId: this.organisationId,
+      entityId: this.entityId,
+      siteIds: Object.fromEntries(this.sites.map((s) => [s.key, s.id])),
+      personaUserIds: {
+        "sustainability-lead": this.sustainabilityLead.userId,
+        "independent-reviewer": this.independentReviewer.userId,
+      },
+      evidenceIds: Object.fromEntries(this.evidenceIdByKey),
+      invoiceSourceDocumentId: this.invoiceSourceDocumentId,
+      meterReadingSourceDocumentId: this.meterReadingSourceDocumentId,
+      nonconformityId: this.nonconformityId,
+      correctiveActionId: this.correctiveActionId,
+      lcaAssessmentId: this.lcaAssessmentId,
+      lcaScenarioId: this.lcaScenarioId,
+      managementReviewId: this.managementReviewId,
+      managementPackId: this.managementPackId,
+      boardManagementPackId: this.boardManagementPackId,
+    };
   }
 
   // -------------------------------------------------------------------
@@ -1550,17 +1726,33 @@ export class LiveSeedPort implements DemoSeedPort {
       throw new Error(`Reconciliation failed: prior-year comparable obligations are ${priorLinkedReviewedCount}/${priorObligationCount} reviewed and linked, expected a fully reviewed, non-empty comparable set.`);
     }
 
-    for (const [key, expectedSha] of (await import("./evidence")).buildSyntheticEvidence().map((f) => [f.key, f.sha256] as const)) {
-      const evidenceId = this.evidenceIdByKey.get(key);
-      if (!evidenceId) throw new Error(`Reconciliation failed: evidence "${key}" was never stored.`);
+    // Checkpoint B corrective handoff §5: read the ACTUAL stored bytes back
+    // through the real, access-controlled evidence path (never trust an
+    // EvidenceObject row's own recorded checksum/size alone) and compare
+    // them byte-for-byte against this fixture's own deterministic generated
+    // content — exact length and exact bytes, not just a hash field.
+    if (!this.owner) throw new Error("Reconciliation failed: no organisation context available to read evidence/document bytes.");
+    const owner = this.owner;
+    for (const file of buildSyntheticEvidence()) {
+      const evidenceId = this.evidenceIdByKey.get(file.key);
+      if (!evidenceId) throw new Error(`Reconciliation failed: evidence "${file.key}" was never stored.`);
       const row = await prisma.evidenceObject.findUniqueOrThrow({ where: { id: evidenceId } });
-      if (row.checksumSha256 !== expectedSha) throw new Error(`Reconciliation failed: evidence "${key}" checksum does not match its generated bytes.`);
+      if (row.checksumSha256 !== file.sha256) throw new Error(`Reconciliation failed: evidence "${file.key}" recorded checksum does not match its generated bytes.`);
+      if (row.byteSize !== file.bytes.length) {
+        throw new Error(`Reconciliation failed: evidence "${file.key}" recorded byte size ${row.byteSize} does not match its generated bytes' actual length ${file.bytes.length}.`);
+      }
+      const read = await readEvidenceObjectBytes(owner, evidenceId);
+      if (!read) throw new Error(`Reconciliation failed: evidence "${file.key}" bytes could not be read back through the real evidence-access path.`);
+      if (read.bytes.length !== file.bytes.length || !read.bytes.equals(file.bytes)) {
+        throw new Error(`Reconciliation failed: evidence "${file.key}" stored bytes do not match its expected deterministic content.`);
+      }
     }
 
-    // Checkpoint B fix 7: the invoice/meter-reading SourceDocuments must
-    // each be linked to a real ActivityEntry (never floating evidence) and
-    // recomputing their expected bytes from that entry's *current* persisted
-    // fields must match what was actually stored — never a placeholder.
+    // Checkpoint B fix 7 (extended by §5): the invoice/meter-reading
+    // SourceDocuments must each be linked to a real ActivityEntry (never
+    // floating evidence); §5 additionally reads the ACTUAL stored content
+    // back through the real tenant-scoped document path and checks it byte-
+    // for-byte, never trusting the row's own sha256/byteSize fields alone.
     if (!this.invoiceSourceDocumentId) throw new Error("Reconciliation failed: the electricity invoice source document was never created.");
     const invoiceDoc = await prisma.sourceDocument.findUniqueOrThrow({ where: { id: this.invoiceSourceDocumentId } });
     const invoiceLinkedEntry = await prisma.activityEntry.findFirstOrThrow({ where: { organisationId, sourceDocumentId: invoiceDoc.id } });
@@ -1568,8 +1760,12 @@ export class LiveSeedPort implements DemoSeedPort {
       `${BOARD1.disclosure}\nFixture: ${BOARD1.fixtureVersion}\nSynthetic energy invoice\n\nSite: North Works. Period: January 2026. Metered electricity: ${invoiceLinkedEntry.canonicalValue.toString()} ${invoiceLinkedEntry.canonicalUnit}.\nNo real person, signature, certificate or company result is represented.\n`,
       "utf8",
     );
-    if (invoiceDoc.sha256 !== createHash("sha256").update(expectedInvoiceBytes).digest("hex")) {
+    if (invoiceDoc.sha256 !== createHash("sha256").update(expectedInvoiceBytes).digest("hex") || invoiceDoc.byteSize !== expectedInvoiceBytes.length) {
       throw new Error("Reconciliation failed: the electricity invoice's stored bytes no longer match its linked activity entry.");
+    }
+    const invoiceContent = await getDocumentContent(owner, invoiceDoc.id);
+    if (!invoiceContent || !Buffer.from(invoiceContent.content).equals(expectedInvoiceBytes)) {
+      throw new Error("Reconciliation failed: the electricity invoice's actual stored content does not match its expected deterministic bytes.");
     }
 
     if (!this.meterReadingSourceDocumentId) throw new Error("Reconciliation failed: the meter-reading source document was never created.");
@@ -1579,8 +1775,12 @@ export class LiveSeedPort implements DemoSeedPort {
       `${BOARD1.disclosure}\nFixture: ${BOARD1.fixtureVersion}\nSynthetic meter reading\n\nSite: East Cards. Period: February 2026. Observed electricity consumption: ${meterLinkedEntry.canonicalValue.toString()} ${meterLinkedEntry.canonicalUnit}.\nNo real person, signature, certificate or company result is represented.\n`,
       "utf8",
     );
-    if (meterDoc.sha256 !== createHash("sha256").update(expectedMeterBytes).digest("hex")) {
+    if (meterDoc.sha256 !== createHash("sha256").update(expectedMeterBytes).digest("hex") || meterDoc.byteSize !== expectedMeterBytes.length) {
       throw new Error("Reconciliation failed: the meter reading's stored bytes no longer match its linked activity entry.");
+    }
+    const meterContent = await getDocumentContent(owner, meterDoc.id);
+    if (!meterContent || !Buffer.from(meterContent.content).equals(expectedMeterBytes)) {
+      throw new Error("Reconciliation failed: the meter reading's actual stored content does not match its expected deterministic bytes.");
     }
 
     if (!this.lcaAssessmentId || !this.lcaScenarioId) throw new Error("Reconciliation failed: LCA assessment/scenario missing.");
@@ -1595,10 +1795,19 @@ export class LiveSeedPort implements DemoSeedPort {
     if (!this.managementPackId) throw new Error("Reconciliation failed: management pack was never issued.");
     const pack = await prisma.managementReviewPack.findUniqueOrThrow({ where: { id: this.managementPackId } });
     if (pack.status !== "ISSUED") throw new Error("Reconciliation failed: management pack is not issued.");
+    // Checkpoint B corrective handoff §5: a fresh recomputation over the
+    // pack's own persisted payload, not just trusting the checksum column
+    // was set correctly at some point in the past.
+    if (pack.checksumSha256 !== createHash("sha256").update(canonicalStringify(pack.payload)).digest("hex")) {
+      throw new Error("Reconciliation failed: the management review pack's checksum does not match a fresh recomputation of its own persisted payload.");
+    }
 
     if (!this.boardManagementPackId) throw new Error("Reconciliation failed: the board management pack (FrozenBoardPack) was never issued.");
     const boardPack = await prisma.boardManagementPack.findUniqueOrThrow({ where: { id: this.boardManagementPackId } });
     if (boardPack.status !== "ISSUED") throw new Error("Reconciliation failed: the board management pack is not issued.");
+    if (boardPack.payloadSha256 !== createHash("sha256").update(canonicalStringify(boardPack.snapshot)).digest("hex")) {
+      throw new Error("Reconciliation failed: the board management pack's checksum does not match a fresh recomputation of its own persisted payload.");
+    }
     const boardPackBody = boardPack.snapshot as unknown as { decisions: unknown[]; sourceRevisions: unknown[] };
     if (!Array.isArray(boardPackBody.decisions) || boardPackBody.decisions.length === 0) {
       throw new Error("Reconciliation failed: the board management pack has no linked decisions.");
@@ -1657,16 +1866,35 @@ export class LiveSeedPort implements DemoSeedPort {
       boardManagementPackChecksum: boardPack.payloadSha256,
       nonconformityStatus: nc.status,
     };
-    const digest = createHash("sha256").update(JSON.stringify(summary)).digest("hex");
+    // Checkpoint B corrective handoff §5: canonicalStringify (the same
+    // deterministic, recursively key-sorted JSON serialisation the pack
+    // checksums above use) rather than JSON.stringify's insertion-order-
+    // dependent output — this summary carries no wall-clock/fetch-time
+    // values, so the digest is a pure function of persisted, reconciled
+    // state.
+    const digest = createHash("sha256").update(canonicalStringify(summary)).digest("hex");
     return { digest };
   }
 
   /** CAS from BUILDING only — never overwrites an already-READY or somehow-reverted-to-NONE row. */
   async markFixtureReady(version: string, digest: string): Promise<void> {
     trace("markFixtureReady start");
+    // Checkpoint B corrective handoff §5: the identity map + implementation
+    // revision are written atomically with this same CAS — a fixture is
+    // never READY without both a digest AND the durable state a replay
+    // needs to re-verify it, and the pure-CAS regression tests' own
+    // synthetic keys (never the real BOARD-1 fixture) never populate one.
+    const isRealFixture = version === FIXTURE_KEY;
+    const identityMap = isRealFixture ? this.buildIdentityMap() : undefined;
     const { count } = await prisma.demoFixtureLease.updateMany({
       where: { fixtureKey: version, status: "BUILDING" },
-      data: { status: "READY", digest },
+      data: {
+        status: "READY",
+        digest,
+        ...(identityMap
+          ? { identityMap: identityMap as unknown as Prisma.InputJsonValue, implementationRevision: FIXTURE_IMPLEMENTATION_REVISION }
+          : {}),
+      },
     });
     if (count === 0) {
       throw new Error(`Fixture "${version}" was not BUILDING when marking READY — refusing to overwrite an unexpected state.`);

@@ -8835,6 +8835,28 @@ model DemoFixtureLease {
   /// check counts "ordinary" (non-fixture) organisations against this exact
   /// recorded id, never a naming convention.
   fixtureOrganisationId String?
+  /// Checkpoint B corrective handoff §5: a schema-versioned map of every id
+  /// needed to re-derive this fixture's full state on replay (organisation/
+  /// entity/site/persona/evidence/document/LCA/review/pack/EMS-chain ids),
+  /// written atomically with the same BUILDING -> READY CAS that sets
+  /// `digest` (see live-seed-port.ts's markFixtureReady/buildIdentityMap).
+  /// Replaces resolveExistingFixtureState's previous reliance on
+  /// findFirst-by-friendly-name/oldest-row/duplicate-filename heuristics,
+  /// which a genuine post-freeze live transition (another row sharing a
+  /// naming convention) could defeat. Every id read from here is
+  /// re-validated against its expected tenant/relation before use — this
+  /// column is operator-writable data, never trusted as proof on its own.
+  identityMap Json?
+  /// Checkpoint B corrective handoff §5: bumped whenever this file's own
+  /// persisted-identity/verification contract changes shape, independently
+  /// of BOARD1.fixtureVersion (the demo's public label). existingFixture()
+  /// reports an invalid digest for a READY lease recorded under a different
+  /// revision, which seedBoardDemo's fixed orchestrator contract already
+  /// turns into "Fixture identity differs; provision a fresh empty demo
+  /// database" — an old READY fixture is never silently reinterpreted as
+  /// one this code version can actually verify, and no reset/repair/reseed
+  /// happens here.
+  implementationRevision Int @default(0)
   createdAt  DateTime               @default(now())
   updatedAt  DateTime               @updatedAt
 }

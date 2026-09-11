@@ -9,6 +9,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { describe, it, expect } from "vitest";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { LiveSeedPort } from "../../scripts/board-demo/live-seed-port";
 import { BOARD1 } from "../../scripts/board-demo/board1";
@@ -214,6 +215,66 @@ describe("Checkpoint B fix 5 — partial build state / replay integrity", () => 
       await prisma.demoFixtureLease.update({ where: { fixtureKey: BOARD1.fixtureVersion }, data: { digest: realDigest } });
     }
     // Restored correctly — a genuine replay still verifies cleanly afterward.
+    await expect(new LiveSeedPort().verifyExistingFixture()).resolves.toBeUndefined();
+  });
+});
+
+describe("Checkpoint B corrective handoff §5 — durable identity map / actual-byte integrity", () => {
+  it("existingFixture reports a fixture recorded under a different implementation revision as invalid, never silently reinterpreting it", async () => {
+    const lease = await prisma.demoFixtureLease.findUniqueOrThrow({ where: { fixtureKey: BOARD1.fixtureVersion } });
+    expect(lease.status).toBe("READY");
+    const realRevision = lease.implementationRevision;
+    await prisma.demoFixtureLease.update({ where: { fixtureKey: BOARD1.fixtureVersion }, data: { implementationRevision: realRevision + 1 } });
+    try {
+      const existing = await new LiveSeedPort().existingFixture();
+      // Not null (still READY) but an invalid digest — seedBoardDemo's own
+      // fixed orchestrator contract turns this into "Fixture identity
+      // differs; provision a fresh empty demo database" without any
+      // reset/repair happening in this file.
+      expect(existing).not.toBeNull();
+      expect(existing?.digest).toBe("");
+    } finally {
+      await prisma.demoFixtureLease.update({ where: { fixtureKey: BOARD1.fixtureVersion }, data: { implementationRevision: realRevision } });
+    }
+    // Restored correctly — a genuine replay still reports the real digest afterward.
+    const restored = await new LiveSeedPort().existingFixture();
+    expect(restored?.digest).toBe(lease.digest);
+  });
+
+  it("replay refuses a fixture whose persisted identity map has been tampered with to point at a foreign row", async () => {
+    const lease = await prisma.demoFixtureLease.findUniqueOrThrow({ where: { fixtureKey: BOARD1.fixtureVersion } });
+    const realMap = lease.identityMap as Record<string, unknown>;
+    expect(realMap).toBeTruthy();
+    const tamperedMap = { ...realMap, nonconformityId: "not-a-real-id" };
+    await prisma.demoFixtureLease.update({ where: { fixtureKey: BOARD1.fixtureVersion }, data: { identityMap: tamperedMap as unknown as Prisma.InputJsonValue } });
+    try {
+      await expect(new LiveSeedPort().verifyExistingFixture()).rejects.toThrow();
+    } finally {
+      await prisma.demoFixtureLease.update({ where: { fixtureKey: BOARD1.fixtureVersion }, data: { identityMap: realMap as unknown as Prisma.InputJsonValue } });
+    }
+    await expect(new LiveSeedPort().verifyExistingFixture()).resolves.toBeUndefined();
+  });
+
+  it("replay refuses evidence whose stored bytes have been altered, even when its checksum/size columns still claim to match", async () => {
+    const lease = await prisma.demoFixtureLease.findUniqueOrThrow({ where: { fixtureKey: BOARD1.fixtureVersion } });
+    const map = lease.identityMap as { evidenceIds: Record<string, string> };
+    const evidenceId = Object.values(map.evidenceIds)[0];
+    const before = await prisma.evidenceObject.findUniqueOrThrow({ where: { id: evidenceId } });
+    // A genuine replay reads bytes back through the real storage-backed
+    // path, not just the EvidenceObject row's own recorded metadata — so
+    // proving this requires actually corrupting the underlying blob table,
+    // never just the EvidenceObject row's own checksum/size columns (which
+    // the fix now cross-checks against a fresh read, not merely trusts).
+    const originalBlob = await prisma.evidenceObjectBlob.findUniqueOrThrow({ where: { evidenceObjectId: before.storageKey! } });
+    await prisma.evidenceObjectBlob.update({
+      where: { evidenceObjectId: before.storageKey! },
+      data: { data: Uint8Array.from(Buffer.from("tampered bytes, not the real fixture content")) },
+    });
+    try {
+      await expect(new LiveSeedPort().verifyExistingFixture()).rejects.toThrow(/stored bytes do not match/);
+    } finally {
+      await prisma.evidenceObjectBlob.update({ where: { evidenceObjectId: before.storageKey! }, data: { data: originalBlob.data } });
+    }
     await expect(new LiveSeedPort().verifyExistingFixture()).resolves.toBeUndefined();
   });
 });
