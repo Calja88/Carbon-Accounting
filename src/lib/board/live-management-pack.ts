@@ -1,43 +1,43 @@
 /**
  * Live binding for the board-sprint's own frozen management pack
  * (`FrozenBoardPack` in contracts.ts, rendered by
- * src/components/board/management-pack.tsx) — distinct from the
- * pre-existing T73 `ManagementReviewPack` (src/lib/ems/review/pack-service.ts),
- * whose payload is a different, unrelated shape (review/attendees/inputs)
- * that cannot carry an Overview snapshot, decisions, or pinned source
- * revisions. This module was missing entirely before Checkpoint B; BD08's
- * createFrozenManagementPack only ever produced the T73 pack, so this
- * board-sprint contract's own artifact was never generated or persisted.
+ * src/components/board/management-pack.tsx).
  *
- * Generate/issue follow the exact same atomic-CAS, issue-once pattern
- * pack-service.ts already uses and Checkpoint B confirmed correct there:
- * a plain re-read-then-write does not fully close a generate/issue race
- * (a SELECT does not force Postgres to re-evaluate against a concurrent
- * writer's just-committed row the way an UPDATE's WHERE clause does), so
- * the write itself is the compare-and-swap.
+ * Checkpoint B corrective handoff §7: this is no longer a standalone
+ * `BoardManagementPack` row with its own generate/issue/status/audit
+ * lifecycle running alongside the pre-existing T73 `ManagementReviewPack`
+ * (`@/lib/ems/review/pack-service.ts`) — there is now exactly ONE
+ * management-pack lifecycle. The board's Overview snapshot, decisions and
+ * pinned source revisions are a validated, versioned `board` section folded
+ * into that SAME `ManagementReviewPack.payload`, covered by that pack's one
+ * canonical checksum, and frozen by that pack's one issue-once CAS. This
+ * module is now a thin adapter: it builds the board section from real,
+ * server-derived data and calls straight through to pack-service.ts; it
+ * never writes to `prisma.boardManagementPack` again.
+ *
+ * `BoardManagementPack` the table/migration is left entirely alone —
+ * existing rows are untouched legacy data (no destructive cleanup), but no
+ * runtime code path reads or writes it from here on.
  */
-import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import { requirePermission } from "@/lib/rbac/authorize";
-import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
-import { tenantWhere } from "@/lib/repositories/tenant-scope";
-import { canonicalStringify } from "@/lib/audit/integrity";
+import {
+  generateManagementReviewPack,
+  issueManagementReviewPack,
+  getManagementReviewPack,
+  BOARD_PACK_SCHEMA_VERSION,
+  type BoardPackInput,
+} from "@/lib/ems/review/pack-service";
 import { loadOverviewForContext, type OverviewSearchParams } from "./live-overview";
 import type { FrozenBoardPack } from "./contracts";
 
 export class BoardManagementPackError extends Error {}
 
-const MANAGE_PERMISSION = "ems.management_review.manage" as const;
 const VIEW_PERMISSION = "ems.view" as const;
 
-type SnapshotBody = Pick<FrozenBoardPack, "reference" | "snapshot" | "sourceRevisions" | "decisions">;
-
-function computeChecksum(body: SnapshotBody): string {
-  return createHash("sha256").update(canonicalStringify(body)).digest("hex");
-}
-
 export interface GenerateBoardManagementPackInput {
+  reviewId: string;
   reference: string;
   overviewWindow: OverviewSearchParams;
   sourceRevisions: FrozenBoardPack["sourceRevisions"];
@@ -45,102 +45,89 @@ export interface GenerateBoardManagementPackInput {
   actorUserId: string;
 }
 
-/** Repeatable while DRAFT — mirrors generateManagementReviewPack's own contract. */
-export async function generateBoardManagementPack(context: OrganisationContext, input: GenerateBoardManagementPackInput) {
-  requirePermission(context, MANAGE_PERMISSION);
-  const ctx = toTenantRepositoryContext(context);
+/**
+ * The board section is always built here, from the real Overview
+ * live-loader and the caller's own already-resolved source
+ * revisions/decisions — never accepted as a caller-supplied summary,
+ * actor identity, or approval status. `pack-service.ts` treats the result
+ * as opaque data it hashes and stores, never reinterprets.
+ */
+async function buildBoardSection(context: OrganisationContext, input: GenerateBoardManagementPackInput): Promise<BoardPackInput> {
   const overview = await loadOverviewForContext(context, input.overviewWindow);
-  const body: SnapshotBody = {
+  return {
     reference: input.reference,
+    overviewWindow: input.overviewWindow,
     snapshot: overview,
     sourceRevisions: input.sourceRevisions,
     decisions: input.decisions,
   };
-
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.boardManagementPack.findFirst({ where: tenantWhere(ctx, { reference: input.reference }) });
-    let row;
-    if (!current) {
-      row = await tx.boardManagementPack.create({
-        data: {
-          organisationId: ctx.organisationId,
-          reference: input.reference,
-          status: "DRAFT",
-          snapshot: body as object,
-          payloadSha256: "",
-          preparedByUserId: input.actorUserId,
-        },
-      });
-    } else {
-      // The actual compare-and-swap: WHERE status = 'DRAFT' is re-evaluated
-      // by Postgres against the latest committed row if this UPDATE had to
-      // wait on a concurrent issuer's lock, so a pack issued in the interim
-      // is never overwritten — affects 0 rows instead.
-      const cas = await tx.boardManagementPack.updateMany({
-        where: { organisationId: ctx.organisationId, id: current.id, status: "DRAFT" },
-        data: { snapshot: body as object, payloadSha256: "" },
-      });
-      if (cas.count === 0) {
-        throw new BoardManagementPackError("This pack has already been issued and cannot be regenerated.");
-      }
-      row = await tx.boardManagementPack.findUniqueOrThrow({ where: { id: current.id } });
-    }
-    // Checkpoint B corrective handoff §5: the checksum is computed from the
-    // row Postgres actually just stored (re-read within this same
-    // transaction), never the pre-write in-memory `body` — jsonb's own
-    // storage-level normalization (numeric formatting, Decimal/Date
-    // serialization) is not guaranteed to reproduce a plain JS
-    // JSON.stringify of the original object byte-for-byte, so only a value
-    // read back through the real column can be hashed and later
-    // reproduced identically by a fresh recomputation over the persisted
-    // payload.
-    const payloadSha256 = computeChecksum(row.snapshot as unknown as SnapshotBody);
-    return tx.boardManagementPack.update({ where: { id: row.id }, data: { payloadSha256 } });
-  });
 }
 
-/** One-way freeze — never overwrites an already-ISSUED pack, never reissuable. */
-export async function issueBoardManagementPack(context: OrganisationContext, reference: string, actorUserId: string, approvedByUserId?: string) {
-  requirePermission(context, MANAGE_PERMISSION);
-  const ctx = toTenantRepositoryContext(context);
-  const current = await prisma.boardManagementPack.findFirst({ where: tenantWhere(ctx, { reference }) });
-  if (!current) throw new BoardManagementPackError("Generate the pack before issuing it.");
-  if (current.status === "ISSUED") throw new BoardManagementPackError("This pack has already been issued.");
-
-  return prisma.$transaction(async (tx) => {
-    const cas = await tx.boardManagementPack.updateMany({
-      where: { organisationId: ctx.organisationId, id: current.id, status: "DRAFT" },
-      data: { status: "ISSUED", issuedAt: new Date(), approvedByUserId: approvedByUserId ?? null },
-    });
-    if (cas.count === 0) {
-      throw new BoardManagementPackError("This pack was issued by a concurrent request; reload and retry.");
-    }
-    return tx.boardManagementPack.findUniqueOrThrow({ where: { id: current.id } });
-  });
+/** Repeatable while DRAFT — delegates entirely to pack-service.ts's own generate. */
+export async function generateBoardManagementPack(context: OrganisationContext, input: GenerateBoardManagementPackInput) {
+  const board = await buildBoardSection(context, input);
+  return generateManagementReviewPack(context, input.reviewId, input.actorUserId, board);
 }
 
-/** Renders only the saved snapshot — never refetches current records to fill an issued pack. */
-export async function getBoardManagementPack(context: OrganisationContext, reference: string): Promise<FrozenBoardPack | null> {
-  requirePermission(context, VIEW_PERMISSION);
-  const ctx = toTenantRepositoryContext(context);
-  const row = await prisma.boardManagementPack.findFirst({ where: tenantWhere(ctx, { reference }) });
-  if (!row) return null;
-  const body = row.snapshot as unknown as SnapshotBody;
-  const [preparer, approver] = await Promise.all([
-    prisma.user.findUnique({ where: { id: row.preparedByUserId } }),
-    row.approvedByUserId ? prisma.user.findUnique({ where: { id: row.approvedByUserId } }) : Promise.resolve(null),
-  ]);
+/** One-way freeze — delegates entirely to pack-service.ts's own issue. */
+export async function issueBoardManagementPack(context: OrganisationContext, input: GenerateBoardManagementPackInput) {
+  const board = await buildBoardSection(context, input);
+  return issueManagementReviewPack(context, input.reviewId, input.actorUserId, board);
+}
+
+interface StoredBoardSection {
+  schemaVersion: number;
+  reference: string;
+  snapshot: FrozenBoardPack["snapshot"];
+  sourceRevisions: FrozenBoardPack["sourceRevisions"];
+  decisions: FrozenBoardPack["decisions"];
+}
+
+function parseBoardSection(payload: unknown): StoredBoardSection | null {
+  if (!payload || typeof payload !== "object") return null;
+  const board = (payload as Record<string, unknown>).board;
+  if (!board || typeof board !== "object") return null;
+  const b = board as Record<string, unknown>;
+  if (b.schemaVersion !== BOARD_PACK_SCHEMA_VERSION) return null;
+  if (typeof b.reference !== "string" || !b.snapshot || !Array.isArray(b.sourceRevisions) || !Array.isArray(b.decisions)) return null;
   return {
-    id: row.id,
-    reference: row.reference,
-    version: row.version,
-    status: row.status === "ISSUED" ? "issued" : "draft",
-    issuedAt: row.issuedAt ? row.issuedAt.toISOString() : null,
-    preparedBy: preparer?.name ?? "Unknown",
-    approvedBy: approver?.name ?? null,
-    snapshot: body.snapshot,
-    sourceRevisions: body.sourceRevisions,
-    decisions: body.decisions,
-    payloadSha256: row.payloadSha256,
+    schemaVersion: b.schemaVersion,
+    reference: b.reference,
+    snapshot: b.snapshot as FrozenBoardPack["snapshot"],
+    sourceRevisions: b.sourceRevisions as FrozenBoardPack["sourceRevisions"],
+    decisions: b.decisions as FrozenBoardPack["decisions"],
+  };
+}
+
+/**
+ * Renders only the saved `board` section of the one management-review
+ * pack — never refetches current records to fill an issued pack. Returns
+ * null when the pack has no validated board section (an ordinary T73-only
+ * review) or doesn't exist yet.
+ */
+export async function getBoardManagementPack(context: OrganisationContext, reviewId: string): Promise<FrozenBoardPack | null> {
+  requirePermission(context, VIEW_PERMISSION);
+  const pack = await getManagementReviewPack(context, reviewId);
+  if (!pack) return null;
+  const board = parseBoardSection(pack.payload);
+  if (!board) return null;
+
+  const issuer = pack.issuedByUserId ? await prisma.user.findUnique({ where: { id: pack.issuedByUserId } }) : null;
+
+  return {
+    id: pack.id,
+    reference: board.reference,
+    version: 1,
+    status: pack.status === "ISSUED" ? "issued" : "draft",
+    issuedAt: pack.issuedAt ? pack.issuedAt.toISOString() : null,
+    preparedBy: issuer?.name ?? "Unknown",
+    // Checkpoint B corrective handoff §7: the merged lifecycle has one
+    // issuer, not a separate preparer/approver pair — ManagementReviewPack
+    // carries no approver field of its own, so this is never fabricated.
+    approvedBy: null,
+    snapshot: board.snapshot,
+    sourceRevisions: board.sourceRevisions,
+    decisions: board.decisions,
+    payloadSha256: pack.checksumSha256 ?? "",
   };
 }

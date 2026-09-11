@@ -60,7 +60,6 @@ import { upsertProcess, upsertInventoryItem, assignFactor } from "@/lib/lca/mode
 import { runCalculation, getLatestRun, runTotals } from "@/lib/lca/calculation-service";
 import { cloneAssessment } from "@/lib/lca/assessment-service";
 import { scheduleManagementReview, startManagementReviewInputCollection } from "@/lib/ems/review/review-service";
-import { generateManagementReviewPack, issueManagementReviewPack } from "@/lib/ems/review/pack-service";
 import { generateBoardManagementPack, issueBoardManagementPack } from "@/lib/board/live-management-pack";
 import { createOtherRequirementSource } from "@/lib/ems/legal/other-requirement-service";
 import {
@@ -167,7 +166,7 @@ export const FIXTURE_ORGANISATION_SLUG_PREFIX = "board-1-";
  * `existingFixture()` below for how a mismatch is handled — never by
  * resetting or reinterpreting the old fixture, only by refusing it.
  */
-const FIXTURE_IMPLEMENTATION_REVISION = 1;
+const FIXTURE_IMPLEMENTATION_REVISION = 2;
 
 /**
  * Every id `verifyAllInvariants`/`createImprovementChain`/etc. need to
@@ -193,8 +192,12 @@ interface FixtureIdentityMapV1 {
   lcaAssessmentId: string;
   lcaScenarioId: string;
   managementReviewId: string;
+  /**
+   * Checkpoint B corrective handoff §7: the ONE management-review pack —
+   * the board section (Overview snapshot, decisions, source revisions) is
+   * folded into its own payload, never a second standalone pack id.
+   */
   managementPackId: string;
-  boardManagementPackId: string;
 }
 
 /**
@@ -207,6 +210,11 @@ function parseIdentityMap(value: unknown): FixtureIdentityMapV1 {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Fixture is marked READY but has no persisted identity map — refusing to verify with heuristic lookups.");
   }
+  // Checkpoint B corrective handoff §7: this map dropped boardManagementPackId
+  // (merged into managementPackId's own payload) — guarded by the module-level
+  // FIXTURE_IMPLEMENTATION_REVISION bump at the call site (existingFixture),
+  // never by this map's own schemaVersion, which stays 1 (fewer required
+  // fields, not a structurally new shape).
   const v = value as Record<string, unknown>;
   if (v.schemaVersion !== 1) {
     throw new Error(`Fixture identity map has unrecognised schemaVersion ${JSON.stringify(v.schemaVersion)}.`);
@@ -241,7 +249,6 @@ function parseIdentityMap(value: unknown): FixtureIdentityMapV1 {
     lcaScenarioId: str("lcaScenarioId"),
     managementReviewId: str("managementReviewId"),
     managementPackId: str("managementPackId"),
-    boardManagementPackId: str("boardManagementPackId"),
   };
 }
 
@@ -271,7 +278,6 @@ export class LiveSeedPort implements DemoSeedPort {
   private lcaScenarioId: string | null = null;
   private managementReviewId: string | null = null;
   private managementPackId: string | null = null;
-  private boardManagementPackId: string | null = null;
   static readonly BOARD_MANAGEMENT_PACK_REFERENCE = "BOARD1-PACK-2026-Q3";
   private invoiceSourceDocumentId: string | null = null;
   private meterReadingSourceDocumentId: string | null = null;
@@ -550,8 +556,6 @@ export class LiveSeedPort implements DemoSeedPort {
     this.managementReviewId = review.id;
     const pack = await prisma.managementReviewPack.findFirstOrThrow({ where: { id: map.managementPackId, organisationId } });
     this.managementPackId = pack.id;
-    const boardPack = await prisma.boardManagementPack.findFirstOrThrow({ where: { id: map.boardManagementPackId, organisationId } });
-    this.boardManagementPackId = boardPack.id;
 
     const nc = await prisma.nonconformity.findFirstOrThrow({ where: { id: map.nonconformityId, organisationId } });
     this.nonconformityId = nc.id;
@@ -596,7 +600,7 @@ export class LiveSeedPort implements DemoSeedPort {
     if (!this.invoiceSourceDocumentId || !this.meterReadingSourceDocumentId) throw new Error("Cannot build the fixture identity map before the invoice/meter-reading documents exist.");
     if (!this.nonconformityId || !this.correctiveActionId) throw new Error("Cannot build the fixture identity map before the EMS chain nonconformity/corrective action exist.");
     if (!this.lcaAssessmentId || !this.lcaScenarioId) throw new Error("Cannot build the fixture identity map before the LCA baseline/scenario exist.");
-    if (!this.managementReviewId || !this.managementPackId || !this.boardManagementPackId) throw new Error("Cannot build the fixture identity map before the management review/packs exist.");
+    if (!this.managementReviewId || !this.managementPackId) throw new Error("Cannot build the fixture identity map before the management review/pack exist.");
     return {
       schemaVersion: 1,
       organisationId: this.organisationId,
@@ -615,7 +619,6 @@ export class LiveSeedPort implements DemoSeedPort {
       lcaScenarioId: this.lcaScenarioId,
       managementReviewId: this.managementReviewId,
       managementPackId: this.managementPackId,
-      boardManagementPackId: this.boardManagementPackId,
     };
   }
 
@@ -1637,22 +1640,23 @@ export class LiveSeedPort implements DemoSeedPort {
     // same shape the pack-service test suite already exercises), not a
     // partial/fake one.
 
-    await generateManagementReviewPack(owner, review.id, owner.userId);
-    const issued = await issueManagementReviewPack(owner, review.id, owner.userId);
-    this.managementPackId = issued.id;
-
-    // The board-sprint's own FrozenBoardPack (contracts.ts) — a real
-    // Overview snapshot plus decisions/source revisions genuinely pinned to
-    // this fixture's own EMS chain and LCA assessment, not the T73 pack's
-    // (empty) input-link catalogue above.
+    // Checkpoint B corrective handoff §7: one management-pack lifecycle —
+    // the board-sprint's own FrozenBoardPack (contracts.ts, a real Overview
+    // snapshot plus decisions/source revisions genuinely pinned to this
+    // fixture's own EMS chain and LCA assessment) is now a validated
+    // section of this SAME ManagementReviewPack, generated and issued
+    // exactly once, never a second standalone pack with its own status/
+    // checksum. The board section must be ready before either call, so
+    // generate/issue happen after the EMS chain and LCA exist, not before.
     if (!this.nonconformityId || !this.correctiveActionId || !this.lcaAssessmentId || !this.lcaScenarioId) {
-      throw new Error("EMS chain and LCA must be built before the frozen board pack.");
+      throw new Error("EMS chain and LCA must be built before the frozen management pack.");
     }
     const [nonconformity, correctiveAction] = await Promise.all([
       prisma.nonconformity.findUniqueOrThrow({ where: { id: this.nonconformityId } }),
       prisma.correctiveAction.findUniqueOrThrow({ where: { id: this.correctiveActionId } }),
     ]);
-    await generateBoardManagementPack(owner, {
+    const boardPackInput: Parameters<typeof generateBoardManagementPack>[1] = {
+      reviewId: review.id,
       reference: LiveSeedPort.BOARD_MANAGEMENT_PACK_REFERENCE,
       overviewWindow: { from: "2026-01", to: "2026-08" },
       actorUserId: owner.userId,
@@ -1671,9 +1675,10 @@ export class LiveSeedPort implements DemoSeedPort {
         { id: this.lcaAssessmentId, kind: "lca_assessment", revision: "baseline", label: "BOARD1-LCA-001 baseline", href: `/assessments/${this.lcaAssessmentId}` },
         { id: this.lcaScenarioId, kind: "lca_assessment", revision: "scenario", label: "BOARD1-LCA-001-S1 scenario", href: `/assessments/${this.lcaScenarioId}` },
       ],
-    });
-    const issuedBoardPack = await issueBoardManagementPack(owner, LiveSeedPort.BOARD_MANAGEMENT_PACK_REFERENCE, owner.userId);
-    this.boardManagementPackId = issuedBoardPack.id;
+    };
+    await generateBoardManagementPack(owner, boardPackInput);
+    const issued = await issueBoardManagementPack(owner, boardPackInput);
+    this.managementPackId = issued.id;
   }
 
   // -------------------------------------------------------------------
@@ -1838,25 +1843,26 @@ export class LiveSeedPort implements DemoSeedPort {
     if (!this.managementPackId) throw new Error("Reconciliation failed: management pack was never issued.");
     const pack = await prisma.managementReviewPack.findUniqueOrThrow({ where: { id: this.managementPackId } });
     if (pack.status !== "ISSUED") throw new Error("Reconciliation failed: management pack is not issued.");
-    // Checkpoint B corrective handoff §5: a fresh recomputation over the
-    // pack's own persisted payload, not just trusting the checksum column
-    // was set correctly at some point in the past.
+    // Checkpoint B corrective handoff §5/§7: a fresh recomputation over the
+    // pack's own persisted payload (which now embeds the board section
+    // too), not just trusting the checksum column was set correctly at
+    // some point in the past — one canonical checksum over the one pack.
     if (pack.checksumSha256 !== createHash("sha256").update(canonicalStringify(pack.payload)).digest("hex")) {
       throw new Error("Reconciliation failed: the management review pack's checksum does not match a fresh recomputation of its own persisted payload.");
     }
 
-    if (!this.boardManagementPackId) throw new Error("Reconciliation failed: the board management pack (FrozenBoardPack) was never issued.");
-    const boardPack = await prisma.boardManagementPack.findUniqueOrThrow({ where: { id: this.boardManagementPackId } });
-    if (boardPack.status !== "ISSUED") throw new Error("Reconciliation failed: the board management pack is not issued.");
-    if (boardPack.payloadSha256 !== createHash("sha256").update(canonicalStringify(boardPack.snapshot)).digest("hex")) {
-      throw new Error("Reconciliation failed: the board management pack's checksum does not match a fresh recomputation of its own persisted payload.");
+    // Checkpoint B corrective handoff §7: the board-sprint's own frozen
+    // section (FrozenBoardPack) lives inside this SAME pack's payload —
+    // never a second standalone pack/status/checksum.
+    const boardSection = (pack.payload as { board?: { schemaVersion?: unknown; decisions?: unknown; sourceRevisions?: unknown } } | null)?.board;
+    if (!boardSection || boardSection.schemaVersion !== 1) {
+      throw new Error("Reconciliation failed: the management pack has no validated board section.");
     }
-    const boardPackBody = boardPack.snapshot as unknown as { decisions: unknown[]; sourceRevisions: unknown[] };
-    if (!Array.isArray(boardPackBody.decisions) || boardPackBody.decisions.length === 0) {
-      throw new Error("Reconciliation failed: the board management pack has no linked decisions.");
+    if (!Array.isArray(boardSection.decisions) || boardSection.decisions.length === 0) {
+      throw new Error("Reconciliation failed: the management pack's board section has no linked decisions.");
     }
-    if (!Array.isArray(boardPackBody.sourceRevisions) || boardPackBody.sourceRevisions.length === 0) {
-      throw new Error("Reconciliation failed: the board management pack has no pinned source revisions.");
+    if (!Array.isArray(boardSection.sourceRevisions) || boardSection.sourceRevisions.length === 0) {
+      throw new Error("Reconciliation failed: the management pack's board section has no pinned source revisions.");
     }
 
     if (!this.nonconformityId) throw new Error("Reconciliation failed: EMS chain nonconformity is missing.");
@@ -1933,8 +1939,6 @@ export class LiveSeedPort implements DemoSeedPort {
       lcaScenarioPerFunctionalUnitKgCo2e: scenarioPerFu,
       managementPackId: pack.id,
       managementPackChecksum: pack.checksumSha256,
-      boardManagementPackId: boardPack.id,
-      boardManagementPackChecksum: boardPack.payloadSha256,
       nonconformityStatus: nc.status,
     };
     // Checkpoint B corrective handoff §5: canonicalStringify (the same

@@ -8929,14 +8929,15 @@ enum BoardManagementPackStatus {
   ISSUED
 }
 
-/// The board-sprint's own frozen management pack (`FrozenBoardPack` in
-/// src/lib/board/contracts.ts, rendered by src/components/board/management-pack.tsx)
-/// — distinct from the pre-existing T73 ManagementReviewPack, which has its
-/// own unrelated payload shape and cannot carry an Overview snapshot/decisions/
-/// pinned source revisions. `snapshot` holds the full serialized FrozenBoardPack
-/// body (everything except id/status/issuedAt/payloadSha256, which live in
-/// their own columns); generate/issue follow the same atomic-CAS,
-/// issue-once pattern as ManagementReviewPack.
+/// RETIRED (Checkpoint B corrective handoff §7): no runtime code path reads
+/// or writes this table anymore. The board-sprint's own frozen pack
+/// (`FrozenBoardPack` in src/lib/board/contracts.ts) is now a validated
+/// `board` section of ManagementReviewPack.payload — one management-pack
+/// lifecycle, one canonical checksum — built by
+/// `@/lib/board/live-management-pack.ts`, an adapter over
+/// `@/lib/ems/review/pack-service.ts`. This model and its migration are
+/// left in place as untouched legacy data (no destructive cleanup); any
+/// rows created before this change are historical only.
 model BoardManagementPack {
   id               String                    @id @default(cuid())
   organisationId   String

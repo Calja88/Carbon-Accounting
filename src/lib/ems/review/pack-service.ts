@@ -62,6 +62,32 @@ const VIEW_PERMISSION = "ems.view" as const;
 
 export const MANAGEMENT_REVIEW_PACK_GENERATOR_VERSION = "t73-pack-v1" as const;
 
+/**
+ * Checkpoint B corrective handoff §7: the board sprint's own frozen pack
+ * (`FrozenBoardPack` in `@/lib/board/contracts`) is no longer a standalone
+ * `BoardManagementPack` row with its own generate/issue/status lifecycle —
+ * it is one more validated, versioned section of this SAME
+ * `ManagementReviewPack.payload`, sharing this pack's one issue/status/audit
+ * lifecycle and its one canonical checksum. `pack-service.ts` never imports
+ * board-layer types (that dependency runs the other way — board/ already
+ * depends on ems/); the caller (`@/lib/board/live-management-pack.ts`)
+ * builds this section from the real Overview snapshot and passes it in as
+ * plain, already-serializable data.
+ */
+export const BOARD_PACK_SCHEMA_VERSION = 1 as const;
+export interface BoardPackInput {
+  reference: string;
+  /** The caller's own board-scope search params, opaque to this module. */
+  overviewWindow: unknown;
+  /** The real `OverviewModel`, opaque to this module. */
+  snapshot: unknown;
+  sourceRevisions: unknown[];
+  decisions: unknown[];
+}
+interface BoardPackSection extends BoardPackInput {
+  schemaVersion: typeof BOARD_PACK_SCHEMA_VERSION;
+}
+
 function toJsonInput(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
@@ -80,7 +106,7 @@ interface ReviewForPack {
 }
 
 /** Pure, deterministic pack payload builder — same live rows always produce the same object shape/ordering. */
-async function buildPackPayload(ctx: TenantRepositoryContext, review: ReviewForPack) {
+async function buildPackPayload(ctx: TenantRepositoryContext, review: ReviewForPack, board?: BoardPackInput) {
   const inputLinks = await prisma.managementReviewInputLink.findMany({
     where: tenantWhere(ctx, { reviewId: review.id }),
   });
@@ -92,6 +118,8 @@ async function buildPackPayload(ctx: TenantRepositoryContext, review: ReviewForP
     where: tenantWhere(ctx, { reviewId: review.id }),
   });
   const sortedAttendees = [...attendees].sort((a, b) => compareStrings(a.personId, b.personId));
+
+  const boardSection: BoardPackSection | null = board ? { schemaVersion: BOARD_PACK_SCHEMA_VERSION, ...board } : null;
 
   return {
     generatorVersion: MANAGEMENT_REVIEW_PACK_GENERATOR_VERSION,
@@ -116,6 +144,7 @@ async function buildPackPayload(ctx: TenantRepositoryContext, review: ReviewForP
       summary: link.summary ?? null,
       isStale: link.isStale,
     })),
+    board: boardSection,
   };
 }
 
@@ -127,7 +156,7 @@ function computeChecksum(payload: unknown): string {
 // Generate (repeatable, DRAFT only) / issue (one-way freeze)
 // ---------------------------------------------------------------------------
 
-export async function generateManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string) {
+export async function generateManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string, board?: BoardPackInput) {
   requirePermission(context, MANAGE_PERMISSION);
   const ctx = toTenantRepositoryContext(context);
   const review = await findTenantManagementReview(ctx, reviewId);
@@ -141,8 +170,7 @@ export async function generateManagementReviewPack(context: OrganisationContext,
     throw new ManagementReviewPackError("This review's pack has already been issued and cannot be regenerated.");
   }
 
-  const payload = await buildPackPayload(ctx, review);
-  const checksumSha256 = computeChecksum(payload);
+  const payload = await buildPackPayload(ctx, review, board);
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
     // Checkpoint B fix: the previous unconditional upsert let a delayed
@@ -166,14 +194,14 @@ export async function generateManagementReviewPack(context: OrganisationContext,
           cutoffDate: review.cutoffDate,
           generatorVersion: MANAGEMENT_REVIEW_PACK_GENERATOR_VERSION,
           payload: toJsonInput(payload),
-          checksumSha256,
+          checksumSha256: "",
           generatedAt: new Date(),
         },
       });
     } else {
       const casResult = await tx.managementReviewPack.updateMany({
         where: { organisationId: txCtx.organisationId, id: currentPack.id, status: "DRAFT" },
-        data: { payload: toJsonInput(payload), checksumSha256, generatedAt: new Date() },
+        data: { payload: toJsonInput(payload), checksumSha256: "", generatedAt: new Date() },
       });
       if (casResult.count === 0) {
         throw new ManagementReviewPackError("This review's pack has already been issued and cannot be regenerated.");
@@ -182,6 +210,21 @@ export async function generateManagementReviewPack(context: OrganisationContext,
         where: { organisationId_id: { organisationId: txCtx.organisationId, id: currentPack.id } },
       });
     }
+
+    // Checkpoint B corrective handoff §7 (carrying forward the fix §5
+    // needed for the old standalone board pack): the checksum is computed
+    // from the payload Postgres actually just stored (re-read within this
+    // same transaction), never the pre-write in-memory object — jsonb's
+    // own storage-level normalization (numeric formatting in particular)
+    // is not guaranteed to reproduce a plain JS JSON.stringify byte-for-
+    // byte, so only a value read back through the real column can be
+    // hashed and later reproduced identically by a fresh recomputation
+    // over the persisted payload — the same property this pack's own
+    // "repeated generation is stable" and issue-time recomputation both
+    // depend on, now doubly important with the board section's real
+    // Overview numbers folded in.
+    const checksumSha256 = computeChecksum(pack.payload);
+    pack = await tx.managementReviewPack.update({ where: { id: pack.id }, data: { checksumSha256 } });
 
     await recordAuditEvent(tx, txCtx, {
       eventType: "management_review_pack.generated",
@@ -198,7 +241,7 @@ export async function generateManagementReviewPack(context: OrganisationContext,
   });
 }
 
-export async function issueManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string) {
+export async function issueManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string, board?: BoardPackInput) {
   requirePermission(context, MANAGE_PERMISSION);
   const ctx = toTenantRepositoryContext(context);
   const review = await findTenantManagementReview(ctx, reviewId);
@@ -211,8 +254,7 @@ export async function issueManagementReviewPack(context: OrganisationContext, re
   if (!pack) throw new ManagementReviewPackError("Generate the pack before issuing it.");
   if (pack.status === "ISSUED") throw new ManagementReviewPackError("This pack has already been issued.");
 
-  const payload = await buildPackPayload(ctx, review);
-  const checksumSha256 = computeChecksum(payload);
+  const payload = await buildPackPayload(ctx, review, board);
   const inputLinks = await prisma.managementReviewInputLink.findMany({ where: tenantWhere(ctx, { reviewId: review.id }) });
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
@@ -226,7 +268,7 @@ export async function issueManagementReviewPack(context: OrganisationContext, re
       where: { organisationId: txCtx.organisationId, id: pack.id, status: "DRAFT" },
       data: {
         payload: toJsonInput(payload),
-        checksumSha256,
+        checksumSha256: "",
         generatedAt: new Date(),
         status: "ISSUED",
         issuedByUserId: actorUserId,
@@ -236,9 +278,15 @@ export async function issueManagementReviewPack(context: OrganisationContext, re
     if (casResult.count !== 1) {
       throw new ManagementReviewPackError("This pack was issued by a concurrent request; reload and retry.");
     }
-    const issued = await tx.managementReviewPack.findUniqueOrThrow({
+    let issued = await tx.managementReviewPack.findUniqueOrThrow({
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: pack.id } },
     });
+    // Checkpoint B corrective handoff §7: same read-back-then-hash
+    // guarantee as generate above, recomputed one final time at the
+    // moment of freeze so the checksum that never changes again is
+    // provably a hash of the exact bytes this row holds.
+    const checksumSha256 = computeChecksum(issued.payload);
+    issued = await tx.managementReviewPack.update({ where: { id: issued.id }, data: { checksumSha256 } });
 
     for (const link of inputLinks) {
       await tx.managementReviewInputSnapshot.create({
