@@ -8,6 +8,7 @@ import { tenantWhere } from "@/lib/repositories/tenant-scope";
 import { buildAnalyticsSnapshot, type AnalyticsSnapshot } from "@/lib/analytics-service";
 import { monthInputValue, formatRangeLabel } from "@/lib/report-period";
 import { listOverdueOrUnevaluatedObligations } from "@/lib/ems/legal/evaluation-service";
+import { SCOPE3_CAT3_LABEL } from "@/lib/scope3-derived";
 import { boardPeriodSchema } from "./schemas";
 import { loadOverview, type OverviewPorts, type BoardScope } from "./overview-service";
 import { buildCarbonSection, type AuthorizedAnalyticsWindow, type WindowCoverage } from "./carbon-adapter";
@@ -192,12 +193,22 @@ async function computeScope3CategoryCoverage(
   periodStart: Date,
   periodEnd: Date,
 ): Promise<{ quantifiedCategories: number; screenedCategories: number }> {
-  const screened = await prisma.activityDataPoint.findMany({
+  const screenedRows = await prisma.activityDataPoint.findMany({
     where: { scope: "SCOPE_3", scope3Category: { not: null } },
     select: { scope3Category: true },
     distinct: ["scope3Category"],
   });
-  if (siteIds.length === 0) return { quantifiedCategories: 0, screenedCategories: screened.length };
+  // Category 3 structurally has no data point of its own (schema comment on
+  // ActivityDataPoint.scope3Category) — it is always screened via the
+  // standing derivation mechanism (scope3-derived.ts), never via a
+  // catalogue entry, so it would never appear in screenedRows above despite
+  // genuinely being screened (and, once a positive value derives, genuinely
+  // quantified) every period.
+  const screenedCategories = new Set([
+    ...screenedRows.map((r) => r.scope3Category).filter((c): c is string => c !== null),
+    SCOPE3_CAT3_LABEL,
+  ]);
+  if (siteIds.length === 0) return { quantifiedCategories: 0, screenedCategories: screenedCategories.size };
   const ctx = toTenantRepositoryContext(context);
   const quantified = await prisma.calculation.findMany({
     where: tenantWhere<Prisma.CalculationWhereInput>(ctx, {
@@ -215,7 +226,7 @@ async function computeScope3CategoryCoverage(
     distinct: ["scope3Category"],
   });
   const categories = new Set(quantified.map((c) => c.scope3Category).filter((c): c is string => c !== null));
-  return { quantifiedCategories: categories.size, screenedCategories: screened.length };
+  return { quantifiedCategories: categories.size, screenedCategories: screenedCategories.size };
 }
 
 /** True only when a real Scope 2 market-based/residual-mix companion calculation exists for this window — never assumed available. */
@@ -309,19 +320,6 @@ async function header(context: OrganisationContext, scope: BoardScope): ReturnTy
 }
 
 async function carbon(context: OrganisationContext, scope: BoardScope): ReturnType<OverviewPorts<OrganisationContext>["carbon"]> {
-  try {
-    return await carbonInner(context, scope);
-  } catch (err) {
-    // TEMPORARY diagnostic — overview-service.ts's own section() wrapper
-    // deliberately swallows this exception before it ever reaches a log a
-    // client could see; this one is CI-only stderr to find the Checkpoint B
-    // fix 2 "unavailable" root cause, and must be removed once found.
-    console.error("[TEMP-DIAG] carbon() threw:", err);
-    throw err;
-  }
-}
-
-async function carbonInner(context: OrganisationContext, scope: BoardScope): ReturnType<OverviewPorts<OrganisationContext>["carbon"]> {
   const periodStart = monthStringToDate(scope.from, false), periodEnd = monthStringToDate(scope.to, true);
   const prior = priorYear(periodStart, periodEnd);
   // A single explicitly-selected site must actually narrow every dataset
