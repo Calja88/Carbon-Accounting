@@ -33,6 +33,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveOrganisationContext, type OrganisationContext } from "@/lib/organisation/context";
 import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
 import { createActivityEntryWithCalculations, prepareReportingData } from "@/lib/entries-service";
+import { reviewSourcePeriodObligation } from "@/lib/carbon/source-period-obligation-service";
 import { createEnvironmentalAspect } from "@/lib/ems/aspects/aspect-service";
 import { createOperationalControl, recordControlCheck, uploadEvidenceToControlCheck } from "@/lib/ems/controls/control-service";
 import { createEnvironmentalObjective } from "@/lib/ems/objectives/objective-service";
@@ -407,6 +408,7 @@ export class LiveSeedPort implements DemoSeedPort {
       "ems.compliance_obligation.edit",
       "ems.compliance_obligation.approve",
       "ems.compliance_evaluation.perform",
+      "carbon.entry.approve",
       ...lcaGrants,
     ];
     for (const code of grants) {
@@ -612,6 +614,23 @@ export class LiveSeedPort implements DemoSeedPort {
 
     const siteById = new Map(this.sites.map((s) => [s.key, s]));
 
+    // Checkpoint B corrective handoff §1: the exact ActivityEntry id each
+    // (site, month, source) submission actually produced, captured directly
+    // from each createActivityEntryWithCalculations call's own return value
+    // — never rediscovered later via a findFirst lookup that could match
+    // the wrong row when several sources share one data-point category
+    // (electricity-a/b, services-a/b/c/d). A duplicate key is a real bug
+    // (two distinct submissions colliding on one identity), not something
+    // to silently overwrite.
+    const entryIdBySourcePeriod = new Map<string, string>();
+    function recordSubmission(siteKey: string, month: string, source: string, entryId: string) {
+      const key = `${siteKey}:${month}:${source}`;
+      if (entryIdBySourcePeriod.has(key)) {
+        throw new Error(`Duplicate BOARD-1 submission identity: ${key} already maps to an entry.`);
+      }
+      entryIdBySourcePeriod.set(key, entryId);
+    }
+
     // Phase 1: real Scope 1/2 entries + calculations for 2026 only — the
     // year the derived Category 3 mechanism and the 192 obligations cover.
     // 2025 (prior comparable) only needs to reconcile its own total, so it
@@ -631,9 +650,9 @@ export class LiveSeedPort implements DemoSeedPort {
         if (target.scope1Kg > 0) {
           const [gasKg, fleetKg] = [round4(target.scope1Kg * 0.8), round4(target.scope1Kg * 0.2)];
           await Promise.all(
-            ([["gas", gasKg], ["fleet", fleetKg]] as const).map(([source, kg]) => {
-              if (kg <= 0) return null;
-              return createActivityEntryWithCalculations(ctx, {
+            ([["gas", gasKg], ["fleet", fleetKg]] as const).map(async ([source, kg]) => {
+              if (kg <= 0) return;
+              const result = await createActivityEntryWithCalculations(ctx, {
                 activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
                 siteId: site.id,
                 periodStart,
@@ -646,6 +665,7 @@ export class LiveSeedPort implements DemoSeedPort {
                 enteredByUserId: owner.userId,
                 dataQualityTier: "TIER_3",
               });
+              recordSubmission(target.siteKey, target.month, source, result.entry.id);
             }),
           );
         }
@@ -653,8 +673,8 @@ export class LiveSeedPort implements DemoSeedPort {
           const electricityKeys = target.siteKey === "central-digital" ? ["electricity-a", "electricity-b"] : ["electricity"];
           const share = target.scope2LocationKg / electricityKeys.length;
           await Promise.all(
-            electricityKeys.map((source) =>
-              createActivityEntryWithCalculations(ctx, {
+            electricityKeys.map(async (source) => {
+              const result = await createActivityEntryWithCalculations(ctx, {
                 activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
                 siteId: site.id,
                 periodStart,
@@ -666,8 +686,9 @@ export class LiveSeedPort implements DemoSeedPort {
                 rawUnit: "kWh",
                 enteredByUserId: owner.userId,
                 dataQualityTier: "TIER_3",
-              }),
-            ),
+              });
+              recordSubmission(target.siteKey, target.month, source, result.entry.id);
+            }),
           );
         }
       });
@@ -757,27 +778,33 @@ export class LiveSeedPort implements DemoSeedPort {
           const derivedCat3Kg = derivedCat3BySiteMonth.get(`${site.id}:${target.month}`) ?? 0;
           const parts = scope3Allocation(target.scope3Kg, round4(derivedCat3Kg));
 
-          const writes: Promise<unknown>[] = [];
+          const writes: Promise<void>[] = [];
           if (parts.category6Kg > 0) {
-            writes.push(createActivityEntryWithCalculations(ctx, {
-              activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.travel.factorCategory)!,
-              siteId: site.id, periodStart, periodEnd, rawValue: parts.category6Kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-            }));
+            writes.push(
+              createActivityEntryWithCalculations(ctx, {
+                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.travel.factorCategory)!,
+                siteId: site.id, periodStart, periodEnd, rawValue: parts.category6Kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+              }).then((result) => recordSubmission(target.siteKey, target.month, "travel", result.entry.id)),
+            );
           }
           if (parts.category7Kg > 0) {
-            writes.push(createActivityEntryWithCalculations(ctx, {
-              activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.commuting.factorCategory)!,
-              siteId: site.id, periodStart, periodEnd, rawValue: parts.category7Kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-            }));
+            writes.push(
+              createActivityEntryWithCalculations(ctx, {
+                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.commuting.factorCategory)!,
+                siteId: site.id, periodStart, periodEnd, rawValue: parts.category7Kg, rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+              }).then((result) => recordSubmission(target.siteKey, target.month, "commuting", result.entry.id)),
+            );
           }
           if (parts.category1Kg > 0) {
             const purchasedKeys = target.siteKey === "central-digital" ? ["services-a", "services-b", "services-c", "services-d"] : ["substrate", "services", "consumables"];
             const share = parts.category1Kg / purchasedKeys.length;
             for (const source of purchasedKeys) {
-              writes.push(createActivityEntryWithCalculations(ctx, {
-                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
-                siteId: site.id, periodStart, periodEnd, rawValue: round4(share), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-              }));
+              writes.push(
+                createActivityEntryWithCalculations(ctx, {
+                  activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
+                  siteId: site.id, periodStart, periodEnd, rawValue: round4(share), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+                }).then((result) => recordSubmission(target.siteKey, target.month, source, result.entry.id)),
+              );
             }
           }
           await Promise.all(writes);
@@ -793,63 +820,89 @@ export class LiveSeedPort implements DemoSeedPort {
         const site = siteById.get(target.siteKey)!;
         const periodStart = new Date(`${target.month}-01T00:00:00Z`);
         const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
-        const writes: Promise<unknown>[] = [];
+        const writes: Promise<void>[] = [];
         if (target.scope1Kg > 0) {
           const [gasKg, fleetKg] = [round4(target.scope1Kg * 0.8), round4(target.scope1Kg * 0.2)];
           for (const [source, kg] of [["gas", gasKg], ["fleet", fleetKg]] as const) {
             if (kg <= 0) continue;
-            writes.push(createActivityEntryWithCalculations(ctx, {
-              activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
-              siteId: site.id, periodStart, periodEnd, rawValue: kg, rawUnit: source === "gas" ? "kWh" : "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-            }));
+            writes.push(
+              createActivityEntryWithCalculations(ctx, {
+                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
+                siteId: site.id, periodStart, periodEnd, rawValue: kg, rawUnit: source === "gas" ? "kWh" : "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+              }).then((result) => recordSubmission(target.siteKey, target.month, source, result.entry.id)),
+            );
           }
         }
         if (target.scope2LocationKg > 0) {
           const electricityKeys = target.siteKey === "central-digital" ? ["electricity-a", "electricity-b"] : ["electricity"];
           const share = target.scope2LocationKg / electricityKeys.length;
           for (const source of electricityKeys) {
-            writes.push(createActivityEntryWithCalculations(ctx, {
-              activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
-              siteId: site.id, periodStart, periodEnd, rawValue: round4(share), rawUnit: "kWh", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-            }));
+            writes.push(
+              createActivityEntryWithCalculations(ctx, {
+                activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[source].factorCategory)!,
+                siteId: site.id, periodStart, periodEnd, rawValue: round4(share), rawUnit: "kWh", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+              }).then((result) => recordSubmission(target.siteKey, target.month, source, result.entry.id)),
+            );
           }
         }
         if (target.scope3Kg > 0) {
-          writes.push(createActivityEntryWithCalculations(ctx, {
-            activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.substrate.factorCategory)!,
-            siteId: site.id, periodStart, periodEnd, rawValue: round4(target.scope3Kg), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
-          }));
+          writes.push(
+            createActivityEntryWithCalculations(ctx, {
+              activityDataPointId: dataPointIdByCategory.get(factorCategoryFor.substrate.factorCategory)!,
+              siteId: site.id, periodStart, periodEnd, rawValue: round4(target.scope3Kg), rawUnit: "kg", enteredByUserId: owner.userId, dataQualityTier: "TIER_3",
+            }).then((result) => recordSubmission(target.siteKey, target.month, "substrate", result.entry.id)),
+          );
         }
         await Promise.all(writes);
       });
 
     trace("carbon 2025 window done");
 
-    // Checkpoint B fix 2: 192 real, independently reviewable source-period
-    // obligations for 2026, each genuinely bound (submittedActivityEntryId)
-    // to the exact ActivityEntry its review actually covers — never a
-    // dangling reference row the Overview's coverage metric can't trace
-    // back to real submitted/reviewed data.
-    async function linkedObligationRow(row: { siteKey: string; month: string; source: string; externalKey: string }) {
+    // Checkpoint B corrective handoff §1: 192 real, independently reviewable
+    // source-period obligations for 2026, each genuinely bound
+    // (submittedActivityEntryId) to the exact ActivityEntry its review
+    // actually covers — never a dangling reference row the Overview's
+    // coverage metric can't trace back to real submitted/reviewed data, and
+    // never stamped REVIEWED merely because a submission exists. Every
+    // obligation is created REVIEW_REQUIRED; the explicit
+    // reviewSourcePeriodObligation service (below) is the only thing that
+    // ever moves one to REVIEWED.
+    async function boundObligationRow(row: { siteKey: string; month: string; source: string; externalKey: string }) {
       const site = siteById.get(row.siteKey)!;
-      const periodStart = new Date(`${row.month}-01T00:00:00Z`);
-      const entry = await prisma.activityEntry.findFirst({
-        where: { organisationId: owner.organisationId, siteId: site.id, periodStart, activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[row.source].factorCategory) },
-        select: { id: true },
-      });
+      const entryId = entryIdBySourcePeriod.get(`${row.siteKey}:${row.month}:${row.source}`) ?? null;
+      // Re-verify against the database (not just trust the in-memory map)
+      // that a bound entry genuinely matches this obligation's own
+      // organisation, site, full reporting period and source identity —
+      // exactly what a foreign key alone cannot express.
+      let submittedActivityEntryId: string | null = null;
+      if (entryId) {
+        const periodStart = new Date(`${row.month}-01T00:00:00Z`);
+        const matched = await prisma.activityEntry.findFirst({
+          where: {
+            id: entryId,
+            organisationId: owner.organisationId,
+            siteId: site.id,
+            periodStart,
+            activityDataPointId: dataPointIdByCategory.get(factorCategoryFor[row.source].factorCategory),
+          },
+          select: { id: true },
+        });
+        if (!matched) {
+          throw new Error(`BOARD-1 submission identity mismatch: entry ${entryId} for ${row.siteKey}:${row.month}:${row.source} does not match its own claimed org/site/period/source.`);
+        }
+        submittedActivityEntryId = matched.id;
+      }
       return {
         organisationId: owner.organisationId,
         siteId: site.id,
         month: row.month,
         sourceKey: row.source,
         externalKey: row.externalKey,
-        status: entry ? "REVIEWED" : "REVIEW_REQUIRED",
-        reviewedByMembershipId: entry ? owner.membershipId : null,
-        reviewedAt: entry ? new Date() : null,
-        submittedActivityEntryId: entry?.id ?? null,
+        status: "REVIEW_REQUIRED" as const,
+        submittedActivityEntryId,
       };
     }
-    const currentObligationRows = await Promise.all(obligations.map(linkedObligationRow));
+    const currentObligationRows = await Promise.all(obligations.map(boundObligationRow));
     await prisma.carbonSourcePeriodObligation.createMany({ data: currentObligationRows });
     trace("carbon obligations createMany done");
 
@@ -867,9 +920,26 @@ export class LiveSeedPort implements DemoSeedPort {
         priorObligationSourceRows.push({ siteKey: target.siteKey, month: target.month, source, externalKey: `BOARD-1:2025:${target.siteKey}:${target.month}:${source}` });
       }
     }
-    const priorObligationRows = await Promise.all(priorObligationSourceRows.map(linkedObligationRow));
+    const priorObligationRows = await Promise.all(priorObligationSourceRows.map(boundObligationRow));
     await prisma.carbonSourcePeriodObligation.createMany({ data: priorObligationRows });
     trace("carbon prior-year obligations createMany done");
+
+    // Explicitly review every obligation a real submission was bound to —
+    // the seed's own synthetic reviewer persona, through the same
+    // permission-checked, fingerprinted service a real reviewer would use.
+    // An obligation with no bound submission stays REVIEW_REQUIRED: leaving
+    // a gap unreviewed is honest; reviewing something that doesn't exist
+    // would not be.
+    if (!this.independentReviewer) throw new Error("Independent reviewer persona must exist before obligation review.");
+    const reviewer = this.independentReviewer;
+    const boundObligationIds = await prisma.carbonSourcePeriodObligation.findMany({
+      where: { organisationId: owner.organisationId, status: "REVIEW_REQUIRED", submittedActivityEntryId: { not: null } },
+      select: { id: true },
+    });
+    await mapWithConcurrency(boundObligationIds, 4, async ({ id }) => {
+      await reviewSourcePeriodObligation(reviewer, id, { note: "BOARD-1 seed: reviewed against its genuine bound submission." });
+    });
+    trace("carbon obligation review done");
   }
 
   // -------------------------------------------------------------------
@@ -1403,10 +1473,17 @@ export class LiveSeedPort implements DemoSeedPort {
     // REVIEWED rows is genuinely bound to the real ActivityEntry it
     // reviews — never a REVIEWED status floating free of any submission.
     const linkedReviewedCount = await prisma.carbonSourcePeriodObligation.count({
-      where: { organisationId, month: { startsWith: "2026" }, status: "REVIEWED", submittedActivityEntryId: { not: null } },
+      where: {
+        organisationId,
+        month: { startsWith: "2026" },
+        status: "REVIEWED",
+        submittedActivityEntryId: { not: null },
+        reviewedByMembershipId: { not: null },
+        reviewFingerprint: { not: null },
+      },
     });
     if (linkedReviewedCount !== 192) {
-      throw new Error(`Reconciliation failed: only ${linkedReviewedCount}/192 REVIEWED obligations are bound to a real submitted activity entry.`);
+      throw new Error(`Reconciliation failed: only ${linkedReviewedCount}/192 REVIEWED obligations are bound to a real submitted activity entry with a recorded reviewer and fingerprint.`);
     }
 
     // A genuine, comparable prior-year (2025) obligation set — never just

@@ -277,6 +277,9 @@ export const AUDIT_EVENT_TYPES = [
   "evidence_object.retention_previewed",
   "evidence_object.retention_executed",
   "organisation_export.generated",
+  // Carbon source-period obligation review (Checkpoint B corrective handoff §1).
+  "carbon_source_period_obligation.reviewed",
+  "carbon_source_period_obligation.excluded",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -364,7 +367,8 @@ export type AuditResourceType =
   | "management_review_minute_revision"
   | "management_review_action_link"
   | "legal_hold"
-  | "organisation_export";
+  | "organisation_export"
+  | "carbon_source_period_obligation";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

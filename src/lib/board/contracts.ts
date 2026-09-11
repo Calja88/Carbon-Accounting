@@ -43,7 +43,19 @@ export interface OverviewModel {
     current: CarbonMetric; previous: CarbonMetric; marketBasedKg: number | null;
     quantifiedCategories: number; screenedCategories: number; sites: SiteRow[]; trend: TrendPoint[];
   }>;
-  attention: Section<{ items: AttentionItem[]; total: number; openActions: number; awaitingVerification: number }>;
+  attention: Section<{
+    items: AttentionItem[]; total: number; openActions: number; awaitingVerification: number;
+    /**
+     * EMS-derived families (nonconformity/action/obligation-evaluation)
+     * carry no site or entity attribution in the schema, so a RESTRICTED
+     * member cannot be truthfully narrowed to their own scope for them.
+     * When false, `items`/`total`/`openActions`/`awaitingVerification`
+     * reflect only carbon-gap attention (which IS site-scoped) — never a
+     * silently zeroed EMS contribution presented as "nothing outstanding".
+     */
+    emsAvailable: boolean;
+    emsUnavailableReason: string | null;
+  }>;
   priorities: Section<{ title: string; detail: string; tone: Tone; source: LinkRef }[]>;
   managementPack: LinkRef | null;
 }

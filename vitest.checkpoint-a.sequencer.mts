@@ -22,6 +22,7 @@ const PRIORITY = [
   "tests/board-product/checkpoint-b-lca-scenarios.test.ts",
   "tests/board-product/checkpoint-b-ems-chain.test.ts",
   "tests/board-product/checkpoint-b-coverage.test.ts",
+  "tests/board-product/checkpoint-b-obligation-review.test.ts",
 ];
 
 function priorityOf(moduleId: string): number {

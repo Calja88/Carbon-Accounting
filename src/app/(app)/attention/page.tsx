@@ -38,10 +38,17 @@ export default async function AttentionPage({
   if ("unavailable" in model) return <Unavailable title={model.unavailable.title} detail={model.unavailable.detail} />;
   if (model.attention.state === "unavailable") return <Unavailable title="Attention queue unavailable" detail={model.attention.message} />;
   return (
-    <AttentionWorkbench
-      items={model.attention.data.items}
-      capturedAt={new Date(model.capturedAt).toLocaleString("en-GB", { timeZone: "Europe/London" })}
-    />
+    <>
+      {!model.attention.data.emsAvailable && model.attention.data.emsUnavailableReason ? (
+        <p className="px-4 pt-4 text-sm text-slate-600" role="note">
+          {model.attention.data.emsUnavailableReason}
+        </p>
+      ) : null}
+      <AttentionWorkbench
+        items={model.attention.data.items}
+        capturedAt={new Date(model.capturedAt).toLocaleString("en-GB", { timeZone: "Europe/London" })}
+      />
+    </>
   );
 }
 

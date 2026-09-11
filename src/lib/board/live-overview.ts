@@ -9,6 +9,7 @@ import { buildAnalyticsSnapshot, type AnalyticsSnapshot } from "@/lib/analytics-
 import { monthInputValue, formatRangeLabel } from "@/lib/report-period";
 import { listOverdueOrUnevaluatedObligations } from "@/lib/ems/legal/evaluation-service";
 import { SCOPE3_CAT3_LABEL } from "@/lib/scope3-derived";
+import { computeReviewFingerprint } from "@/lib/carbon/source-period-obligation-service";
 import { boardPeriodSchema } from "./schemas";
 import { loadOverview, type OverviewPorts, type BoardScope } from "./overview-service";
 import { buildCarbonSection, type AuthorizedAnalyticsWindow, type WindowCoverage } from "./carbon-adapter";
@@ -101,7 +102,7 @@ async function computeCoverageWindow(
 
   const entryRows = await prisma.activityEntry.findMany({
     where: tenantWhere(ctx, { siteId: { in: [...siteIds] }, periodStart: { gte: periodStart, lte: periodEnd } }),
-    select: { siteId: true, periodStart: true, status: true },
+    select: { id: true, siteId: true, periodStart: true, status: true },
   });
   const entriesByCell = new Map<string, typeof entryRows>();
   for (const row of entryRows) {
@@ -116,7 +117,7 @@ async function computeCoverageWindow(
       siteId: { in: [...siteIds] },
       month: { gte: months[0], lte: months[months.length - 1] },
     }),
-    select: { siteId: true, month: true, status: true, submittedActivityEntryId: true },
+    select: { siteId: true, month: true, status: true, submittedActivityEntryId: true, reviewFingerprint: true },
   });
   const obligationsByCell = new Map<string, typeof obligationRows>();
   for (const row of obligationRows) {
@@ -125,11 +126,32 @@ async function computeCoverageWindow(
     if (list) list.push(row);
     else obligationsByCell.set(key, [row]);
   }
+
+  // Revalidate every obligation-to-entry pair against tenant scope and the
+  // permitted-site predicate rather than trusting the stored id alone — a
+  // dangling reference (deleted/foreign entry) or one whose site/period no
+  // longer matches the obligation it claims must never silently count as a
+  // valid received/reviewed submission.
   const linkedEntryIds = obligationRows.map((o) => o.submittedActivityEntryId).filter((id): id is string => id !== null);
   const linkedEntries = linkedEntryIds.length
-    ? await prisma.activityEntry.findMany({ where: { id: { in: linkedEntryIds } }, select: { id: true, status: true } })
+    ? await prisma.activityEntry.findMany({
+        where: tenantWhere(ctx, { id: { in: linkedEntryIds }, siteId: { in: [...siteIds] } }),
+        select: { id: true, siteId: true, periodStart: true, status: true, canonicalValue: true, canonicalUnit: true },
+      })
     : [];
-  const linkedEntryStatusById = new Map(linkedEntries.map((e) => [e.id, e.status]));
+  const linkedEntryById = new Map(linkedEntries.map((e) => [e.id, e]));
+  const linkedCalculations = linkedEntryIds.length
+    ? await prisma.calculation.findMany({
+        where: tenantWhere(ctx, { activityEntryId: { in: linkedEntryIds } }),
+        select: { id: true, basis: true, resultKgCo2e: true, activityEntryId: true },
+      })
+    : [];
+  const calculationsByEntryId = new Map<string, typeof linkedCalculations>();
+  for (const calc of linkedCalculations) {
+    const list = calculationsByEntryId.get(calc.activityEntryId);
+    if (list) list.push(calc);
+    else calculationsByEntryId.set(calc.activityEntryId, [calc]);
+  }
 
   const cells = new Map<string, Coverage>();
   for (const siteId of siteIds) {
@@ -137,25 +159,56 @@ async function computeCoverageWindow(
       const key = cellKey(siteId, month);
       const obligationsForCell = obligationsByCell.get(key);
       const cell = emptyCoverage();
+      // Dedupe by entry id so an obligation-linked entry's flagged/
+      // awaiting-factor state is never double-counted against the same
+      // status also surfaced via the unmapped-submission scan below.
+      const flaggedOrAwaitingEntryIds = new Set<string>();
       if (obligationsForCell && obligationsForCell.length > 0) {
         cell.expected = 0;
         for (const obligation of obligationsForCell) {
           cell.expected += 1;
-          if (obligation.submittedActivityEntryId) cell.received += 1;
-          if (obligation.status === "REVIEWED") cell.reviewed += 1;
-          else if (obligation.status === "EXCLUDED") cell.excluded += 1;
-          const entryStatus = obligation.submittedActivityEntryId ? linkedEntryStatusById.get(obligation.submittedActivityEntryId) : undefined;
-          if (entryStatus === "AWAITING_FACTOR") cell.awaitingFactor += 1;
-          else if (entryStatus === "FLAGGED") cell.flagged += 1;
-        }
-      } else {
-        for (const row of entriesByCell.get(key) ?? []) {
+          if (obligation.status === "EXCLUDED") {
+            cell.excluded += 1;
+            continue;
+          }
+          const entry = obligation.submittedActivityEntryId ? linkedEntryById.get(obligation.submittedActivityEntryId) : undefined;
+          const validMatch =
+            entry !== undefined && entry.siteId === obligation.siteId && monthKeyOf(entry.periodStart) === obligation.month;
+          if (!validMatch) continue; // dangling/mismatched link: neither received nor reviewed
           cell.received += 1;
-          if (row.status === "APPROVED") cell.reviewed += 1;
-          else if (row.status === "REJECTED") cell.excluded += 1;
-          else if (row.status === "AWAITING_FACTOR") cell.awaitingFactor += 1;
-          else if (row.status === "FLAGGED") cell.flagged += 1;
+          flaggedOrAwaitingEntryIds.add(entry.id);
+          if (entry.status === "AWAITING_FACTOR") cell.awaitingFactor += 1;
+          else if (entry.status === "FLAGGED") cell.flagged += 1;
+          if (obligation.status === "REVIEWED") {
+            const calcs = calculationsByEntryId.get(entry.id) ?? [];
+            const freshFingerprint = calcs.length > 0 ? computeReviewFingerprint(entry, calcs) : null;
+            // A stale fingerprint (submission or its calculations changed
+            // since the recorded review) must require review again — the
+            // status column alone is not trusted as current truth.
+            if (freshFingerprint !== null && freshFingerprint === obligation.reviewFingerprint) {
+              cell.reviewed += 1;
+            }
+          }
         }
+      }
+      // Unmapped submissions in this exact cell — real ActivityEntry rows
+      // that exist regardless of whether any obligation claims them. A cell
+      // with obligations must not hide additional flagged/awaiting-factor
+      // entries the obligation set doesn't happen to cover; deduped by
+      // entry id so a row already counted above via a valid obligation
+      // link is never counted twice.
+      for (const row of entriesByCell.get(key) ?? []) {
+        if (obligationsForCell && obligationsForCell.length > 0) {
+          if (flaggedOrAwaitingEntryIds.has(row.id)) continue;
+          if (row.status === "AWAITING_FACTOR") cell.awaitingFactor += 1;
+          else if (row.status === "FLAGGED") cell.flagged += 1;
+          continue;
+        }
+        cell.received += 1;
+        if (row.status === "APPROVED") cell.reviewed += 1;
+        else if (row.status === "REJECTED") cell.excluded += 1;
+        else if (row.status === "AWAITING_FACTOR") cell.awaitingFactor += 1;
+        else if (row.status === "FLAGGED") cell.flagged += 1;
       }
       cells.set(key, cell);
     }
@@ -365,7 +418,20 @@ async function attention(context: OrganisationContext, scope: BoardScope): Retur
   // denied rather than shown organisation-wide. An ORGANISATION_WIDE
   // member's standing access already covers the whole organisation, so
   // their view is unaffected.
-  const emsAttentionAllowed = context.access.mode === "ORGANISATION_WIDE";
+  // Even an ORGANISATION_WIDE member who has narrowed to one selected site
+  // gets organisation-wide EMS attention if shown at all — Nonconformity/
+  // ActionItem/CorrectiveAction/ComplianceObligation carry no site relation
+  // to filter by, so "EMS for this site" cannot be truthfully rendered.
+  // Surface that as an explicit unavailable reason for the selected scope
+  // rather than silently presenting organisation-wide EMS as site-specific.
+  const singleSiteSelected = scope.siteIds.length === 1;
+  const emsAttentionAllowed = context.access.mode === "ORGANISATION_WIDE" && !singleSiteSelected;
+  const emsUnavailableReason =
+    context.access.mode !== "ORGANISATION_WIDE"
+      ? "EMS attention is organisation-wide and cannot be narrowed to your site access — showing carbon attention for your sites only."
+      : singleSiteSelected
+        ? "EMS attention is organisation-wide and cannot be narrowed to one selected site — showing carbon attention for the selected site only."
+        : null;
   const [analyticsWindow, coverage, obligations, effectivenessItems, actionResult] = await Promise.all([
     buildAnalyticsSnapshot(context, periodStart, periodEnd, restrictToSiteIds).then(toAnalyticsWindow),
     computeCoverageWindow(context, [], periodStart, periodEnd), // recomputed below once sites are known
@@ -386,7 +452,10 @@ async function attention(context: OrganisationContext, scope: BoardScope): Retur
   const items = mergeAttention(groups);
   return {
     state: "ready", asOf: new Date().toISOString(),
-    data: { items, total: items.length, openActions: actionResult.counts.open, awaitingVerification: actionResult.counts.awaitingVerification },
+    data: {
+      items, total: items.length, openActions: actionResult.counts.open, awaitingVerification: actionResult.counts.awaitingVerification,
+      emsAvailable: emsAttentionAllowed, emsUnavailableReason,
+    },
   };
 }
 

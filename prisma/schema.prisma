@@ -157,6 +157,7 @@ model Organisation {
   calculations        Calculation[]
   reportSnapshots     ReportSnapshot[]
   sourceDocuments     SourceDocument[]
+  carbonSourcePeriodObligations CarbonSourcePeriodObligation[]
 
   // LCA-domain roots (T17). lcaMethodologyProfiles stays nullable/optional —
   // a methodology profile may be platform-shared (organisationId null) —
@@ -388,6 +389,10 @@ model OrganisationMembership {
 
   // Notifications and reminders (T24): notifications addressed to this membership.
   receivedNotifications Notification[] @relation("NotificationRecipient")
+
+  // Carbon source-period obligation review (Checkpoint B corrective handoff §1).
+  reviewedCarbonSourcePeriodObligations CarbonSourcePeriodObligation[] @relation("CarbonSourcePeriodObligationReviewedBy")
+  excludedCarbonSourcePeriodObligations CarbonSourcePeriodObligation[] @relation("CarbonSourcePeriodObligationExcludedBy")
 
   // Process/activity profiles (T30): record authorship.
   createdActivityProcesses ActivityProcess[] @relation("ActivityProcessCreatedBy")
@@ -665,6 +670,7 @@ model Site {
   activityEntries  ActivityEntry[]
   energyContracts  SiteEnergyContract[]
   commutingSurveys CommutingSurvey[]
+  carbonSourcePeriodObligations CarbonSourcePeriodObligation[]
 
   // Product LCA / PCF
   productManufacturingLocations ProductManufacturingLocation[]
@@ -1010,6 +1016,7 @@ model ActivityEntry {
   /// Product assessments that cite this corporate record as their source.
   /// Reference only — see LcaCorporateDataLink.
   lcaCorporateDataLinks   LcaCorporateDataLink[]
+  carbonSourcePeriodObligations CarbonSourcePeriodObligation[]
 
   @@index([activityDataPointId, siteId, periodStart])
   @@index([sourceDocumentId])
@@ -8825,23 +8832,55 @@ model DemoFixtureLease {
 /// asserted in code before every write (see live-seed-port.ts), and
 /// `submittedActivityEntryId` traces each review decision to the real
 /// ActivityEntry it reviews.
+/// A real referable/reviewable claim about one (site, month, source) carbon
+/// submission. Checkpoint B corrective handoff §1: status only ever moves
+/// REVIEW_REQUIRED -> REVIEWED via the explicit, permission-checked
+/// `reviewSourcePeriodObligation` service (never stamped by the seed merely
+/// because a submission exists), and -> EXCLUDED only via
+/// `excludeSourcePeriodObligation` with a recorded reason/decision. The FK
+/// relations below give referential integrity (an obligation cannot outlive
+/// its organisation/site/entry/reviewer); they do not by themselves prove
+/// that the referenced site/entry belong to the SAME reporting period and
+/// source this obligation claims — that cross-field matching is the
+/// service's job (see source-period-obligation-service.ts), not something a
+/// foreign key alone can express.
 model CarbonSourcePeriodObligation {
-  id                       String    @id @default(cuid())
+  id                       String       @id @default(cuid())
   organisationId           String
+  organisation             Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
   siteId                   String
+  site                     Site         @relation(fields: [siteId], references: [id], onDelete: Restrict)
   month                    String
   sourceKey                String
-  externalKey              String    @unique
-  status                   String    @default("REVIEW_REQUIRED")
+  externalKey              String       @unique
+  status                   String       @default("REVIEW_REQUIRED")
   reviewedByMembershipId   String?
+  reviewedByMembership     OrganisationMembership? @relation("CarbonSourcePeriodObligationReviewedBy", fields: [reviewedByMembershipId], references: [id], onDelete: Restrict)
   reviewedAt               DateTime?
+  /// Canonical fingerprint (sha256) of the reviewed ActivityEntry's
+  /// canonical value/unit plus every contributing Calculation's id/basis/
+  /// resultKgCo2e at the moment of review. A later change to the entry or
+  /// its calculations no longer matches this fingerprint, so coverage must
+  /// treat the obligation as requiring review again even though its status
+  /// column still says REVIEWED until the next explicit review call.
+  reviewFingerprint        String?
   /// The actual ActivityEntry this obligation's review decision covers —
-  /// never populated without a real, persisted entry to point to.
+  /// never populated without a real, persisted entry to point to. RESTRICT:
+  /// an entry with a recorded review must never be deleted out from under
+  /// that provenance.
   submittedActivityEntryId String?
+  submittedActivityEntry   ActivityEntry?          @relation(fields: [submittedActivityEntryId], references: [id], onDelete: Restrict)
+  excludedByMembershipId   String?
+  excludedByMembership     OrganisationMembership? @relation("CarbonSourcePeriodObligationExcludedBy", fields: [excludedByMembershipId], references: [id], onDelete: Restrict)
+  excludedAt               DateTime?
+  /// Required whenever status = EXCLUDED — an authorised decision, never
+  /// merely the absence of a matching submission.
+  excludedReason           String?
   createdAt                DateTime  @default(now())
 
   @@unique([organisationId, siteId, month, sourceKey])
   @@index([organisationId, siteId, month])
+  @@index([submittedActivityEntryId])
 }
 
 enum BoardManagementPackStatus {

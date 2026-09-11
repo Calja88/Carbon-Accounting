@@ -47,7 +47,7 @@ describe("canonical action attention", () => {
 describe("read-model composition", () => {
   function ports(): OverviewPorts<string> { return {
     authorizeScope: vi.fn(async () => {}), header: async () => ({ organisationName: "Synthetic", periodLabel: "Jan–Aug 2026", previousPeriodLabel: "Jan–Aug 2025", synthetic: true, managementPack: null }),
-    carbon: async () => ({ state: "unavailable", message: "Not available" }), attention: async () => ({ state: "ready", data: { items: [], total: 0, openActions: 0, awaitingVerification: 0 }, asOf: "2026-09-08" }), priorities: async () => ({ state: "ready", data: [], asOf: "2026-09-08" }), sectionFailure: vi.fn(),
+    carbon: async () => ({ state: "unavailable", message: "Not available" }), attention: async () => ({ state: "ready", data: { items: [], total: 0, openActions: 0, awaitingVerification: 0, emsAvailable: true, emsUnavailableReason: null }, asOf: "2026-09-08" }), priorities: async () => ({ state: "ready", data: [], asOf: "2026-09-08" }), sectionFailure: vi.fn(),
   }; }
   const scope = { organisationId: "demo", siteIds: ["s1"], from: "2026-01", to: "2026-08", asOfDate: "2026-09-08" };
   it("authorizes before reading anything", async () => { const p = ports(); p.authorizeScope = async () => { throw Error("Denied"); }; p.carbon = vi.fn(); await expect(loadOverview(p, "ctx", scope)).rejects.toThrow("Denied"); expect(p.carbon).not.toHaveBeenCalled(); });
