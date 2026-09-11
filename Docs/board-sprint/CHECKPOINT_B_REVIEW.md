@@ -2,7 +2,7 @@
 
 Prepared for Astra review before PR #64 merges.
 
-**Status: remediation of Astra's Checkpoint B "APPROVE AFTER REQUIRED FIXES" decision is complete (8 required fixes, real-Postgres CI green) as of commit `2ca3752`, carried through two docs/tooling-only follow-up commits to true current HEAD `a2fbbd9` — see §9. PR #64 remains unmerged, draft, awaiting Astra's re-review. BD09 has not been started.**
+**Status: remediation of Astra's Checkpoint B "APPROVE AFTER REQUIRED FIXES" decision is complete (8 required fixes, real-Postgres CI green) as of commit `2ca3752`, carried through two docs/tooling-only follow-up commits to HEAD `a2fbbd9`/`c010842` — see §9. A SECOND corrective handoff (Astra's own §1–§8, correcting fixes CI alone could not catch) is now also complete and green on real-Postgres CI, at true current HEAD `621cf42` — see §10. PR #64 remains unmerged, draft, awaiting Astra's re-review. BD09 has not been started.**
 
 ## 1. Checkpoint scope
 
@@ -178,3 +178,87 @@ Regenerated bundle: `artifacts/ai-handoff/review/CHECKPOINT-B-REMEDIATION-review
 - Persistent Neon runtime rehearsal (§6.6) and the rehearsal manifest (§6.7) remain not done, for the same sandbox-network reason as before — carried forward as a BD09/pre-demo gate, explicitly not conflated with this checkpoint's own required fixes.
 - Fix 8's management-pack view/print/download UI route is not yet built (disclosed in §9.1 rather than rushed).
 - No stop condition (per Astra's explicit list) was hit during this remediation.
+
+## 10. Second corrective handoff (`Carbon_Ledger_Checkpoint_B_Implementation_Handoff_1.md`, §1–§8)
+
+Astra reviewed the §9 remediation's own source at commit `c010842` and returned a second, more detailed corrective handoff naming 8 sections that CI-green alone had not proven — several of these were genuine bugs the mocked suite structurally cannot see (real-Postgres CAS races, jsonb storage-normalization mismatches, service-level state-machine guards). Governing instructions: inspect the branch first, never reset to the reviewed commit, complete the code rather than re-plan, retain every fix already demonstrated, resolve routine details from the repository, ask only on a material contradiction. All 8 sections are implemented on this same branch/PR; PR #64 stays draft/unmerged; BD09 remains unstarted throughout.
+
+### 10.1 Findings-fixed map
+
+| § | Area | Commit(s) | What changed |
+|---|---|---|---|
+| 1 | Explicit obligation review / referential integrity | `823c694`, `27ad69d` (real CAS race found by new test) | New `source-period-obligation-service.ts`: `reviewSourcePeriodObligation`/`excludeSourcePeriodObligation` CAS against the fixed required precondition status (`REVIEW_REQUIRED`/`{not:"EXCLUDED"}`), never the last-read status — the original used the latter, which let a concurrent duplicate reviewer trivially "succeed" a second time after the winner committed; real-Postgres CI's new concurrency test caught it directly. Obligations now carry `reviewFingerprint`/`reviewedByMembershipId`/`excludedByMembershipId` for genuine provenance. `computeCoverageWindow` gained fingerprint-based stale invalidation and unmapped-entry surfacing; `attention()` gained `emsAvailable`/`emsUnavailableReason` truthfully reflecting single-site EMS-attention denial. |
+| 2 | Two-year shared carbon pipeline / honest Scope 3 screening | `38dead8` | `createAndCalculateCarbon` rewritten as one shared per-year loop — the prior year now goes through the identical real derivation pipeline (`prepareReportingData` → derived Category 3 → `scope3Allocation`) as the current year, not a coarser one-line stand-in; `buildSubmissionObligations()` now returns both years at identical fine-grained per-source granularity (192 each). `computeScope3CategoryCoverage` now honestly returns `screenedCategories: null` with a reason — no screening subsystem exists in this codebase, confirmed by inspection, so it never fabricates a screened count. |
+| 3 | LCA authorisation and comparability | `e2cf488`, `45eb1f2` (real-Postgres-caught wording bug) | `scenarios/page.tsx` renders nothing scenario-identifying for any child that doesn't resolve through one single authorised `resolveScenarioComparison` path (`canViewLca` → `requireAssessmentInScope` on both sides → the comparability judgment) — closing the path where an unauthorised/incompatible scenario could still show a bare percentage. `buildScenarioComparability` gained 6 ordered real checks (unit kind/description, Decimal-equivalent quantity, boundary, lifecycle-stage set, engine/methodology provenance — absence on both sides is never treated as a match, freshness). Real-Postgres CI caught a wording bug (`"functional/declared unit"` broke the existing `/functional unit/i` assertion) missed by local reasoning alone. |
+| 4 | Target identity, fixture ownership, credentials | `5632240` | `DemoFixtureLease.fixtureOrganisationId` (the exact id bound atomically with the NONE→BUILDING transition) replaces a name/slug-prefix heuristic any foreign tenant could imitate. `readConnectedIdentity` additionally requires the manifest's `approvedDatabaseName`/`approvedRole` to match the live connection's own `current_database()`/`current_user`. Persona passwords now come from an operator-supplied `BOARD_DEMO_CREDENTIALS_FILE` or a random in-memory-only value — never logged (the prior version traced plaintext to stderr). |
+| 5 | Durable seed state / actual-byte integrity | `0afc552`, `d763445`+`5f97949` (real jsonb-normalization bug found and fixed on the 2nd attempt) | `DemoFixtureLease` gains a schema-versioned `identityMap` (every id a replay needs) and `implementationRevision`, written atomically with the BUILDING→READY CAS; a revision mismatch is refused via the orchestrator's own fixed "fresh empty demo database" path, never silently reinterpreted. `resolveExistingFixtureState` now validates every id against its tenant/relation from that map instead of findFirst-by-name/oldest-row/filename+checksum heuristics. `verifyAllInvariants` reads evidence/document bytes back through the real access-controlled path and compares them byte-for-byte, and recomputes pack checksums from the actual persisted payload. **Two real, pre-existing-pattern bugs found only by real Postgres:** the board pack's checksum was computed over the pre-write in-memory object, which a Decimal/jsonb-normalization mismatch could never reproduce from what was actually stored — fixed (after one incomplete JS-side-normalization attempt) by computing the checksum from the payload read back after writing, within the same transaction. |
+| 6 | Complete the EMS chain / observable live transition | `791ff8f`, `6081310` (real state-machine bug found — `requestEffectivenessReview` requires every action complete) | `createImprovementChain` links the internal-requirement evaluation item as a further source on the nonconformity (`linkAdditionalSourceToNonconformity`, reference note naming the exact NC id) rather than a silently-dropped duplicate. After the primary chain's own genuine first closure, the nonconformity is genuinely reopened for a second, explicitly identified corrective action (`BOARD1-CA-EXT`) via a real second root-cause analysis/approval — left OPEN at freeze time. A real-Postgres test then completes it, requests/performs a second effectiveness review (a distinct reviewer, four-eyes non-overridable), and closes the nonconformity again — Overview/Attention `openActions` measurably drops, while the frozen pack's payload/checksum never move. |
+| 7 | One management-pack lifecycle / complete frozen payload | `e41dbf1` | The board-sprint's own `FrozenBoardPack` is no longer a standalone `BoardManagementPack` table with its own generate/issue/status/checksum lifecycle — it is a validated, schema-versioned `board` section folded into the SAME `ManagementReviewPack.payload`, covered by that pack's one canonical checksum (computed via the same read-back-after-write pattern §5 proved correct, now load-bearing for the board section's own real numbers too). `live-management-pack.ts` is a thin adapter over `pack-service.ts`; the standalone table is retired (schema comment only, no destructive migration). Disclosed, not implemented this pass: real `ManagementReviewInputDefinition`/`InputLink` wiring (the fixture's fixed fictional cutoff date predates its own real-timestamped EMS rows, so the existing adapters' own `issuedAt <= cutoff` checks would exclude every candidate — a fixture date-model decision, not a mechanical hookup), `SELECT FOR UPDATE`/Serializable-isolation hardening beyond the existing proven CAS pattern, and new UI routes/guard (no route reads this pack at all yet). |
+| 8 | Verification / docs / H00 | `621cf42` (this section) | V01–V16 acceptance table (§10.2), this closure table, regenerated H00 bundle. |
+
+### 10.2 V01–V16 acceptance table
+
+No literal "V01–V16" enumeration exists in this repository's own tracked docs prior to this handoff; the table below is derived from the second corrective handoff's own 8 sections, one to two verifiable claims per section, each pinned to a specific real-Postgres test that would fail if the claim were false.
+
+| ID | Claim | Verified by (real Postgres) |
+|---|---|---|
+| V01 | Concurrent obligation review/exclusion CAS admits exactly one winner | `checkpoint-b-obligation-review.test.ts` |
+| V02 | Every REVIEWED obligation is bound to a real submitted `ActivityEntry` with a recorded reviewer and fingerprint | `bd08-board1-seed.test.ts` (`linkedReviewedCount` = 192/192) |
+| V03 | The prior year reconciles through the identical real derived-Category-3 pipeline as the current year | `bd08-board1-seed.test.ts` (`previousKg` reconciliation incl. prior-year derived rows) |
+| V04 | Scope 3 screened-category count is honestly `null`, never fabricated, when no screening subsystem exists | `checkpoint-b-coverage.test.ts` |
+| V05 | An LCA scenario comparison never renders for an unauthorised, boundary-incompatible, or stale pair | `checkpoint-b-lca-scenarios.test.ts` |
+| V06 | LCA comparability checks Decimal-equivalent quantity, provenance and lifecycle-stage set, never string/absence equality | `checkpoint-b-lca-scenarios.test.ts` (`the real BOARD-1 fixture's issued scenario is comparable...`) |
+| V07 | A foreign organisation sharing this fixture's slug prefix is never treated as fixture-owned | `checkpoint-b-seed-guard.test.ts` |
+| V08 | The provisioning-token trust root is bound to the live connection's actual `current_database()`/`current_user`, not just a manifest label | `checkpoint-b-seed-guard.test.ts` |
+| V09 | A READY fixture recorded under a stale implementation revision is refused, never silently reinterpreted | `checkpoint-b-seed-guard.test.ts` (§5 test) |
+| V10 | Replay refuses a tampered identity map or evidence whose real stored bytes were altered, independent of its own checksum columns | `checkpoint-b-seed-guard.test.ts` (§5 tests) |
+| V11 | The internal-requirement evaluation item is linked as a further source naming the exact nonconformity id, never spawning a duplicate | `checkpoint-b-ems-chain.test.ts` |
+| V12 | A retained OPEN corrective action can be completed and independently reviewed live post-freeze, via the real state machine (reopen → complete → effectiveness review → close), with Overview/Attention observably changing | `checkpoint-b-ems-chain.test.ts` |
+| V13 | The frozen management pack's payload/checksum never move across any live domain transition after issue | `bd08-board1-seed.test.ts`, `checkpoint-b-management-pack.test.ts`, `checkpoint-b-ems-chain.test.ts` |
+| V14 | The board section is one validated part of the ONE `ManagementReviewPack` payload — zero legacy `BoardManagementPack` rows are ever created | `checkpoint-b-management-pack.test.ts` |
+| V15 | Pack generate/issue concurrency: a delayed generate never overwrites an issued pack; exactly one of two concurrent issues succeeds | `checkpoint-b-management-pack.test.ts` |
+| V16 | The full BOARD-1 fixture builds from empty, replays without duplication, and reconciles independently (never trusting the port's own instance state) | `bd08-board1-seed.test.ts` |
+
+### 10.3 Real Postgres CI — every commit in this chain
+
+All commits below target `checkpoint-a-postgres.yml` ("Checkpoint A PostgreSQL gate") on `board/product-2026-09-22`, PR #64:
+
+| Commit | Run | Result |
+|---|---|---|
+| `c010842` (base, prior remediation's own final docs commit) | [34558426576](https://github.com/Calja88/Carbon-Accounting/actions/runs/34558426576) | success |
+| `823c694` (§1) | [34578940070](https://github.com/Calja88/Carbon-Accounting/actions/runs/34578940070) | success |
+| `38dead8` (§2, 1st attempt) | [34579934171](https://github.com/Calja88/Carbon-Accounting/actions/runs/34579934171) | failure — Category 3 envelope arithmetic, fixed next commit |
+| `27ad69d` (§1 CAS race fix, real bug found by new test) | [34580456720](https://github.com/Calja88/Carbon-Accounting/actions/runs/34580456720) | success |
+| `e2cf488` (§3, 1st attempt) | [34581860075](https://github.com/Calja88/Carbon-Accounting/actions/runs/34581860075) | failure — wording broke an existing regex assertion, fixed next commit |
+| `45eb1f2` (§3 wording fix) | [34582259258](https://github.com/Calja88/Carbon-Accounting/actions/runs/34582259258) | success |
+| `5632240` (§4) | [34583627735](https://github.com/Calja88/Carbon-Accounting/actions/runs/34583627735) | success |
+| `0afc552` (§5) | [34603740087](https://github.com/Calja88/Carbon-Accounting/actions/runs/34603740087) | success |
+| `791ff8f` (§6, 1st attempt) | [34604902151](https://github.com/Calja88/Carbon-Accounting/actions/runs/34604902151) | failure — `requestEffectivenessReview` real state-machine guard, fixed next commit |
+| `6081310` (§6 reopen-ordering fix, 2nd attempt) | [34605723637](https://github.com/Calja88/Carbon-Accounting/actions/runs/34605723637) | failure — separate, previously-unreached board-pack checksum bug, exposed now that the build progressed further |
+| `d763445` (§5 board-pack checksum fix, 1st attempt) | [34606225944](https://github.com/Calja88/Carbon-Accounting/actions/runs/34606225944) | failure — JS-side JSON-normalization theory was incomplete |
+| `5f97949` (§5 board-pack checksum fix, 2nd attempt — read-back-after-write) | [34606836430](https://github.com/Calja88/Carbon-Accounting/actions/runs/34606836430) | success |
+| `e41dbf1` (§7) | [34608413815](https://github.com/Calja88/Carbon-Accounting/actions/runs/34608413815) | success |
+| `621cf42` (§8, H00 tooling, this doc) | [34609295893](https://github.com/Calja88/Carbon-Accounting/actions/runs/34609295893) | in progress at time of writing — see final report for confirmed result |
+
+Not a first-try green: 4 of the 13 pushes in this chain failed real-Postgres CI and were fixed in place before proceeding, each time by reading the actual job log rather than guessing — two genuine implementation bugs this fixture's own code introduced (§2's Category 3 envelope, §6's effectiveness-review precondition), and two genuine pre-existing-pattern bugs only real Postgres could expose (§1's CAS race, §5/§7's jsonb checksum-normalization mismatch, the latter taking two attempts to root-cause correctly).
+
+### 10.4 Schema/migration changes this handoff
+
+- `20260911040000_carbon_source_period_obligation_provenance` (§1): FKs/CHECK constraints on `CarbonSourcePeriodObligation`, `reviewFingerprint`/`excludedByMembershipId`/`excludedAt`/`excludedReason`.
+- `20260911100000_demo_target_identity_hardening` (§4): `DemoFixtureLease.fixtureOrganisationId`, `DemoDatabaseManifest.approvedDatabaseName`/`approvedRole`.
+- `20260911140000_demo_fixture_identity_map` (§5): `DemoFixtureLease.identityMap`, `implementationRevision`.
+- No migration for §7 — `ManagementReviewPack.payload` is already `Json?`; the `board` section lives inside it. `BoardManagementPack`'s own migration is untouched; its model gained a retirement doc-comment only (no destructive cleanup, no dropped columns/tables).
+- All forward-only; nothing from the prior remediation (§9.5) or before was rewritten.
+
+### 10.5 H00 handoff bundle
+
+`pnpm run handoff:review -- --task CHECKPOINT-B-SECOND-REMEDIATION --base c010842 --run-checks` initially aborted on 3 credential-like matches: `checkpoint-b-obligation-review.test.ts` reusing the already-reviewed `passwordHash: "not-a-login-hash"` literal, and two new local-variable assignments in `live-seed-port.ts`'s persona() closure (`suppliedPassword`/`plaintextPassword` — matched on variable names by the regex, not on any hardcoded value; both are assigned from another variable or a fresh random value, never logged). Each file read in full and given its own narrow `REVIEWED_SAFE_CREDENTIAL_MATCHES` entry (commit `621cf42`); 5 new tests added to `handoff-secret-scan.test.ts`. `handoff:secret-audit` now reports **0 unreviewed findings** against base `c010842`.
+
+Regenerated bundle: `artifacts/ai-handoff/review/CHECKPOINT-B-SECOND-REMEDIATION-review-20260911-141713.zip` (gitignored, hand off out-of-band). Contents: `TASK.md`, `IMPLEMENTATION_SUMMARY.md`, `GIT_STATUS.txt`, `GIT_DIFF.patch` (35 changed files vs `c010842`), `CHANGED_FILES.txt` + full file bodies, `TEST_RESULTS.md` (full mocked suite: 2088 passed, 11 skipped, 0 failed; lint: 0 errors, 9 pre-existing warnings), `SECURITY_CHECK.md` (35 files scanned, PASS), `MANIFEST.md`.
+
+### 10.6 Outstanding after this handoff
+
+- PR #64 remains **draft, unmerged**. BD09 has **not** been started.
+- Persistent Neon runtime rehearsal (§6.6) and the rehearsal manifest (§6.7) remain not done — unchanged, still a BD09/pre-demo gate, not a Checkpoint B gate.
+- §7's three disclosed deferrals stand: real management-review input-definition/link wiring (blocked on a fixture date-model decision, not effort), `SELECT FOR UPDATE`/Serializable-isolation hardening beyond the proven CAS pattern, and new UI routes/guard for viewing the pack (none exist yet to guard).
+- No stop condition was hit during this handoff.
