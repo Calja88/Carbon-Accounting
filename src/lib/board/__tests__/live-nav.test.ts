@@ -19,15 +19,21 @@ describe("resolveBoardNav", () => {
     expect(resolveBoardNav(null)).toEqual([]);
   });
 
-  it("never includes overview or attention — BD05 hasn't built those routes yet", () => {
+  it("includes overview and attention once carbon.view is granted — BD05 built both routes", () => {
     const nav = resolveBoardNav(contextWith(["carbon.view", "lca.view", "ems.view"]));
-    expect(nav.map((item) => item.id)).not.toContain("overview");
-    expect(nav.map((item) => item.id)).not.toContain("attention");
+    expect(nav.map((item) => item.id)).toContain("overview");
+    expect(nav.map((item) => item.id)).toContain("attention");
+  });
+
+  it("gates overview/attention on carbon.view, same as carbon itself", () => {
+    const noCarbon = resolveBoardNav(contextWith(["ems.view"]));
+    expect(noCarbon.map((item) => item.id)).not.toContain("overview");
+    expect(noCarbon.map((item) => item.id)).not.toContain("attention");
   });
 
   it("filters each item by its own permission, not a blanket grant", () => {
     const carbonOnly = resolveBoardNav(contextWith(["carbon.view"]));
-    expect(carbonOnly.map((item) => item.id)).toEqual(["carbon"]);
+    expect(carbonOnly.map((item) => item.id).sort()).toEqual(["attention", "carbon", "overview"]);
   });
 
   it("gates every ems.* nav item on ems.view, matching the previous top nav's EMS gate", () => {

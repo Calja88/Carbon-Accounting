@@ -41,9 +41,30 @@ export interface OverviewModel {
   synthetic: boolean; capturedAt: string;
   carbon: Section<{
     current: CarbonMetric; previous: CarbonMetric; marketBasedKg: number | null;
-    quantifiedCategories: number; screenedCategories: number; sites: SiteRow[]; trend: TrendPoint[];
+    quantifiedCategories: number;
+    /**
+     * Null when no Scope 3 screening decision has actually been recorded
+     * for this organisation (no screening subsystem exists yet) — never a
+     * fabricated 0 or an inference from the quantified count. See
+     * `screenedCategoriesReason` for why.
+     */
+    screenedCategories: number | null;
+    screenedCategoriesReason: string | null;
+    sites: SiteRow[]; trend: TrendPoint[];
   }>;
-  attention: Section<{ items: AttentionItem[]; total: number; openActions: number; awaitingVerification: number }>;
+  attention: Section<{
+    items: AttentionItem[]; total: number; openActions: number; awaitingVerification: number;
+    /**
+     * EMS-derived families (nonconformity/action/obligation-evaluation)
+     * carry no site or entity attribution in the schema, so a RESTRICTED
+     * member cannot be truthfully narrowed to their own scope for them.
+     * When false, `items`/`total`/`openActions`/`awaitingVerification`
+     * reflect only carbon-gap attention (which IS site-scoped) — never a
+     * silently zeroed EMS contribution presented as "nothing outstanding".
+     */
+    emsAvailable: boolean;
+    emsUnavailableReason: string | null;
+  }>;
   priorities: Section<{ title: string; detail: string; tone: Tone; source: LinkRef }[]>;
   managementPack: LinkRef | null;
 }
@@ -60,6 +81,9 @@ export interface RecordModel {
   nextStep: { title: string; detail: string };
 }
 export interface FrozenBoardPack {
+  cutoffDate?: string;
+  lca?: import("@/components/board/lca-scenario").ScenarioComparison | null;
+  inputs?: { key: string; sourceType: string; sourceRecordId: string; revision: string | null; summary: unknown }[];
   id: string; reference: string; version: number; status: "draft" | "issued";
   issuedAt: string | null; preparedBy: string; approvedBy: string | null;
   snapshot: OverviewModel; sourceRevisions: RecordRef[];

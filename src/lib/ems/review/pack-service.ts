@@ -39,11 +39,10 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { OrganisationContext } from "@/lib/organisation/context";
-import { requirePermission } from "@/lib/rbac/authorize";
+import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
 import {
   findTenantManagementReview,
   findTenantManagementReviewPack,
-  findTenantManagementReviewPackByReviewId,
   findTenantManagementReviewAiNarrative,
   toTenantRepositoryContext,
 } from "@/lib/repositories/ems-repository";
@@ -57,10 +56,49 @@ export { TenantOwnershipError };
 
 export class ManagementReviewPackError extends Error {}
 
+function packConflict(error: unknown): never {
+  const failure = error as { code?: string; meta?: { code?: string } } | null;
+  // Prisma wraps a raw SELECT FOR UPDATE serialization failure as P2010,
+  // whereas a model write conflict arrives as P2034. Both transactions rolled back.
+  if (failure?.code === "P2034" || (failure?.code === "P2010" && ["40001", "40P01"].includes(failure.meta?.code ?? ""))) {
+    throw new ManagementReviewPackError("Review inputs changed concurrently; reload before generating or issuing again.");
+  }
+  throw error;
+}
+
 const MANAGE_PERMISSION = "ems.management_review.manage" as const;
 const VIEW_PERMISSION = "ems.view" as const;
 
 export const MANAGEMENT_REVIEW_PACK_GENERATOR_VERSION = "t73-pack-v1" as const;
+
+/**
+ * Checkpoint B corrective handoff §7: the board sprint's own frozen pack
+ * (`FrozenBoardPack` in `@/lib/board/contracts`) is no longer a standalone
+ * `BoardManagementPack` row with its own generate/issue/status lifecycle —
+ * it is one more validated, versioned section of this SAME
+ * `ManagementReviewPack.payload`, sharing this pack's one issue/status/audit
+ * lifecycle and its one canonical checksum. `pack-service.ts` never imports
+ * board-layer types (that dependency runs the other way — board/ already
+ * depends on ems/); the caller (`@/lib/board/live-management-pack.ts`)
+ * builds this section from the real Overview snapshot and passes it in as
+ * plain, already-serializable data.
+ */
+export const BOARD_PACK_SCHEMA_VERSION = 1 as const;
+export interface BoardPackInput {
+  reference: string;
+  /** The caller's own board-scope search params, opaque to this module. */
+  overviewWindow: unknown;
+  /** The real `OverviewModel`, opaque to this module. */
+  snapshot: unknown;
+  sourceRevisions: unknown[];
+  decisions: unknown[];
+  lca?: unknown;
+  preparedBy?: string;
+}
+type BoardPackSource = BoardPackInput | ((tx: Prisma.TransactionClient) => Promise<BoardPackInput>);
+interface BoardPackSection extends BoardPackInput {
+  schemaVersion: typeof BOARD_PACK_SCHEMA_VERSION;
+}
 
 function toJsonInput(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -80,18 +118,20 @@ interface ReviewForPack {
 }
 
 /** Pure, deterministic pack payload builder — same live rows always produce the same object shape/ordering. */
-async function buildPackPayload(ctx: TenantRepositoryContext, review: ReviewForPack) {
-  const inputLinks = await prisma.managementReviewInputLink.findMany({
+async function buildPackPayload(tx: Prisma.TransactionClient, ctx: TenantRepositoryContext, review: ReviewForPack, board?: BoardPackInput) {
+  const inputLinks = await tx.managementReviewInputLink.findMany({
     where: tenantWhere(ctx, { reviewId: review.id }),
   });
   const sortedLinks = [...inputLinks].sort(
     (a, b) => compareStrings(a.inputDefinitionKey, b.inputDefinitionKey) || compareStrings(a.sourceRecordId, b.sourceRecordId),
   );
 
-  const attendees = await prisma.managementReviewAttendee.findMany({
+  const attendees = await tx.managementReviewAttendee.findMany({
     where: tenantWhere(ctx, { reviewId: review.id }),
   });
   const sortedAttendees = [...attendees].sort((a, b) => compareStrings(a.personId, b.personId));
+
+  const boardSection: BoardPackSection | null = board ? { schemaVersion: BOARD_PACK_SCHEMA_VERSION, ...board } : null;
 
   return {
     generatorVersion: MANAGEMENT_REVIEW_PACK_GENERATOR_VERSION,
@@ -116,6 +156,7 @@ async function buildPackPayload(ctx: TenantRepositoryContext, review: ReviewForP
       summary: link.summary ?? null,
       isStale: link.isStale,
     })),
+    board: boardSection,
   };
 }
 
@@ -127,42 +168,77 @@ function computeChecksum(payload: unknown): string {
 // Generate (repeatable, DRAFT only) / issue (one-way freeze)
 // ---------------------------------------------------------------------------
 
-export async function generateManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string) {
+export async function generateManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string, board?: BoardPackSource) {
   requirePermission(context, MANAGE_PERMISSION);
   const ctx = toTenantRepositoryContext(context);
-  const review = await findTenantManagementReview(ctx, reviewId);
+  return prisma.$transaction(async (tx) => {
+  const txCtx = ctx;
+  await tx.$queryRaw`SELECT "id" FROM "ManagementReview" WHERE "id" = ${reviewId} AND "organisationId" = ${ctx.organisationId} FOR UPDATE`;
+  const review = await tx.managementReview.findFirst({ where: tenantWhere(ctx, { id: reviewId }) });
   if (!review) throw new TenantOwnershipError();
   if (review.status !== "INPUT_COLLECTION") {
     throw new ManagementReviewPackError("A pack can only be generated while the review is in input collection.");
   }
 
-  const existing = await findTenantManagementReviewPackByReviewId(ctx, review.id);
+  const existing = await tx.managementReviewPack.findFirst({ where: tenantWhere(ctx, { reviewId }) });
   if (existing && existing.status === "ISSUED") {
     throw new ManagementReviewPackError("This review's pack has already been issued and cannot be regenerated.");
   }
 
-  const payload = await buildPackPayload(ctx, review);
-  const checksumSha256 = computeChecksum(payload);
+  const savedBoard = (existing?.payload as { board?: BoardPackInput } | null)?.board;
+  const payload = await buildPackPayload(tx, ctx, review, typeof board === "function" ? await board(tx) : board ?? savedBoard);
+    // Checkpoint B fix: the previous unconditional upsert let a delayed
+    // generate call overwrite a payload issueManagementReviewPack had
+    // already frozen, if the issue committed between this function's
+    // pre-transaction read and its write. A plain re-read-then-write here
+    // would not fully close that window either (Postgres re-evaluates an
+    // UPDATE's WHERE clause against the latest committed row when it was
+    // blocked waiting on a concurrent writer's lock, but a SELECT does
+    // not) — so the write itself must be the conditional: updateMany's
+    // WHERE clause acts as the actual compare-and-swap when a row already
+    // exists, and a fresh row is protected by its own unique constraint.
+    const currentPack = await tx.managementReviewPack.findFirst({ where: tenantWhere(txCtx, { reviewId: review.id }) });
+    let pack;
+    if (!currentPack) {
+      pack = await tx.managementReviewPack.create({
+        data: {
+          organisationId: txCtx.organisationId,
+          reviewId: review.id,
+          agendaTemplateVersionId: review.agendaTemplateVersionId,
+          cutoffDate: review.cutoffDate,
+          generatorVersion: MANAGEMENT_REVIEW_PACK_GENERATOR_VERSION,
+          payload: toJsonInput(payload),
+          checksumSha256: "",
+          generatedAt: new Date(),
+        },
+      });
+    } else {
+      const casResult = await tx.managementReviewPack.updateMany({
+        where: { organisationId: txCtx.organisationId, id: currentPack.id, status: "DRAFT" },
+        data: { payload: toJsonInput(payload), checksumSha256: "", generatedAt: new Date() },
+      });
+      if (casResult.count === 0) {
+        throw new ManagementReviewPackError("This review's pack has already been issued and cannot be regenerated.");
+      }
+      pack = await tx.managementReviewPack.findUniqueOrThrow({
+        where: { organisationId_id: { organisationId: txCtx.organisationId, id: currentPack.id } },
+      });
+    }
 
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
-    const pack = await tx.managementReviewPack.upsert({
-      where: { organisationId_reviewId: { organisationId: txCtx.organisationId, reviewId: review.id } },
-      create: {
-        organisationId: txCtx.organisationId,
-        reviewId: review.id,
-        agendaTemplateVersionId: review.agendaTemplateVersionId,
-        cutoffDate: review.cutoffDate,
-        generatorVersion: MANAGEMENT_REVIEW_PACK_GENERATOR_VERSION,
-        payload: toJsonInput(payload),
-        checksumSha256,
-        generatedAt: new Date(),
-      },
-      update: {
-        payload: toJsonInput(payload),
-        checksumSha256,
-        generatedAt: new Date(),
-      },
-    });
+    // Checkpoint B corrective handoff §7 (carrying forward the fix §5
+    // needed for the old standalone board pack): the checksum is computed
+    // from the payload Postgres actually just stored (re-read within this
+    // same transaction), never the pre-write in-memory object — jsonb's
+    // own storage-level normalization (numeric formatting in particular)
+    // is not guaranteed to reproduce a plain JS JSON.stringify byte-for-
+    // byte, so only a value read back through the real column can be
+    // hashed and later reproduced identically by a fresh recomputation
+    // over the persisted payload — the same property this pack's own
+    // "repeated generation is stable" and issue-time recomputation both
+    // depend on, now doubly important with the board section's real
+    // Overview numbers folded in.
+    const checksumSha256 = computeChecksum(pack.payload);
+    pack = await tx.managementReviewPack.update({ where: { id: pack.id }, data: { checksumSha256 } });
 
     await recordAuditEvent(tx, txCtx, {
       eventType: "management_review_pack.generated",
@@ -176,38 +252,57 @@ export async function generateManagementReviewPack(context: OrganisationContext,
     });
 
     return pack;
-  });
+  }, { isolationLevel: "RepeatableRead", timeout: 120000 }).catch(packConflict);
 }
 
-export async function issueManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string) {
+export async function issueManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string, board?: BoardPackSource) {
   requirePermission(context, MANAGE_PERMISSION);
   const ctx = toTenantRepositoryContext(context);
-  const review = await findTenantManagementReview(ctx, reviewId);
+  return prisma.$transaction(async (tx) => {
+  const txCtx = ctx;
+  await tx.$queryRaw`SELECT "id" FROM "ManagementReview" WHERE "id" = ${reviewId} AND "organisationId" = ${ctx.organisationId} FOR UPDATE`;
+  const review = await tx.managementReview.findFirst({ where: tenantWhere(ctx, { id: reviewId }) });
   if (!review) throw new TenantOwnershipError();
   if (review.status !== "INPUT_COLLECTION") {
     throw new ManagementReviewPackError("Only a review in input collection can have its pack issued.");
   }
 
-  const pack = await findTenantManagementReviewPackByReviewId(ctx, review.id);
+  const pack = await tx.managementReviewPack.findFirst({ where: tenantWhere(ctx, { reviewId }) });
   if (!pack) throw new ManagementReviewPackError("Generate the pack before issuing it.");
   if (pack.status === "ISSUED") throw new ManagementReviewPackError("This pack has already been issued.");
 
-  const payload = await buildPackPayload(ctx, review);
-  const checksumSha256 = computeChecksum(payload);
-  const inputLinks = await prisma.managementReviewInputLink.findMany({ where: tenantWhere(ctx, { reviewId: review.id }) });
-
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
-    const issued = await tx.managementReviewPack.update({
-      where: { organisationId_id: { organisationId: txCtx.organisationId, id: pack.id } },
+  const savedBoard = (pack.payload as { board?: BoardPackInput } | null)?.board;
+  const payload = await buildPackPayload(tx, ctx, review, typeof board === "function" ? await board(tx) : board ?? savedBoard);
+  const inputLinks = await tx.managementReviewInputLink.findMany({ where: tenantWhere(ctx, { reviewId: review.id }) });
+    // CAS: re-prove DRAFT status inside the transaction rather than trusting
+    // the pre-transaction read above (BD08 carried-forward Astra finding —
+    // the prior unconditional update let two concurrent issue calls both
+    // succeed, double-writing input snapshots and silently re-stamping
+    // issuedAt/issuedByUserId). A losing racer gets an explicit conflict,
+    // never a second silent freeze.
+    const casResult = await tx.managementReviewPack.updateMany({
+      where: { organisationId: txCtx.organisationId, id: pack.id, status: "DRAFT" },
       data: {
         payload: toJsonInput(payload),
-        checksumSha256,
+        checksumSha256: "",
         generatedAt: new Date(),
         status: "ISSUED",
         issuedByUserId: actorUserId,
         issuedAt: new Date(),
       },
     });
+    if (casResult.count !== 1) {
+      throw new ManagementReviewPackError("This pack was issued by a concurrent request; reload and retry.");
+    }
+    let issued = await tx.managementReviewPack.findUniqueOrThrow({
+      where: { organisationId_id: { organisationId: txCtx.organisationId, id: pack.id } },
+    });
+    // Checkpoint B corrective handoff §7: same read-back-then-hash
+    // guarantee as generate above, recomputed one final time at the
+    // moment of freeze so the checksum that never changes again is
+    // provably a hash of the exact bytes this row holds.
+    const checksumSha256 = computeChecksum(issued.payload);
+    issued = await tx.managementReviewPack.update({ where: { id: issued.id }, data: { checksumSha256 } });
 
     for (const link of inputLinks) {
       await tx.managementReviewInputSnapshot.create({
@@ -242,7 +337,7 @@ export async function issueManagementReviewPack(context: OrganisationContext, re
     });
 
     return issued;
-  });
+  }, { isolationLevel: "RepeatableRead", timeout: 120000 }).catch(packConflict);
 }
 
 export async function getManagementReviewPack(context: OrganisationContext, reviewId: string) {
@@ -250,13 +345,22 @@ export async function getManagementReviewPack(context: OrganisationContext, revi
   const ctx = toTenantRepositoryContext(context);
   const review = await findTenantManagementReview(ctx, reviewId);
   if (!review) throw new TenantOwnershipError();
-  return prisma.managementReviewPack.findFirst({
+  const pack = await prisma.managementReviewPack.findFirst({
     where: tenantWhere(ctx, { reviewId: review.id }),
     include: {
       inputSnapshots: { orderBy: { inputDefinitionKey: "asc" } },
       aiNarratives: { orderBy: { generatedAt: "desc" } },
     },
   });
+  if (pack && (pack.payload as { board?: unknown } | null)?.board) {
+    requirePermission(context, "carbon.view");
+    requirePermission(context, "lca.view");
+    if (context.access.mode !== "ORGANISATION_WIDE") throw new PermissionDeniedError("ENTITY_NOT_IN_SCOPE");
+  }
+  if (pack?.status === "ISSUED" && pack.checksumSha256 !== computeChecksum(pack.payload)) {
+    throw new ManagementReviewPackError("The issued pack failed its integrity check.");
+  }
+  return pack;
 }
 
 // ---------------------------------------------------------------------------

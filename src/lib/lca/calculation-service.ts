@@ -518,8 +518,8 @@ const runInclude = {
 export type LoadedRun = Prisma.LcaCalculationRunGetPayload<{ include: typeof runInclude }>;
 export type LoadedResult = LoadedRun["results"][number];
 
-export async function getLatestRun(assessmentId: string): Promise<LoadedRun | null> {
-  return prisma.lcaCalculationRun.findFirst({
+export async function getLatestRun(assessmentId: string, db: Prisma.TransactionClient = prisma): Promise<LoadedRun | null> {
+  return db.lcaCalculationRun.findFirst({
     where: { assessmentId },
     include: runInclude,
     orderBy: { runAt: "desc" },
@@ -617,8 +617,8 @@ export function runTotals(run: { totals: Prisma.JsonValue }): SerialisedTotals {
  * the figures on screen are out of date rather than presenting stale numbers
  * as current.
  */
-export async function isCalculationStale(assessmentId: string): Promise<{ stale: boolean; reason: string | null }> {
-  const run = await prisma.lcaCalculationRun.findFirst({
+export async function isCalculationStale(assessmentId: string, db: Prisma.TransactionClient = prisma): Promise<{ stale: boolean; reason: string | null }> {
+  const run = await db.lcaCalculationRun.findFirst({
     where: { assessmentId },
     orderBy: { runAt: "desc" },
     select: { id: true, runAt: true, engineVersion: true, assessmentUpdatedAt: true },
@@ -626,12 +626,12 @@ export async function isCalculationStale(assessmentId: string): Promise<{ stale:
   if (!run) return { stale: true, reason: "This assessment has not been calculated yet." };
 
   const [assessment, newerItem, newerProcess] = await Promise.all([
-    prisma.lcaAssessment.findUnique({ where: { id: assessmentId }, select: { updatedAt: true } }),
-    prisma.lcaInventoryItem.findFirst({
+    db.lcaAssessment.findUnique({ where: { id: assessmentId }, select: { updatedAt: true } }),
+    db.lcaInventoryItem.findFirst({
       where: { assessmentId, updatedAt: { gt: run.runAt } },
       select: { id: true, name: true },
     }),
-    prisma.lcaProcess.findFirst({
+    db.lcaProcess.findFirst({
       where: { assessmentId, updatedAt: { gt: run.runAt } },
       select: { id: true, name: true },
     }),

@@ -123,6 +123,15 @@ vi.mock("@/lib/prisma", () => {
       return find(tables.evaluations, key as Row);
     }),
     findMany: vi.fn(async ({ where }: FindArgs) => tables.evaluations.filter((row) => matchesSimple(row, where ?? {}))),
+    findUniqueOrThrow: vi.fn(async ({ where }: FindArgs) => {
+      const row = find(tables.evaluations, where ?? {});
+      if (!row) throw new Error("not found");
+      return {
+        ...row,
+        scopes: tables.evaluationScopes.filter((s) => s.evaluationId === row.id),
+        items: tables.evaluationItems.filter((i) => i.evaluationId === row.id),
+      };
+    }),
     create: vi.fn(async ({ data }: { data: Row & { scopes?: { create: Row[] }; items?: { create: Row[] } } }) => {
       const { scopes: scopesEnvelope, items: itemsEnvelope, ...evalData } = data;
       const id = `evaluation-${tables.nextId++}`;
@@ -162,7 +171,29 @@ vi.mock("@/lib/prisma", () => {
     }),
   };
 
+  const complianceEvaluationScope = {
+    createMany: vi.fn(async ({ data }: { data: Row[] }) => {
+      const rows = data.map((s) => ({ id: `escope-${tables.nextId++}`, ...s }));
+      tables.evaluationScopes.push(...rows);
+      return { count: rows.length };
+    }),
+  };
+
   const complianceEvaluationItem = {
+    createMany: vi.fn(async ({ data }: { data: Row[] }) => {
+      const rows = data.map((i) => ({
+        id: `item-${tables.nextId++}`,
+        status: "NOT_EVALUATED",
+        rationale: null,
+        evaluatorMembershipId: null,
+        evaluatedAt: null,
+        followUpDate: null,
+        createdAt: new Date(),
+        ...i,
+      }));
+      tables.evaluationItems.push(...rows);
+      return { count: rows.length };
+    }),
     findFirst: vi.fn(async ({ where }: FindArgs) => {
       const key = (where as Row & { organisationId_id?: Row })?.organisationId_id ?? where ?? {};
       return find(tables.evaluationItems, key as Row);
@@ -199,6 +230,7 @@ vi.mock("@/lib/prisma", () => {
     complianceObligationVersion,
     complianceEvaluationProgramme,
     complianceEvaluation,
+    complianceEvaluationScope,
     complianceEvaluationItem,
     complianceEvaluationFindingLink,
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prismaClient)),

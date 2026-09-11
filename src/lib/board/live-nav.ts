@@ -18,10 +18,9 @@ import { BOARD_NAV, type BoardNavItem } from "./navigation";
  * Only ever call it from a server component (see `(app)/layout.tsx`).
  */
 
-// "overview" (/) and "attention" (/attention) belong to BD05 — not built
-// yet on this branch. Until then those routes don't exist, so the item is
-// left out of the nav entirely rather than linked or shown disabled.
-const NOT_YET_BUILT = new Set(["overview", "attention"]);
+// BD05 built the real "/" Overview and "/attention" queue routes — both
+// are now real, permitted destinations, not placeholders.
+const NOT_YET_BUILT = new Set<string>([]);
 
 // BOARD_NAV's candidate href for these two doesn't exist yet (BD06 owns a
 // top-level /evidence hub; BD08 owns /management-packs); redirect each to
@@ -33,6 +32,8 @@ const ROUTE_OVERRIDES: Partial<Record<string, BoardNavItem["href"]>> = {
 
 function isPermitted(id: string, context: OrganisationContext): boolean {
   switch (id) {
+    case "overview":
+    case "attention":
     case "carbon":
       return hasPermission(context, "carbon.view");
     case "products":

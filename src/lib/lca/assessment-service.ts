@@ -114,6 +114,10 @@ export interface CreateAssessmentInput {
   ownerUserId?: string | null;
   methodologyProfileId?: string | null;
   boundary?: LcaBoundary;
+  functionalUnitDescription?: string | null;
+  functionalUnitQuantity?: string;
+  functionalUnitUnit?: string | null;
+  isDeclaredUnit?: boolean;
   actorUserId: string;
 }
 
@@ -157,6 +161,10 @@ export async function createAssessment(context: OrganisationContext, input: Crea
         boundary,
         includedStages: stages,
         status: LcaAssessmentStatus.DRAFT,
+        ...(input.functionalUnitDescription !== undefined ? { functionalUnitDescription: input.functionalUnitDescription } : {}),
+        ...(input.functionalUnitQuantity !== undefined ? { functionalUnitQuantity: input.functionalUnitQuantity } : {}),
+        ...(input.functionalUnitUnit !== undefined ? { functionalUnitUnit: input.functionalUnitUnit } : {}),
+        ...(input.isDeclaredUnit !== undefined ? { isDeclaredUnit: input.isDeclaredUnit } : {}),
       },
     });
 

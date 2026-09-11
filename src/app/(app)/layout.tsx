@@ -7,7 +7,7 @@ import { AssistantPanel } from "@/components/ai/assistant-panel";
 import { ConnectedShell } from "@/components/board/connected-shell";
 import { ScopeBar } from "@/components/board/scope-bar";
 import { resolveBoardNav } from "@/lib/board/live-nav";
-import { isVerifiedDemoEnvironment } from "@/lib/board/live-environment";
+import { isVerifiedSyntheticOrganisation } from "@/lib/board/demo-identity";
 import { monthInputValue } from "@/lib/report-period";
 import { Providers } from "./providers";
 import { SignOutButton } from "./sign-out-button";
@@ -97,14 +97,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     />
   );
 
-  // BD02: server-derived only, never a client toggle or a URL/branch-name
-  // guess. `null` here means no disposable demo database's own recorded
-  // identity is available to check against the environment manifest — true
-  // for every environment this branch has run in so far (BD02 could not
-  // provision one this session; see Docs/board-sprint/CONTINUITY.md). The
-  // banner is correctly off until a real guarded environment's identity can
-  // be read here.
-  const synthetic = isVerifiedDemoEnvironment(null);
+  // Disclosure follows the connected manifest and exact fixture organisation.
+  const synthetic = organisation ? await isVerifiedSyntheticOrganisation(organisation.organisationId) : false;
 
   return (
     <Providers>

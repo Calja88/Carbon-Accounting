@@ -113,7 +113,7 @@ export async function createEmsAudit(context: OrganisationContext, input: Create
   const scopes = await validateAuditScopeEntries(context, input.scopes);
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
-    const audit = await tx.emsAudit.create({
+    const created = await tx.emsAudit.create({
       data: {
         organisationId: txCtx.organisationId,
         programmeId: programme.id,
@@ -127,10 +127,18 @@ export async function createEmsAudit(context: OrganisationContext, input: Create
         scheduledStart: input.scheduledStart,
         scheduledEnd: input.scheduledEnd,
         createdByUserId: input.actorUserId,
-        scopes: { create: scopes.map((scope) => ({ organisationId: txCtx.organisationId, ...scope })) },
       },
-      include: { scopes: true },
     });
+    // A separate createMany, not a nested write — see applicability-service.ts's
+    // createApplicabilityAssessment for why (compound-keyed parent relation
+    // excludes organisationId from the nested-create input; confirmed via
+    // real-Postgres CI).
+    if (scopes.length > 0) {
+      await tx.emsAuditScope.createMany({
+        data: scopes.map((scope) => ({ organisationId: txCtx.organisationId, auditId: created.id, ...scope })),
+      });
+    }
+    const audit = await tx.emsAudit.findUniqueOrThrow({ where: { id: created.id }, include: { scopes: true } });
     await recordAuditEvent(tx, txCtx, {
       eventType: "ems_audit.created",
       resourceType: "ems_audit",

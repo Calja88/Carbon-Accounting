@@ -32,6 +32,12 @@ export function AsyncBoundary({ state, message, children, retry }: { state: "rea
   if (state === "loading") return <div className="bd-skeleton" role="status" aria-live="polite"><span>Loading this section…</span><div /><div /><div /></div>;
   return <div className="bd-empty" role={state === "error" ? "alert" : "status"}><h3>{state === "empty" ? "Nothing needs attention here" : "Section unavailable"}</h3><p>{message ?? "Open the source workspace or try again."}</p>{retry}</div>;
 }
+/** Expected "nothing here yet" — a real setup step, never an error card. Only for states the app genuinely knows are empty. */
+export function SetupState({ title, detail, actions = [] }: { title: string; detail: string; actions?: { label: string; href: string }[] }) {
+  return <div className="bd-empty" role="status"><h3>{title}</h3><p>{detail}</p>
+    {actions.length > 0 && <div className="bd-empty-actions">{actions.map((action, i) => <BoardLink key={action.href} href={action.href} className={`bd-button ${i === 0 ? "bd-button--primary" : "bd-button--quiet"}`}>{action.label}</BoardLink>)}</div>}
+  </div>;
+}
 export function SyntheticDisclosure() {
-  return <div className="bd-demo-banner" role="note"><strong>Synthetic demonstration</strong><span>Fictional records — not company performance</span></div>;
+  return <div className="bd-demo-banner" role="note"><strong>Synthetic demonstration — not company performance</strong><span>Fictional records for evaluation</span></div>;
 }

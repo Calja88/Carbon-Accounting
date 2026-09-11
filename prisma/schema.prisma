@@ -157,6 +157,7 @@ model Organisation {
   calculations        Calculation[]
   reportSnapshots     ReportSnapshot[]
   sourceDocuments     SourceDocument[]
+  carbonSourcePeriodObligations CarbonSourcePeriodObligation[]
 
   // LCA-domain roots (T17). lcaMethodologyProfiles stays nullable/optional —
   // a methodology profile may be platform-shared (organisationId null) —
@@ -388,6 +389,10 @@ model OrganisationMembership {
 
   // Notifications and reminders (T24): notifications addressed to this membership.
   receivedNotifications Notification[] @relation("NotificationRecipient")
+
+  // Carbon source-period obligation review (Checkpoint B corrective handoff §1).
+  reviewedCarbonSourcePeriodObligations CarbonSourcePeriodObligation[] @relation("CarbonSourcePeriodObligationReviewedBy")
+  excludedCarbonSourcePeriodObligations CarbonSourcePeriodObligation[] @relation("CarbonSourcePeriodObligationExcludedBy")
 
   // Process/activity profiles (T30): record authorship.
   createdActivityProcesses ActivityProcess[] @relation("ActivityProcessCreatedBy")
@@ -665,6 +670,7 @@ model Site {
   activityEntries  ActivityEntry[]
   energyContracts  SiteEnergyContract[]
   commutingSurveys CommutingSurvey[]
+  carbonSourcePeriodObligations CarbonSourcePeriodObligation[]
 
   // Product LCA / PCF
   productManufacturingLocations ProductManufacturingLocation[]
@@ -1010,6 +1016,7 @@ model ActivityEntry {
   /// Product assessments that cite this corporate record as their source.
   /// Reference only — see LcaCorporateDataLink.
   lcaCorporateDataLinks   LcaCorporateDataLink[]
+  carbonSourcePeriodObligations CarbonSourcePeriodObligation[]
 
   @@index([activityDataPointId, siteId, periodStart])
   @@index([sourceDocumentId])
@@ -8757,4 +8764,193 @@ model ManagementReviewActionLink {
   @@unique([organisationId, decisionId, actionItemId])
   @@index([organisationId, decisionId])
   @@index([organisationId, actionItemId])
+}
+
+// ---------------------------------------------------------------------------
+// BD08 board-demo fixture infrastructure. Not tenant domain data: these
+// three models exist only to let scripts/board-demo/live-seed-port.ts prove
+// (a) which physical database it is actually connected to, independently
+// of any environment variable (guard.ts's assertDemoTarget), (b) that only
+// one seed/verify operation ever runs against a given fixture at a time
+// (BUILDING -> READY, never READY early), and (c) that the BOARD-1 fixture's
+// "192/192 expected submissions reviewed" Overview claim corresponds to 192
+// real, independently reviewable rows rather than a raw count with no
+// backing record — the exact gap BD05 found and left honestly unresolved
+// (`expected: null` in live-overview.ts) pending this package.
+// ---------------------------------------------------------------------------
+
+/// Singleton row (fixed id) written exactly once, out-of-band, when a
+/// disposable demo database is provisioned — never inferred from a
+/// connection string, env var, or URL substring. `readConnectedIdentity()`
+/// reads this row; its absence means the connected database has not been
+/// positively identified, so the guard fails closed.
+model DemoDatabaseManifest {
+  id            String   @id @default("singleton")
+  databaseId    String
+  environmentId String
+  /// Written only by the out-of-band provisioning step that creates this
+  /// disposable database — never by the seed script itself. readConnectedIdentity
+  /// requires this to match BOARD_DEMO_PROVISIONING_TOKEN from the deployment's
+  /// own environment before ever trusting this row; a manifest row alone
+  /// (e.g. copied, stale, or planted) proves nothing without it.
+  provisioningToken String
+  /// Checkpoint B corrective handoff §4: the provisioning token is a trust
+  /// root binding this manifest to the ACTUAL Postgres identity of the
+  /// approved target, not just an operator-assigned label — readConnectedIdentity
+  /// additionally runs `SELECT current_database(), current_user` on the live
+  /// connection and requires an exact match against these two fields before
+  /// ever reporting disposable/SYNTHETIC. `current_database()` alone never
+  /// identifies a Neon project (many databases can share a name); this is one
+  /// signal among the token/databaseId/environmentId set, never sufficient
+  /// by itself.
+  approvedDatabaseName String?
+  approvedRole         String?
+  createdAt            DateTime @default(now())
+}
+
+enum DemoFixtureLeaseStatus {
+  NONE
+  BUILDING
+  READY
+}
+
+/// One row per fixture key (e.g. "BOARD-1"). Exclusivity is an atomic CAS on
+/// `status` (`UPDATE ... WHERE status = 'NONE'`/`'BUILDING'`, not a held row
+/// lock — see live-seed-port.ts) so each transition commits and becomes
+/// durable immediately: a build that fails after BUILDING leaves BUILDING
+/// persisted (detectable, unavailable), never silently reverting to NONE
+/// while partial domain writes survive. `status` only ever moves
+/// NONE -> BUILDING -> READY, and only to READY after verifyAllInvariants
+/// succeeds; the enum constrains it to exactly those three valid states.
+model DemoFixtureLease {
+  id         String                 @id @default(cuid())
+  fixtureKey String                 @unique
+  status     DemoFixtureLeaseStatus @default(NONE)
+  digest     String                 @default("")
+  /// The exact Organisation id this fixture build created, bound atomically
+  /// with the NONE -> BUILDING transition (see live-seed-port.ts's
+  /// beginFixture). Checkpoint B corrective handoff §4: a name/slug prefix
+  /// (e.g. "board-1-") is never proof of fixture ownership — any tenant
+  /// could create an organisation with that slug. Every later identity
+  /// check counts "ordinary" (non-fixture) organisations against this exact
+  /// recorded id, never a naming convention.
+  fixtureOrganisationId String?
+  /// Checkpoint B corrective handoff §5: a schema-versioned map of every id
+  /// needed to re-derive this fixture's full state on replay (organisation/
+  /// entity/site/persona/evidence/document/LCA/review/pack/EMS-chain ids),
+  /// written atomically with the same BUILDING -> READY CAS that sets
+  /// `digest` (see live-seed-port.ts's markFixtureReady/buildIdentityMap).
+  /// Replaces resolveExistingFixtureState's previous reliance on
+  /// findFirst-by-friendly-name/oldest-row/duplicate-filename heuristics,
+  /// which a genuine post-freeze live transition (another row sharing a
+  /// naming convention) could defeat. Every id read from here is
+  /// re-validated against its expected tenant/relation before use — this
+  /// column is operator-writable data, never trusted as proof on its own.
+  identityMap Json?
+  /// Checkpoint B corrective handoff §5: bumped whenever this file's own
+  /// persisted-identity/verification contract changes shape, independently
+  /// of BOARD1.fixtureVersion (the demo's public label). existingFixture()
+  /// reports an invalid digest for a READY lease recorded under a different
+  /// revision, which seedBoardDemo's fixed orchestrator contract already
+  /// turns into "Fixture identity differs; provision a fresh empty demo
+  /// database" — an old READY fixture is never silently reinterpreted as
+  /// one this code version can actually verify, and no reset/repair/reseed
+  /// happens here.
+  implementationRevision Int @default(0)
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+}
+
+/// One row per BOARD-1 named source-period return
+/// (`site:month:source`, e.g. "north-works:2026-01:gas"). Deliberately not
+/// related via Prisma `@relation` to Organisation/Site/OrganisationMembership/
+/// ActivityEntry — a leaf-level fixture-bookkeeping table, scoped and
+/// filtered/validated at the application layer like every other
+/// tenant-scoped read in this codebase, not a new FK-linked domain concept
+/// (an `@relation` here would need reverse-relation fields threaded onto
+/// those core models for a fixture-bookkeeping leaf, a disproportionate
+/// blast radius). Organisation/site/reviewer consistency is instead
+/// asserted in code before every write (see live-seed-port.ts), and
+/// `submittedActivityEntryId` traces each review decision to the real
+/// ActivityEntry it reviews.
+/// A real referable/reviewable claim about one (site, month, source) carbon
+/// submission. Checkpoint B corrective handoff §1: status only ever moves
+/// REVIEW_REQUIRED -> REVIEWED via the explicit, permission-checked
+/// `reviewSourcePeriodObligation` service (never stamped by the seed merely
+/// because a submission exists), and -> EXCLUDED only via
+/// `excludeSourcePeriodObligation` with a recorded reason/decision. The FK
+/// relations below give referential integrity (an obligation cannot outlive
+/// its organisation/site/entry/reviewer); they do not by themselves prove
+/// that the referenced site/entry belong to the SAME reporting period and
+/// source this obligation claims — that cross-field matching is the
+/// service's job (see source-period-obligation-service.ts), not something a
+/// foreign key alone can express.
+model CarbonSourcePeriodObligation {
+  id                       String       @id @default(cuid())
+  organisationId           String
+  organisation             Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  siteId                   String
+  site                     Site         @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  month                    String
+  sourceKey                String
+  externalKey              String       @unique
+  status                   String       @default("REVIEW_REQUIRED")
+  reviewedByMembershipId   String?
+  reviewedByMembership     OrganisationMembership? @relation("CarbonSourcePeriodObligationReviewedBy", fields: [reviewedByMembershipId], references: [id], onDelete: Restrict)
+  reviewedAt               DateTime?
+  /// Canonical fingerprint (sha256) of the reviewed ActivityEntry's
+  /// canonical value/unit plus every contributing Calculation's id/basis/
+  /// resultKgCo2e at the moment of review. A later change to the entry or
+  /// its calculations no longer matches this fingerprint, so coverage must
+  /// treat the obligation as requiring review again even though its status
+  /// column still says REVIEWED until the next explicit review call.
+  reviewFingerprint        String?
+  /// The actual ActivityEntry this obligation's review decision covers —
+  /// never populated without a real, persisted entry to point to. RESTRICT:
+  /// an entry with a recorded review must never be deleted out from under
+  /// that provenance.
+  submittedActivityEntryId String?
+  submittedActivityEntry   ActivityEntry?          @relation(fields: [submittedActivityEntryId], references: [id], onDelete: Restrict)
+  excludedByMembershipId   String?
+  excludedByMembership     OrganisationMembership? @relation("CarbonSourcePeriodObligationExcludedBy", fields: [excludedByMembershipId], references: [id], onDelete: Restrict)
+  excludedAt               DateTime?
+  /// Required whenever status = EXCLUDED — an authorised decision, never
+  /// merely the absence of a matching submission.
+  excludedReason           String?
+  createdAt                DateTime  @default(now())
+
+  @@unique([organisationId, siteId, month, sourceKey])
+  @@index([organisationId, siteId, month])
+  @@index([submittedActivityEntryId])
+}
+
+enum BoardManagementPackStatus {
+  DRAFT
+  ISSUED
+}
+
+/// RETIRED (Checkpoint B corrective handoff §7): no runtime code path reads
+/// or writes this table anymore. The board-sprint's own frozen pack
+/// (`FrozenBoardPack` in src/lib/board/contracts.ts) is now a validated
+/// `board` section of ManagementReviewPack.payload — one management-pack
+/// lifecycle, one canonical checksum — built by
+/// `@/lib/board/live-management-pack.ts`, an adapter over
+/// `@/lib/ems/review/pack-service.ts`. This model and its migration are
+/// left in place as untouched legacy data (no destructive cleanup); any
+/// rows created before this change are historical only.
+model BoardManagementPack {
+  id               String                    @id @default(cuid())
+  organisationId   String
+  reference        String
+  version          Int                       @default(1)
+  status           BoardManagementPackStatus @default(DRAFT)
+  snapshot         Json
+  payloadSha256    String
+  preparedByUserId String
+  approvedByUserId String?
+  issuedAt         DateTime?
+  generatedAt      DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  @@unique([organisationId, reference])
 }

@@ -19,7 +19,9 @@ import { computeCommutingMiles } from "@/lib/commuting";
 import { SCOPE3_CAT3_LABEL, wttMappingFor } from "@/lib/scope3-derived";
 import type { TenantRepositoryContext } from "@/lib/repositories/context";
 import { assertOwned, tenantWhere } from "@/lib/repositories/tenant-scope";
-import { systemTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { systemTenantRepositoryContext, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import type { OrganisationContext } from "@/lib/organisation/context";
+import { requirePermission } from "@/lib/rbac/authorize";
 
 /** Real activity data with no matching EmissionFactor (yet) — never crashes
  * a save; the entry is stored and surfaced as "awaiting emission factor"
@@ -401,6 +403,24 @@ export async function recalculatePendingEntries() {
  * this for the same period never creates duplicate Cat 3 rows, so it's
  * safe to call every time a report is generated.
  */
+/**
+ * BD08/Checkpoint-A carried-forward fix: the explicit "Prepare reporting
+ * data" step. `generateReportAction` used to call `deriveCategory3Calculations`
+ * as an undisclosed side effect of building a report snapshot — generating a
+ * report also silently mutated the organisation's live Scope 3 total. This
+ * is now the only entry point that derives Category 3 rows; it requires the
+ * same write permission/scope as report generation, and its result
+ * (`skippedNoFactor`) is returned so the caller can disclose any source rows
+ * that could not be derived for lack of a matching factor, rather than
+ * silently omitting them. Report generation itself reads whatever Category 3
+ * rows already exist and never derives new ones (see `buildReportPayload`).
+ */
+export async function prepareReportingData(context: OrganisationContext, periodStart: Date, periodEnd: Date) {
+  requirePermission(context, "carbon.report.generate");
+  const ctx = toTenantRepositoryContext(context);
+  return deriveCategory3Calculations(ctx, periodStart, periodEnd);
+}
+
 export async function deriveCategory3Calculations(ctx: TenantRepositoryContext, periodStart: Date, periodEnd: Date) {
   const sourceCalculations = await prisma.calculation.findMany({
     where: tenantWhere(ctx, {

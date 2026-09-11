@@ -20,7 +20,11 @@ export interface CarbonAdapterInput {
   selectedSiteId?: string;
   /** Reviewed same-scope/source/method keys. Different keys explicitly prevent a comparison. */
   currentComparisonKey: string; previousComparisonKey: string;
-  quantifiedCategories: number; screenedCategories: number; asOf: string;
+  quantifiedCategories: number;
+  /** Null when no Scope 3 screening decision has actually been recorded — see screenedCategoriesReason. */
+  screenedCategories: number | null;
+  screenedCategoriesReason: string | null;
+  asOf: string;
   /** True only when the actual selected electricity companion rows/instrument checks are available. */
   marketBasedAvailable: boolean;
 }
@@ -64,7 +68,16 @@ function assertCoverageWindow(window: AuthorizedAnalyticsWindow, coverage: Windo
 export function buildCarbonSection(input: CarbonAdapterInput): OverviewModel["carbon"] {
   assertWindow(input.current, input.permittedSiteIds); assertWindow(input.previous, input.permittedSiteIds);
   assertCoverageWindow(input.current, input.currentCoverage); assertCoverageWindow(input.previous, input.previousCoverage);
-  if (!Number.isInteger(input.quantifiedCategories) || !Number.isInteger(input.screenedCategories) || input.quantifiedCategories < 0 || input.quantifiedCategories > input.screenedCategories || input.screenedCategories > 15) throw new Error("Invalid Scope 3 coverage");
+  // Quantified is always validated; screened is validated independently and
+  // only when a real screening decision exists (non-null) — a null
+  // screened count is an honest "not recorded", never inferred from or
+  // constrained by the quantified count.
+  if (!Number.isInteger(input.quantifiedCategories) || input.quantifiedCategories < 0 || input.quantifiedCategories > 15) throw new Error("Invalid Scope 3 coverage");
+  if (input.screenedCategories !== null) {
+    if (!Number.isInteger(input.screenedCategories) || input.screenedCategories < 0 || input.screenedCategories > 15 || input.quantifiedCategories > input.screenedCategories) {
+      throw new Error("Invalid Scope 3 coverage");
+    }
+  }
   const currentHref = carbonHref("/carbon", { ...input, siteId: input.selectedSiteId }), previousHref = carbonHref("/carbon", { from: input.previousFrom, to: input.previousTo, siteId: input.selectedSiteId });
   const current = metric(input.current.group.total, input.currentCoverage.group, input.currentComparisonKey, currentHref);
   const previous = metric(input.previous.group.total, input.previousCoverage.group, input.previousComparisonKey, previousHref);
@@ -82,5 +95,5 @@ export function buildCarbonSection(input: CarbonAdapterInput): OverviewModel["ca
     const previousCoverage = input.previousCoverage.months[previousMonth] ?? unknownCoverage();
     return { month: month.month, label: month.label, currentKg: currentCoverage.received ? month.total : null, previousKg: previousCoverage.received && prior ? prior.total : null, href: carbonHref("/carbon", { from: month.month, to: month.month, siteId: input.selectedSiteId }) };
   });
-  return { state: "ready", asOf: input.asOf, data: { current, previous, marketBasedKg: current.kgCO2e === null || !input.marketBasedAvailable ? null : input.current.group.scope2Market, quantifiedCategories: input.quantifiedCategories, screenedCategories: input.screenedCategories, sites, trend } };
+  return { state: "ready", asOf: input.asOf, data: { current, previous, marketBasedKg: current.kgCO2e === null || !input.marketBasedAvailable ? null : input.current.group.scope2Market, quantifiedCategories: input.quantifiedCategories, screenedCategories: input.screenedCategories, screenedCategoriesReason: input.screenedCategoriesReason, sites, trend } };
 }

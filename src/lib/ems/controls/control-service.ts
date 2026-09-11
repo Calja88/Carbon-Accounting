@@ -204,21 +204,34 @@ async function createControlVersion(
         reviewedAt: supersedesControlId ? new Date() : null,
         supersedesControlId,
         createdByUserId: input.actorUserId,
-        aspectLinks: {
-          create: validated.aspectIds.map((aspectId) => ({ organisationId: txCtx.organisationId, aspectId })),
-        },
-        applicabilities: {
-          create: validated.applicabilities.map((item) => ({
-            organisationId: txCtx.organisationId,
-            entityId: item.entityId || null,
-            siteId: item.siteId || null,
-            processId: item.processId || null,
-            externalProviderReference: item.externalProviderReference?.trim() || null,
-          })),
-        },
       },
-      include: { aspectLinks: true, applicabilities: true },
     });
+    // Created as separate rows rather than through operationalControl.create()'s
+    // nested `aspectLinks`/`applicabilities` writes: organisationId is shared by
+    // more than one relation on OperationalControlAspect/ControlApplicability
+    // (the plain Organisation relation and the composite control/aspect
+    // relations), and the generated Prisma client rejects a raw organisationId
+    // scalar inside that nested-create shape ("Unknown argument organisationId")
+    // — confirmed against a real PostgreSQL-backed client (tests/board-product/
+    // bd06-chain.test.ts), never previously exercised outside mocked-Prisma
+    // tests. Same final rows, same transaction, no schema change.
+    if (validated.aspectIds.length > 0) {
+      await tx.operationalControlAspect.createMany({
+        data: validated.aspectIds.map((aspectId) => ({ organisationId: txCtx.organisationId, controlId: control.id, aspectId })),
+      });
+    }
+    if (validated.applicabilities.length > 0) {
+      await tx.controlApplicability.createMany({
+        data: validated.applicabilities.map((item) => ({
+          organisationId: txCtx.organisationId,
+          controlId: control.id,
+          entityId: item.entityId || null,
+          siteId: item.siteId || null,
+          processId: item.processId || null,
+          externalProviderReference: item.externalProviderReference?.trim() || null,
+        })),
+      });
+    }
     if (supersedesControlId) {
       await tx.operationalControl.update({
         where: { organisationId_id: { organisationId: txCtx.organisationId, id: supersedesControlId } },
@@ -236,7 +249,10 @@ async function createControlVersion(
       source: "web-app",
       after: { controlKey: control.controlKey, version, aspectIds: validated.aspectIds },
     });
-    return control;
+    return tx.operationalControl.findUniqueOrThrow({
+      where: { id: control.id },
+      include: { aspectLinks: true, applicabilities: true },
+    });
   });
 }
 

@@ -70,10 +70,10 @@ export async function requireEntityInScope(context: OrganisationContext, entityI
 }
 
 /** Loads a Site the caller's Organisation owns and is scoped to, or throws TenantOwnershipError. */
-export async function requireSiteInScope(context: OrganisationContext, siteId: string) {
+export async function requireSiteInScope(context: OrganisationContext, siteId: string, db: Prisma.TransactionClient = prisma) {
   assertSiteAccess(context, siteId);
   const ctx = toTenantRepositoryContext(context);
-  const site = await prisma.site.findFirst({ where: tenantWhere(ctx, { id: siteId }) });
+  const site = await db.site.findFirst({ where: tenantWhere(ctx, { id: siteId }) });
   return assertOwned(ctx, site);
 }
 
