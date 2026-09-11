@@ -2,7 +2,7 @@
 
 Prepared for Astra review before PR #64 merges.
 
-**Status: remediation of Astra's Checkpoint B "APPROVE AFTER REQUIRED FIXES" decision is complete as of commit `2ca3752` — see §9. PR #64 remains unmerged, draft, awaiting Astra's re-review. BD09 has not been started.**
+**Status: remediation of Astra's Checkpoint B "APPROVE AFTER REQUIRED FIXES" decision is complete (8 required fixes, real-Postgres CI green) as of commit `2ca3752`, carried through two docs/tooling-only follow-up commits to true current HEAD `a2fbbd9` — see §9. PR #64 remains unmerged, draft, awaiting Astra's re-review. BD09 has not been started.**
 
 ## 1. Checkpoint scope
 
@@ -13,7 +13,7 @@ BD05 (Executive Overview + Attention queue) → BD06 (EMS improvement chain, con
 - **Base branch:** `claude/paragon-id-uk-carbon-mvp-1h1uvb`
 - **Base SHA (H00):** `6b0138a7b25b71b55ffe4215cba14d0f526a785c` (PR #63 merge)
 - **Cumulative branch:** `board/product-2026-09-22`
-- **Current HEAD:** `2ca3752` (after Checkpoint B remediation — see §9)
+- **Current HEAD:** `a2fbbd9` (`2ca3752` + a docs commit `f4e2391` recording remediation results, + a handoff-tooling commit `a2fbbd9` allowlisting 5 reviewed test-fixture matches so `handoff:review` runs clean — no functional/domain code changed in either; both independently green on real-Postgres CI, see §9.2)
 - **PR:** [#64](https://github.com/Calja88/Carbon-Accounting/pull/64) (draft, not merged)
 
 ## 3. Package commits
@@ -137,6 +137,11 @@ Both required checks pass on **HEAD `2ca3752`** (`PR #64`), confirmed via direct
 - `checkpoint-a-postgres.yml` ("Checkpoint A PostgreSQL gate") — run [34557276819](https://github.com/Calja88/Carbon-Accounting/actions/runs/34557276819) — **success**. Runs against real PostgreSQL, in the pinned order (`vitest.checkpoint-a.sequencer.mts`) needed for cross-file fixture dependencies: `tests/checkpoint-a/postgres.test.ts`, `bd06-chain.test.ts`, `bd08-fixes.test.ts`, `bd08-board1-seed.test.ts`, and the 6 new Checkpoint B suites — `checkpoint-b-seed-guard.test.ts`, `checkpoint-b-personas.test.ts`, `checkpoint-b-management-pack.test.ts`, `checkpoint-b-overview.test.ts`, `checkpoint-b-lca-scenarios.test.ts`, `checkpoint-b-ems-chain.test.ts`, `checkpoint-b-coverage.test.ts`.
 - `ci.yml` ("Typecheck, lint, test") — run [34557276840](https://github.com/Calja88/Carbon-Accounting/actions/runs/34557276840) — **success**.
 
+Both checks were re-confirmed green on the two subsequent docs/tooling-only commits, ending at true current HEAD `a2fbbd9`:
+
+- `f4e2391` (this doc update): `checkpoint-a-postgres` run [34557824889](https://github.com/Calja88/Carbon-Accounting/actions/runs/34557824889) — success; `ci.yml` run [34557824900](https://github.com/Calja88/Carbon-Accounting/actions/runs/34557824900) — success.
+- `a2fbbd9` (H00 handoff-tooling allowlist fix, §9.7): `checkpoint-a-postgres` run [34558135087](https://github.com/Calja88/Carbon-Accounting/actions/runs/34558135087) — success; `ci.yml` run [34558135067](https://github.com/Calja88/Carbon-Accounting/actions/runs/34558135067) — success.
+
 This was not a first-try green: 9 prior runs on this remediation (`975472a` through `a950bbd`) failed in CI and were fixed in place — see §9.3.
 
 ### 9.3 Pre-existing bugs found and fixed along the way (not introduced this session)
@@ -160,7 +165,13 @@ Exercising this code against real Postgres for the first time (Fix 2/Fix 7 requi
 - New migration for `BoardManagementPack` (Fix 8, part of `311389a`).
 - Forward-only in both cases — the prior `20260910080000` migration (§6.3) is not rewritten.
 
-### 9.6 Outstanding after remediation
+### 9.6 H00 handoff bundle
+
+`pnpm run handoff:review -- --task CHECKPOINT-B-REMEDIATION --base bacb962 --run-checks` initially aborted (correct fail-closed behaviour) on 5 credential-like matches across the new Checkpoint B real-Postgres test files — 4 reuses of the already-reviewed fixed literal `passwordHash: "not-a-login-hash"` in synthetic membership fixtures, and 2 `BOARD_DEMO_PROVISIONING_TOKEN` assignments (a `randomUUID()`-derived local variable, and a self-documenting mismatch fixture for Fix 4's negative-case test) — none a real credential. Each of the 5 files was read in full and given its own narrow exact-file/exact-matched-text `REVIEWED_SAFE_CREDENTIAL_MATCHES` entry (commit `a2fbbd9`); a different or new credential-like value in any of these files still fails the scan. 12 new tests added to `handoff-secret-scan.test.ts` proving the allow/still-fail/no-leak behaviour for each. `handoff:secret-audit` now reports **0 unreviewed findings** for this remediation's diff against `bacb962`.
+
+Regenerated bundle: `artifacts/ai-handoff/review/CHECKPOINT-B-REMEDIATION-review-20260911-032232.zip` (not committed — gitignored per `handoff:review`'s own design; hand off out-of-band). Contents: `TASK.md`, `IMPLEMENTATION_SUMMARY.md`, `GIT_STATUS.txt`, `GIT_DIFF.patch` (39 changed files vs `bacb962`), `CHANGED_FILES.txt` + full file bodies, `TEST_RESULTS.md` (full mocked suite: 2068 passed, 11 skipped, 0 failed; lint: 0 errors, 9 pre-existing warnings), `SECURITY_CHECK.md` (39 files scanned, PASS — no suspected secrets), `MANIFEST.md`, plus `MIGRATIONS/` and `PRISMA_SCHEMA/` snapshots.
+
+### 9.7 Outstanding after remediation
 
 - PR #64 remains **draft, unmerged**. Next step is Astra's re-review of this remediation, not a merge.
 - BD09 has **not** been started.
