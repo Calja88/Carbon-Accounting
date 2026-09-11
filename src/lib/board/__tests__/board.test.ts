@@ -51,7 +51,17 @@ describe("read-model composition", () => {
   }; }
   const scope = { organisationId: "demo", siteIds: ["s1"], from: "2026-01", to: "2026-08", asOfDate: "2026-09-08" };
   it("authorizes before reading anything", async () => { const p = ports(); p.authorizeScope = async () => { throw Error("Denied"); }; p.carbon = vi.fn(); await expect(loadOverview(p, "ctx", scope)).rejects.toThrow("Denied"); expect(p.carbon).not.toHaveBeenCalled(); });
-  it("does not turn a provider error into zero", async () => { const p = ports(); p.carbon = async () => { throw Error("Provider failed"); }; const result = await loadOverview(p, "ctx", scope); expect(result.carbon.state).toBe("unavailable"); expect(result.attention.state).toBe("ready"); expect(p.sectionFailure).toHaveBeenCalledWith("carbon"); });
+  it("does not turn a provider error into zero", async () => { const p = ports(); const boom = Error("Provider failed"); p.carbon = async () => { throw boom; }; const result = await loadOverview(p, "ctx", scope); expect(result.carbon.state).toBe("unavailable"); expect(result.attention.state).toBe("ready"); expect(p.sectionFailure).toHaveBeenCalledWith("carbon", boom); });
+  // The exception itself must reach the adapter (it is what makes a failure fixable), and never the rendered message.
+  it("hands the real exception to the adapter and shows a section-specific recovery message", async () => {
+    const p = ports(); p.priorities = async () => { throw Error("Conflicting canonical action projection"); };
+    const result = await loadOverview(p, "ctx", scope);
+    expect(result.priorities.state).toBe("unavailable");
+    const message = result.priorities.state === "unavailable" ? result.priorities.message : "";
+    expect(message).toContain("Management focus");
+    expect(message).not.toContain("Conflicting canonical action projection");
+    expect(vi.mocked(p.sectionFailure).mock.calls[0][1]).toBeInstanceOf(Error);
+  });
 });
 describe("calculation orchestration contract", () => {
   const request = { organisationId: "o", entryId: "e", inputRevision: "r1", idempotencyKey: "k", inputDigest: "d" };

@@ -10,6 +10,7 @@ import { buildAnalyticsSnapshot, type AnalyticsSnapshot } from "@/lib/analytics-
 import { monthInputValue, formatRangeLabel } from "@/lib/report-period";
 import { listOverdueOrUnevaluatedObligations } from "@/lib/ems/legal/evaluation-service";
 import { computeReviewFingerprint } from "@/lib/carbon/source-period-obligation-service";
+import { logEvent } from "@/lib/observability/logger";
 import { boardPeriodSchema } from "./schemas";
 import { loadOverview, type OverviewPorts, type BoardScope } from "./overview-service";
 import { buildCarbonSection, type AuthorizedAnalyticsWindow, type WindowCoverage } from "./carbon-adapter";
@@ -481,9 +482,23 @@ async function priorities(context: OrganisationContext, scope: BoardScope): Retu
 
 const ports: OverviewPorts<OrganisationContext> = {
   authorizeScope, header, carbon, attention: (context, scope) => attentionResult ??= attention(context, scope), priorities,
-  sectionFailure(section) {
-    // Safe operational metadata only — never the underlying exception, credentials or evidence bytes.
-    console.error(`[board-overview] section unavailable: ${section}`);
+  sectionFailure(section, error) {
+    // Server-side structured log. The real exception is what makes a
+    // failure fixable, so name/message/stack are recorded here; `logEvent`
+    // redacts value/quantity/token-shaped fields and nothing from this
+    // entry is ever returned to the browser (the caller renders the
+    // section's own generic recovery message instead).
+    logEvent({
+      level: "error",
+      message: "board-overview section failed",
+      organisationId: context.organisationId,
+      fields: {
+        section,
+        errorName: error instanceof Error ? error.name : typeof error,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      },
+    });
   },
 };
 
