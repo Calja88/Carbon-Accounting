@@ -506,3 +506,43 @@ describe("reviewed exact-match credential allowlist (tests/board-product/checkpo
     expect(finding).not.toBeNull();
   });
 });
+
+// Second Checkpoint B corrective handoff: checkpoint-b-obligation-review.test.ts
+// reuses the same already-reviewed "not-a-login-hash" fixture literal.
+describe("reviewed exact-match credential allowlist (tests/board-product/checkpoint-b-obligation-review.test.ts)", () => {
+  const obligationReviewTestPath = join("tests/board-product/", "checkpoint-b-obligation-review.test.ts");
+  const passwordHashMatch = join("passwordHash", ': "not-a-login-hash"');
+
+  it("allows the reviewed passwordHash fixture in its file", () => {
+    expect(scanContentForSecrets(passwordHashMatch, obligationReviewTestPath)).toBeNull();
+  });
+
+  it("still fails a different/new credential-like value added to the same file", () => {
+    const fixture = join("passwordHash", ': "', "a-real-look", 'ing-secret-value"');
+    expect(scanContentForSecrets(fixture, obligationReviewTestPath)).not.toBeNull();
+  });
+});
+
+// Second Checkpoint B corrective handoff §4: live-seed-port.ts's persona
+// password variables — never a hardcoded value, always read from an
+// operator-supplied file or generated fresh in memory.
+describe("reviewed exact-match credential allowlist (scripts/board-demo/live-seed-port.ts)", () => {
+  const liveSeedPortPath = join("scripts/board-demo/", "live-seed-port.ts");
+  const suppliedPasswordMatch = join("suppliedPassword ", "= personaCredentials");
+  const plaintextPasswordMatch = join("plaintextPassword ", "= suppliedPassword");
+
+  it("allows the reviewed suppliedPassword/plaintextPassword variable assignments in this file", () => {
+    expect(scanContentForSecrets(suppliedPasswordMatch, liveSeedPortPath)).toBeNull();
+    expect(scanContentForSecrets(plaintextPasswordMatch, liveSeedPortPath)).toBeNull();
+  });
+
+  it("still fails a different/new credential-like value added to the same file", () => {
+    const fixture = join("plaintextPassword", ' = "', "a-real-look", 'ing-secret-value"');
+    expect(scanContentForSecrets(fixture, liveSeedPortPath)).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    const finding = scanContentForSecrets(suppliedPasswordMatch, "scripts/board-demo/other.ts");
+    expect(finding).not.toBeNull();
+  });
+});
