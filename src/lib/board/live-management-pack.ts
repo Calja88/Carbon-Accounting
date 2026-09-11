@@ -33,8 +33,19 @@ const VIEW_PERMISSION = "ems.view" as const;
 
 type SnapshotBody = Pick<FrozenBoardPack, "reference" | "snapshot" | "sourceRevisions" | "decisions">;
 
+/**
+ * Checkpoint B corrective handoff §5: hashes the same plain-JSON shape that
+ * actually ends up persisted, never the raw in-memory `body` directly — a
+ * value such as a Decimal instance canonicalStringify would otherwise
+ * recurse into by its own internal fields (whatever its constructor happens
+ * to store) rather than its numeric value, producing a checksum that could
+ * never be reproduced from what Postgres actually stores (which serializes
+ * such values through their own `toJSON`/`toString`, same as any JSON.stringify
+ * would). Round-tripping through JSON first guarantees the checksum matches
+ * a later recomputation over the persisted row byte-for-byte.
+ */
 function computeChecksum(body: SnapshotBody): string {
-  return createHash("sha256").update(canonicalStringify(body)).digest("hex");
+  return createHash("sha256").update(canonicalStringify(JSON.parse(JSON.stringify(body)))).digest("hex");
 }
 
 export interface GenerateBoardManagementPackInput {
