@@ -7,8 +7,8 @@ Keep this to ~1-2 pages. Update at the end of every package.
 - **Foundation window merged.** Astra's final Checkpoint A re-review APPROVED MERGE at HEAD `ae402d0d71c52a4da9c2d53470de0c26af9997ef`. PR [#63](https://github.com/Calja88/Carbon-Accounting/pull/63) merged into `claude/paragon-id-uk-carbon-mvp-1h1uvb` as merge commit `6b0138a7b25b71b55ffe4215cba14d0f526a785c` (standard merge, no squash/rebase — `git merge-base --is-ancestor` confirmed). `board/foundations-2026-09-22` gets no further commits.
 - **Packages completed:** BD05 (executive Overview + source-backed Attention), BD06 (connected records, evidence, one complete EMS improvement chain), BD07 (LCA scenario experience). Foundation window (BD01/BD04/BD02/BD03 + Checkpoint A CA01–CA06) also complete and merged.
 - **Product branch:** `board/product-2026-09-22` (created from `origin/claude/paragon-id-uk-carbon-mvp-1h1uvb` @ `6b0138a`, the updated post-merge baseline — not branched from the old foundation branch tip).
-- **Product PR:** [#64](https://github.com/Calja88/Carbon-Accounting/pull/64) (draft), branch `board/product-2026-09-22` against `claude/paragon-id-uk-carbon-mvp-1h1uvb`. Cumulative window for BD05→BD08; stays draft until Checkpoint B.
-- **Head:** BD07 commit `28fc120`.
+- **Product PR:** [#64](https://github.com/Calja88/Carbon-Accounting/pull/64) (draft), branch `board/product-2026-09-22` against `claude/paragon-id-uk-carbon-mvp-1h1uvb`. Cumulative window for BD05→BD08; stays draft until Astra's Checkpoint B re-review.
+- **Head:** `2ca3752` — Checkpoint B remediation (Astra's 8 required fixes) complete and green on real-Postgres CI. Full detail in `Docs/board-sprint/CHECKPOINT_B_REVIEW.md` §9. PR #64 is **not merged**; BD09 has **not** started.
 - Build pack extracted (outside the repo) at `/home/user/carbon-overhaul/build-pack`; Board Demo Build Pack at `/home/user/carbon-overhaul/board-demo-build-pack`; Checkpoint A remediation pack at `/home/user/carbon-overhaul/checkpoint-a-remediation-pack`; dossier at `/home/user/carbon-overhaul/Carbon_Ledger_Product_Transformation_Implementation_Dossier.docx`. All on ephemeral container storage — not guaranteed to survive to a future session; re-upload if a future session can't find them.
 
 ## BD05 — executive Overview and source-backed Attention (complete)
@@ -206,6 +206,16 @@ All four files were then read in full and every finding classified before any sc
 
 Astra's Checkpoint A decision was APPROVE AFTER REQUIRED FIXES. Her pre-authored remediation pack (CA01–CA06) was integrated on this branch: commits `b7c1f56` (pack, zero deviations needed against the verified baseline), `7e4fa06` and `5215a23` (two narrow CI-only deviations — full detail in `Docs/CHECKPOINT_A_REMEDIATION.md`). The disposable-PostgreSQL CA06 gate (`.github/workflows/checkpoint-a-postgres.yml`) ran for real on GitHub Actions and passed on commit `5215a23` (run [34349349842](https://github.com/Calja88/Carbon-Accounting/actions/runs/34349349842)), proving empty-DB migration, no-op re-deploy, and real concurrency/rollback/authorization behaviour — see `Docs/CHECKPOINT_A_REMEDIATION.md` for the full evidence record. PR #63 remains draft/unmerged.
 
+## BD08 (complete) and Checkpoint B remediation (complete)
+
+BD08 (BOARD-1 board-pack fixture) completed and passed real-Postgres CI — see `CHECKPOINT_B_REVIEW.md` §6. Astra's Checkpoint B review of BD05–BD08 returned **APPROVE AFTER REQUIRED FIXES** (8 fixes). All 8 are now implemented on `board/product-2026-09-22` and verified green on real PostgreSQL CI at commit `2ca3752` (`checkpoint-a-postgres` run [34557276819](https://github.com/Calja88/Carbon-Accounting/actions/runs/34557276819); `Typecheck, lint, test` run [34557276840](https://github.com/Calja88/Carbon-Accounting/actions/runs/34557276840)) — full findings-fixed map, the two genuine pre-existing bugs found and fixed along the way (a Prisma nested-write incompatibility across 4 EMS services; a Scope 3 quantified/screened invariant violation), and verification detail in `CHECKPOINT_B_REVIEW.md` §9.
+
+**Tests actually run for this remediation:** the full mocked Vitest suite, `tsc --noEmit`, lint, and — the only place Fix 2's obligation-backed coverage, Fix 7's EMS chain/evidence binding, and Fix 8's frozen-pack concurrency are proven against a real database — the `checkpoint-a-postgres` real-Postgres suite (55 tests across 11 files, including 6 new Checkpoint B suites, in a pinned execution order via a custom `TestSequencer` since Vitest's default does not honour `include` array order for cross-file fixture dependencies).
+
+**Persistent Neon runtime rehearsal — still deferred, not conflated with this checkpoint's gate.** The `cool-cake-20837205` persistent target remains unreachable over raw Postgres TCP from every sandbox this sprint has run in (§6.6/§6.7 unchanged); no READY state, rehearsal manifest, persistent ids, or browser proof has been fabricated to paper over that gap. Astra's own instruction was explicit that this gap may remain a BD09/pre-demo gate and must not block PR #64 by itself — the 8 required fixes above are Checkpoint B's actual gate, and are independently proven on the disposable real-Postgres CI database.
+
+**Remaining, disclosed rather than rushed:** Fix 8's management-pack view/print/download UI route is not yet built.
+
 ## Next package
 
-**BD08** on `board/product-2026-09-22` / PR #64 — not started, awaiting explicit authorization. Foundation merged (PR #63), BD05, BD06 and BD07 complete. Do not merge PR #64 before Checkpoint B (after BD08).
+**Astra's re-review of this Checkpoint B remediation** — not a new package. PR #64 remains draft/unmerged. **BD09 has not been started and is not authorized to start** until Astra's re-review clears it.

@@ -2,6 +2,8 @@
 
 Prepared for Astra review before PR #64 merges.
 
+**Status: remediation of Astra's Checkpoint B "APPROVE AFTER REQUIRED FIXES" decision is complete as of commit `2ca3752` — see §9. PR #64 remains unmerged, draft, awaiting Astra's re-review. BD09 has not been started.**
+
 ## 1. Checkpoint scope
 
 BD05 (Executive Overview + Attention queue) → BD06 (EMS improvement chain, connected records/evidence) → BD07 (LCA scenario experience) → BD08 (BOARD-1 board-pack fixture: `live-seed-port.ts` binding Astra's `DemoSeedPort` contract to real domain services, proven against real PostgreSQL).
@@ -11,7 +13,7 @@ BD05 (Executive Overview + Attention queue) → BD06 (EMS improvement chain, con
 - **Base branch:** `claude/paragon-id-uk-carbon-mvp-1h1uvb`
 - **Base SHA (H00):** `6b0138a7b25b71b55ffe4215cba14d0f526a785c` (PR #63 merge)
 - **Cumulative branch:** `board/product-2026-09-22`
-- **Current HEAD:** `bacb962` (before this review-doc commit)
+- **Current HEAD:** `2ca3752` (after Checkpoint B remediation — see §9)
 - **PR:** [#64](https://github.com/Calja88/Carbon-Accounting/pull/64) (draft, not merged)
 
 ## 3. Package commits
@@ -107,6 +109,61 @@ Re-implementing the seed as raw SQL over the HTTPS API was considered and reject
 
 **Not proven:** an actual run against the intended persistent Neon environment, and therefore no `rehearsal-manifest.json`. This is a real gap, not a formality — it should be closed (per §6.6) before this fixture is relied on for an actual board rehearsal.
 
-## 8. Outstanding
+## 8. Outstanding (pre-remediation state — see §9 for what changed)
 
 Do not merge PR #64 before Astra review. BD09 not started.
+
+## 9. Checkpoint B remediation (Astra's "APPROVE AFTER REQUIRED FIXES" response)
+
+Astra's Checkpoint B review of §1–§8 above returned **APPROVE AFTER REQUIRED FIXES**, naming 8 required fixes. All 8 are implemented on this same branch/PR, verified against real PostgreSQL in CI. Nothing below claims BD09 has started, claims PR #64 is merged, or claims the persistent-Neon gap (§6.6/§6.7) is closed — none of that changed.
+
+### 9.1 Findings-fixed map
+
+| Fix | Area | Commit(s) | What changed |
+|---|---|---|---|
+| 1 | Overview/Attention scope enforcement | `975472a` | EMS-derived Attention families (effectiveness review, corrective action/ActionItem, obligation) now deny rather than org-wide-widen for a site-restricted member (these models carry no site attribution); a selected single site now genuinely narrows `buildAnalyticsSnapshot`'s totals/coverage/links, not just hrefs. New `loadOverviewForContext` export makes this testable without `requireOrganisationContext()`. |
+| 2 | Coverage/reconciliation binding | `6c713ff`, `a985699` (root cause), `a950bbd` (sequencing) | `computeCoverageWindow` rewritten as a per-(site, month) cell hybrid: obligation-backed where `CarbonSourcePeriodObligation` rows exist for that cell, `ActivityEntry`-derived fallback otherwise — never mixed within one cell, and never binding every tenant's Overview to a BOARD-1-only model. `computeScope3CategoryCoverage` regrouped onto the canonical `scope3Category` (was free-text `category`, which any tenant can set identically across distinct categories) and now unconditionally screens Category 3 (root cause of the "Invalid Scope 3 coverage" throw — see §9.3). Seed now genuinely links every obligation to the real `ActivityEntry` it reviews and adds a comparable, fully reviewed prior-year (2025) set. |
+| 3 | LCA comparison bypass | `8458e29`, `2ca3752` (test-only next-auth fix) | `scenarios/page.tsx` no longer renders the legacy percentage/contribution comparison block for any `boardModel` that is null or `comparable: false` — closes the path where a stale, boundary-incompatible, or inaccessible scenario could still show a bare percentage. `createAssessment` now takes explicit functional-unit fields so BOARD-1's baseline/scenario are genuinely comparable rather than relying on a null default. |
+| 4 | Trustworthy seed identity guard | `975472a` | `readConnectedIdentity` now requires two independent, out-of-band signals (`APP_DATA_MODE=synthetic` + a `DemoDatabaseManifest.provisioningToken` only real provisioning writes) before reporting SYNTHETIC/disposable; CI-only naming leniency now requires the full independently-verified disposable check, not the CI flag alone. |
+| 5 | Partial build state / replay integrity | `975472a` | Replaced the two-connection lease/build split (a failure after `BUILDING` could roll the lease back to `NONE` while domain writes survived) with an atomic CAS on `DemoFixtureLease.status`; an interrupted build stays detectable. `verifyExistingFixture` recomputes and checks the digest instead of trusting it. |
+| 6 | Usable personas / credentials / permissions | `975472a` | Personas now get a real bcrypt-hashed random password compatible with the actual login path (was a bare SHA-256 digest, incompatible with `src/auth.ts`); contributor persona actually holds `carbon.entry.create`; sustainability-lead/independent-reviewer/read-only/restricted personas' `lca.*`/`lca.view` grants corrected. |
+| 7 | EMS chain / evidence binding | `a493bd6`, `9c1c687` (root cause) | Internal requirement, audit, and control-check evidence rebuilt through real EMS state machines (applicability assessment → obligation version → evaluation; audit programme → audit → checklist → finding → report) instead of being created directly at terminal status or bypassing lifecycle transitions. Real invoice/meter `SourceDocument` rows now generated from, and linked to, the exact `ActivityEntry` they document. Connected-record links now carry `?record=<id>` to the exact row instead of a bare register list. |
+| 8 | Frozen management pack / concurrency | `311389a` | New `BoardManagementPack` model + `live-management-pack.ts`: a real Overview snapshot, decisions derived from the fixture's own corrective action, and pinned source revisions, frozen via the same atomic-CAS generate/issue pattern used elsewhere. Also fixed the exact race Astra flagged in the pre-existing `pack-service.ts` (`generateManagementReviewPack`'s pre-transaction status read did not close the concurrent-write window). Known remaining gap, disclosed rather than rushed: no authorised view/print/download UI route for the new pack yet. |
+
+### 9.2 Real Postgres CI — green
+
+Both required checks pass on **HEAD `2ca3752`** (`PR #64`), confirmed via direct GitHub Actions API query (not notification-only):
+
+- `checkpoint-a-postgres.yml` ("Checkpoint A PostgreSQL gate") — run [34557276819](https://github.com/Calja88/Carbon-Accounting/actions/runs/34557276819) — **success**. Runs against real PostgreSQL, in the pinned order (`vitest.checkpoint-a.sequencer.mts`) needed for cross-file fixture dependencies: `tests/checkpoint-a/postgres.test.ts`, `bd06-chain.test.ts`, `bd08-fixes.test.ts`, `bd08-board1-seed.test.ts`, and the 6 new Checkpoint B suites — `checkpoint-b-seed-guard.test.ts`, `checkpoint-b-personas.test.ts`, `checkpoint-b-management-pack.test.ts`, `checkpoint-b-overview.test.ts`, `checkpoint-b-lca-scenarios.test.ts`, `checkpoint-b-ems-chain.test.ts`, `checkpoint-b-coverage.test.ts`.
+- `ci.yml` ("Typecheck, lint, test") — run [34557276840](https://github.com/Calja88/Carbon-Accounting/actions/runs/34557276840) — **success**.
+
+This was not a first-try green: 9 prior runs on this remediation (`975472a` through `a950bbd`) failed in CI and were fixed in place — see §9.3.
+
+### 9.3 Pre-existing bugs found and fixed along the way (not introduced this session)
+
+Exercising this code against real Postgres for the first time (Fix 2/Fix 7 require paths never previously covered by real-Postgres tests) surfaced two genuine, pre-existing production defects, fixed because they directly blocked the required fixes from working at all — no accounting methodology, RBAC model, or tenant-scoping logic changed:
+
+1. **Prisma nested-write incompatibility (`9c1c687`).** `createApplicabilityAssessment`, `createComplianceObligation`, `createEmsAudit`, `createComplianceEvaluation` each tried to nest to-many child creates under a parent `create()` call, passing `organisationId` explicitly on each child. Every affected child model has both a plain `organisation` relation and a compound relation back to its immediate parent that also involves `organisationId` — Prisma's generated nested-create input type excludes `organisationId` as "implied by the parent relation" in that situation, so the nested write threw `Unknown argument organisationId` against real Postgres (never caught by the mocked-Prisma test suite, which accepts any shape). Fixed by creating the parent bare, `createMany` for children with explicit ids, then re-fetching with the original `include`. This alone was blocking the entire Fix 7 EMS chain from completing, which cascaded into 9 downstream real-Postgres test failures.
+2. **Scope 3 quantified/screened mismatch (`a985699`).** `buildCarbonSection`'s own invariant (`quantifiedCategories <= screenedCategories`) was violated because Category 3 (fuel- and energy-related activities) structurally has no `ActivityDataPoint` of its own — it only ever appears via the derivation mechanism (`scope3-derived.ts`) — so it was counted in `quantifiedCategories` (via `Calculation.scope3Category`) but omitted from `screenedCategories` (via `ActivityDataPoint.scope3Category`). This threw "Invalid Scope 3 coverage" on every real BOARD-1 Overview load, silently swallowed to "unavailable" by `overview-service.ts`'s own `section()` wrapper (by design — it never logs the real exception). Root-caused via a temporary diagnostic (added in `1f0d993`, removed in `a985699` once found) and fixed by unconditionally screening Category 3.
+
+### 9.4 Verification actually run
+
+- Full mocked Vitest suite: PASS (updated mock fixtures in the 4 EMS service test files affected by the nested-write fix in §9.3).
+- `tsc --noEmit`: PASS.
+- `pnpm run lint`: PASS.
+- Real-Postgres `checkpoint-a-postgres` suite (55 tests across 11 files, pinned order): PASS on `2ca3752` — see §9.2. This is the only environment in which Fix 2's 192/192 obligation-backed coverage, Fix 7's EMS chain/evidence binding, and Fix 8's frozen-pack concurrency were actually exercised against a real database; none of it is asserted from mocked tests alone.
+- **Not run:** anything requiring the persistent Neon target (`cool-cake-20837205`) — unchanged from §6.6/§6.7. This sandbox still has no outbound TCP egress to Neon's Postgres port. This is a real, disclosed gap and is **not** being treated as the sole blocker on this PR — Astra's 8 required fixes above are the PR #64 gate, and are independently proven against the disposable real-Postgres CI database. The persistent-runtime rehearsal remains a BD09/pre-demo gate, not a Checkpoint B gate. No READY state, rehearsal manifest, persistent ids, or browser proof has been fabricated to paper over this gap.
+
+### 9.5 Schema/migration changes this remediation
+
+- `20260910120000` (Fix 1/4/5/6 batch, part of `975472a`): `CarbonSourcePeriodObligation.submittedActivityEntryId` + compound unique `(organisationId, siteId, month, sourceKey)`; `DemoFixtureLease.status` constrained to an enum; `DemoDatabaseManifest.provisioningToken`.
+- New migration for `BoardManagementPack` (Fix 8, part of `311389a`).
+- Forward-only in both cases — the prior `20260910080000` migration (§6.3) is not rewritten.
+
+### 9.6 Outstanding after remediation
+
+- PR #64 remains **draft, unmerged**. Next step is Astra's re-review of this remediation, not a merge.
+- BD09 has **not** been started.
+- Persistent Neon runtime rehearsal (§6.6) and the rehearsal manifest (§6.7) remain not done, for the same sandbox-network reason as before — carried forward as a BD09/pre-demo gate, explicitly not conflated with this checkpoint's own required fixes.
+- Fix 8's management-pack view/print/download UI route is not yet built (disclosed in §9.1 rather than rushed).
+- No stop condition (per Astra's explicit list) was hit during this remediation.
