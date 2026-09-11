@@ -238,7 +238,8 @@ All commits below target `checkpoint-a-postgres.yml` ("Checkpoint A PostgreSQL g
 | `d763445` (§5 board-pack checksum fix, 1st attempt) | [34606225944](https://github.com/Calja88/Carbon-Accounting/actions/runs/34606225944) | failure — JS-side JSON-normalization theory was incomplete |
 | `5f97949` (§5 board-pack checksum fix, 2nd attempt — read-back-after-write) | [34606836430](https://github.com/Calja88/Carbon-Accounting/actions/runs/34606836430) | success |
 | `e41dbf1` (§7) | [34608413815](https://github.com/Calja88/Carbon-Accounting/actions/runs/34608413815) | success |
-| `621cf42` (§8, H00 tooling, this doc) | [34609295893](https://github.com/Calja88/Carbon-Accounting/actions/runs/34609295893) | in progress at time of writing — see final report for confirmed result |
+| `621cf42` (§8, H00 tooling) | [34609295893](https://github.com/Calja88/Carbon-Accounting/actions/runs/34609295893) | success |
+| `adc315a` (§8, this docs closure) | [34609549859](https://github.com/Calja88/Carbon-Accounting/actions/runs/34609549859) | confirmed in the final report |
 
 Not a first-try green: 4 of the 13 pushes in this chain failed real-Postgres CI and were fixed in place before proceeding, each time by reading the actual job log rather than guessing — two genuine implementation bugs this fixture's own code introduced (§2's Category 3 envelope, §6's effectiveness-review precondition), and two genuine pre-existing-pattern bugs only real Postgres could expose (§1's CAS race, §5/§7's jsonb checksum-normalization mismatch, the latter taking two attempts to root-cause correctly).
 
