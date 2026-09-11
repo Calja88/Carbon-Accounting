@@ -33,19 +33,8 @@ const VIEW_PERMISSION = "ems.view" as const;
 
 type SnapshotBody = Pick<FrozenBoardPack, "reference" | "snapshot" | "sourceRevisions" | "decisions">;
 
-/**
- * Checkpoint B corrective handoff §5: hashes the same plain-JSON shape that
- * actually ends up persisted, never the raw in-memory `body` directly — a
- * value such as a Decimal instance canonicalStringify would otherwise
- * recurse into by its own internal fields (whatever its constructor happens
- * to store) rather than its numeric value, producing a checksum that could
- * never be reproduced from what Postgres actually stores (which serializes
- * such values through their own `toJSON`/`toString`, same as any JSON.stringify
- * would). Round-tripping through JSON first guarantees the checksum matches
- * a later recomputation over the persisted row byte-for-byte.
- */
 function computeChecksum(body: SnapshotBody): string {
-  return createHash("sha256").update(canonicalStringify(JSON.parse(JSON.stringify(body)))).digest("hex");
+  return createHash("sha256").update(canonicalStringify(body)).digest("hex");
 }
 
 export interface GenerateBoardManagementPackInput {
@@ -67,34 +56,46 @@ export async function generateBoardManagementPack(context: OrganisationContext, 
     sourceRevisions: input.sourceRevisions,
     decisions: input.decisions,
   };
-  const payloadSha256 = computeChecksum(body);
 
   return prisma.$transaction(async (tx) => {
     const current = await tx.boardManagementPack.findFirst({ where: tenantWhere(ctx, { reference: input.reference }) });
+    let row;
     if (!current) {
-      return tx.boardManagementPack.create({
+      row = await tx.boardManagementPack.create({
         data: {
           organisationId: ctx.organisationId,
           reference: input.reference,
           status: "DRAFT",
           snapshot: body as object,
-          payloadSha256,
+          payloadSha256: "",
           preparedByUserId: input.actorUserId,
         },
       });
+    } else {
+      // The actual compare-and-swap: WHERE status = 'DRAFT' is re-evaluated
+      // by Postgres against the latest committed row if this UPDATE had to
+      // wait on a concurrent issuer's lock, so a pack issued in the interim
+      // is never overwritten — affects 0 rows instead.
+      const cas = await tx.boardManagementPack.updateMany({
+        where: { organisationId: ctx.organisationId, id: current.id, status: "DRAFT" },
+        data: { snapshot: body as object, payloadSha256: "" },
+      });
+      if (cas.count === 0) {
+        throw new BoardManagementPackError("This pack has already been issued and cannot be regenerated.");
+      }
+      row = await tx.boardManagementPack.findUniqueOrThrow({ where: { id: current.id } });
     }
-    // The actual compare-and-swap: WHERE status = 'DRAFT' is re-evaluated
-    // by Postgres against the latest committed row if this UPDATE had to
-    // wait on a concurrent issuer's lock, so a pack issued in the interim
-    // is never overwritten — affects 0 rows instead.
-    const cas = await tx.boardManagementPack.updateMany({
-      where: { organisationId: ctx.organisationId, id: current.id, status: "DRAFT" },
-      data: { snapshot: body as object, payloadSha256 },
-    });
-    if (cas.count === 0) {
-      throw new BoardManagementPackError("This pack has already been issued and cannot be regenerated.");
-    }
-    return tx.boardManagementPack.findUniqueOrThrow({ where: { id: current.id } });
+    // Checkpoint B corrective handoff §5: the checksum is computed from the
+    // row Postgres actually just stored (re-read within this same
+    // transaction), never the pre-write in-memory `body` — jsonb's own
+    // storage-level normalization (numeric formatting, Decimal/Date
+    // serialization) is not guaranteed to reproduce a plain JS
+    // JSON.stringify of the original object byte-for-byte, so only a value
+    // read back through the real column can be hashed and later
+    // reproduced identically by a fresh recomputation over the persisted
+    // payload.
+    const payloadSha256 = computeChecksum(row.snapshot as unknown as SnapshotBody);
+    return tx.boardManagementPack.update({ where: { id: row.id }, data: { payloadSha256 } });
   });
 }
 
