@@ -161,6 +161,8 @@ export async function getBoardManagementPack(context: OrganisationContext, revie
     payloadSha256: pack.checksumSha256 ?? "",
     cutoffDate: pack.cutoffDate.toISOString(),
     lca: board.lca,
-    inputs: pack.inputSnapshots.map((s) => ({ key: s.inputDefinitionKey, sourceType: s.sourceType, sourceRecordId: s.sourceRecordId, revision: s.sourceVersionLabel, summary: s.summary })),
+    // The checksum covers payload.inputs. Relational snapshot rows are provenance,
+    // never an alternative source of displayed historical values.
+    inputs: ((pack.payload as { inputs?: { inputDefinitionKey: string; sourceType: string; sourceRecordId: string; sourceVersionLabel: string | null; summary: unknown }[] }).inputs ?? []).map((s) => ({ key: s.inputDefinitionKey, sourceType: s.sourceType, sourceRecordId: s.sourceRecordId, revision: s.sourceVersionLabel, summary: s.summary })),
   };
 }

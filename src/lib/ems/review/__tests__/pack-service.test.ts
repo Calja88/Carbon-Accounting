@@ -8,6 +8,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { prisma } from "@/lib/prisma";
 import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { ORG_A, ORG_B, makeOrganisationContext } from "@/lib/__tests__/tenant-fixtures";
 
@@ -132,6 +133,11 @@ const orgContextB = makeOrganisationContext(ORG_B, {
 });
 const orgContextANoManage = makeOrganisationContext(ORG_A, {
   permissions: new Set(["ems.view"]) as unknown as ReturnType<typeof makeOrganisationContext>["permissions"],
+});
+
+it("reports a raw PostgreSQL serialization failure as a pack conflict", async () => {
+  vi.mocked(prisma.$queryRaw).mockRejectedValueOnce(Object.assign(new Error("serialization failure"), { code: "P2010", meta: { code: "40001" } }));
+  await expect(generateManagementReviewPack(orgContextA, "review", "actor")).rejects.toBeInstanceOf(ManagementReviewPackError);
 });
 
 function resetTables() {

@@ -89,6 +89,7 @@ function sumCoverage(cells: readonly Coverage[]): Coverage {
 class InvalidBoardScopeError extends Error {}
 
 export async function loadOverviewForContext(context: OrganisationContext, searchParams: OverviewSearchParams, db: Prisma.TransactionClient = prisma): Promise<OverviewModel> {
+requireCarbonView(context);
 async function computeCoverageWindow(
   context: OrganisationContext,
   siteIds: readonly string[],
@@ -492,7 +493,12 @@ const ports: OverviewPorts<OrganisationContext> = {
  * Vitest's node environment, same documented exception as live-nav.ts).
  */
 async function load(): Promise<OverviewModel> {
-  const parsed = resolveScopeParams(searchParams);
+  let selected = searchParams;
+  if (!selected.from && !selected.to && !selected.siteId && await isVerifiedSyntheticOrganisation(context.organisationId, db)) {
+    const latest = await db.carbonSourcePeriodObligation.findFirst({ where: { organisationId: context.organisationId }, orderBy: { month: "desc" }, select: { month: true } });
+    if (latest) selected = { from: `${latest.month.slice(0, 4)}-01`, to: latest.month };
+  }
+  const parsed = resolveScopeParams(selected);
   if (parsed.siteId) await requireSiteInScope(context, parsed.siteId, db); // an invalid or foreign selected site is rejected, never broadened to all sites
   const scope: BoardScope = {
     organisationId: context.organisationId,

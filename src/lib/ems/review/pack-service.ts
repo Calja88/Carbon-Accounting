@@ -57,7 +57,10 @@ export { TenantOwnershipError };
 export class ManagementReviewPackError extends Error {}
 
 function packConflict(error: unknown): never {
-  if (error instanceof Error && "code" in error && error.code === "P2034") {
+  const failure = error as { code?: string; meta?: { code?: string } } | null;
+  // Prisma wraps a raw SELECT FOR UPDATE serialization failure as P2010,
+  // whereas a model write conflict arrives as P2034. Both transactions rolled back.
+  if (failure?.code === "P2034" || (failure?.code === "P2010" && ["40001", "40P01"].includes(failure.meta?.code ?? ""))) {
     throw new ManagementReviewPackError("Review inputs changed concurrently; reload before generating or issuing again.");
   }
   throw error;

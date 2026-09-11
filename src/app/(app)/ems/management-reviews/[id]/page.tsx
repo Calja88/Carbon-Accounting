@@ -45,7 +45,10 @@ export default async function ManagementReviewDetailPage({ params }: { params: P
         attendees: { include: { person: true } },
       },
     }),
-    getManagementReviewPack(context, review.id),
+    getManagementReviewPack(context, review.id).catch((error) => {
+      if (error instanceof PermissionDeniedError) notFound();
+      throw error;
+    }),
     listManagementReviewDecisions(context, review.id),
     listManagementReviewMinuteRevisions(context, review.id),
     prisma.organisationMembership.findMany({
