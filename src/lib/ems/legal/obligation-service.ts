@@ -275,10 +275,25 @@ export async function createComplianceObligation(context: OrganisationContext, i
         effectiveFrom: input.effectiveFrom ?? null,
         reviewDueDate: input.reviewDueDate ?? null,
         preparedByUserId: input.actorUserId,
-        scopes: { create: scopes.map((scope) => ({ organisationId: txCtx.organisationId, ...scope })) },
-        controlLinks: { create: controlIds.map((controlId) => ({ organisationId: txCtx.organisationId, controlId })) },
       },
     });
+    // Separate createMany calls, not nested writes — this model's
+    // `obligationVersion`/`control` relations are themselves keyed on
+    // [organisationId, ...], and Prisma's nested-create input for a
+    // to-many relation under a compound-keyed parent relation excludes
+    // organisationId even though the sibling `organisation` relation still
+    // needs it (confirmed via real-Postgres CI: "Unknown argument
+    // `organisationId`" on the nested write).
+    if (scopes.length > 0) {
+      await tx.complianceObligationVersionScope.createMany({
+        data: scopes.map((scope) => ({ organisationId: txCtx.organisationId, obligationVersionId: version.id, ...scope })),
+      });
+    }
+    if (controlIds.length > 0) {
+      await tx.complianceObligationVersionControl.createMany({
+        data: controlIds.map((controlId) => ({ organisationId: txCtx.organisationId, obligationVersionId: version.id, controlId })),
+      });
+    }
 
     await recordAuditEvent(tx, txCtx, {
       eventType: "compliance_obligation_version.created",

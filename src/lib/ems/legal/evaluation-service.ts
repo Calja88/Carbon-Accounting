@@ -255,7 +255,7 @@ export async function createComplianceEvaluation(context: OrganisationContext, i
   const obligationVersions = await resolveObligationVersionsForScope(ctx, scopes);
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
-    const evaluation = await tx.complianceEvaluation.create({
+    const created = await tx.complianceEvaluation.create({
       data: {
         organisationId: txCtx.organisationId,
         programmeId: programme.id,
@@ -263,16 +263,23 @@ export async function createComplianceEvaluation(context: OrganisationContext, i
         periodEnd: input.periodEnd,
         leadMembershipId: input.leadMembershipId,
         createdByUserId: input.actorUserId,
-        scopes: { create: scopes.map((scope) => ({ organisationId: txCtx.organisationId, ...scope })) },
-        items: {
-          create: obligationVersions.map((version) => ({
-            organisationId: txCtx.organisationId,
-            obligationVersionId: version.id,
-          })),
-        },
       },
-      include: { scopes: true, items: true },
     });
+    // Separate createMany calls, not nested writes — see
+    // applicability-service.ts's createApplicabilityAssessment for why
+    // (compound-keyed parent relation excludes organisationId from the
+    // nested-create input; confirmed via real-Postgres CI).
+    if (scopes.length > 0) {
+      await tx.complianceEvaluationScope.createMany({
+        data: scopes.map((scope) => ({ organisationId: txCtx.organisationId, evaluationId: created.id, ...scope })),
+      });
+    }
+    if (obligationVersions.length > 0) {
+      await tx.complianceEvaluationItem.createMany({
+        data: obligationVersions.map((version) => ({ organisationId: txCtx.organisationId, evaluationId: created.id, obligationVersionId: version.id })),
+      });
+    }
+    const evaluation = await tx.complianceEvaluation.findUniqueOrThrow({ where: { id: created.id }, include: { scopes: true, items: true } });
 
     await recordAuditEvent(tx, txCtx, {
       eventType: "compliance_evaluation.created",
