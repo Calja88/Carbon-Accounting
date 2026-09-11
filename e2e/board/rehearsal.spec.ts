@@ -81,6 +81,7 @@ test("invalid review and unauthenticated export do not disclose a pack", async (
 });
 
 test("connected sources and evidence bytes match the persistent manifest", async ({ page }) => {
+  test.setTimeout(180000);
   await login(page, "sustainability-lead");
   await page.goto(routes.nonconformity);
   const nc = await prisma.nonconformity.findUniqueOrThrow({ where: { id: manifest.ids.nonconformityId } });
@@ -92,6 +93,22 @@ test("connected sources and evidence bytes match the persistent manifest", async
     }
     expect((await page.goto(`/ems/controls?record=${control.id}`))?.ok()).toBe(true);
   }
+  expect((await page.goto(`/ems/legal/obligations?record=${manifest.connectedChain.obligationVersionId}`))?.ok()).toBe(true);
+  await expect(page.locator(`a[href="${routes.nonconformity}"]`).first()).toBeVisible();
+  expect((await page.goto(`/ems/audits/${manifest.connectedChain.auditId}`))?.ok()).toBe(true);
+  for (const document of manifest.sourceDocuments) {
+    expect((await page.goto(`/documents/${document.id}`))?.ok()).toBe(true);
+    const response = await page.request.get(`/api/documents/${document.id}/file`);
+    expect(response.ok()).toBe(true);
+    const bytes = await response.body();
+    expect(bytes.length).toBe(document.byteSize);
+    expect(createHash("sha256").update(bytes).digest("hex")).toBe(document.sha256);
+    expect(response.headers()["content-type"]).toContain(document.mimeType);
+    expect(response.headers()["content-disposition"]).toContain(document.filename);
+    const calculation = document.activityEntries[0]?.calculations[0];
+    expect(calculation).toBeTruthy();
+    expect((await page.goto(`/calculations/${calculation.id}`))?.ok()).toBe(true);
+  }
   for (const id of Object.values(manifest.ids.evidenceIds) as string[]) {
     const evidence = await prisma.evidenceObject.findUniqueOrThrow({ where: { id } });
     const response = await page.request.get(`/api/ems/evidence/${id}`);
@@ -100,6 +117,7 @@ test("connected sources and evidence bytes match the persistent manifest", async
     expect(bytes.length).toBe(evidence.byteSize);
     expect(createHash("sha256").update(bytes).digest("hex")).toBe(evidence.checksumSha256);
     expect(response.headers()["content-type"]).toContain(evidence.mimeType);
+    expect(response.headers()["content-disposition"]).toContain(evidence.filename);
   }
 });
 

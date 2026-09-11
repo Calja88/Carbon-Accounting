@@ -252,7 +252,7 @@ export async function generateManagementReviewPack(context: OrganisationContext,
     });
 
     return pack;
-  }, { isolationLevel: "RepeatableRead", timeout: 30000 }).catch(packConflict);
+  }, { isolationLevel: "RepeatableRead", timeout: 120000 }).catch(packConflict);
 }
 
 export async function issueManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string, board?: BoardPackSource) {
@@ -337,7 +337,7 @@ export async function issueManagementReviewPack(context: OrganisationContext, re
     });
 
     return issued;
-  }, { isolationLevel: "RepeatableRead", timeout: 30000 }).catch(packConflict);
+  }, { isolationLevel: "RepeatableRead", timeout: 120000 }).catch(packConflict);
 }
 
 export async function getManagementReviewPack(context: OrganisationContext, reviewId: string) {

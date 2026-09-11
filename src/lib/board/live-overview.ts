@@ -89,6 +89,9 @@ function sumCoverage(cells: readonly Coverage[]): Coverage {
 class InvalidBoardScopeError extends Error {}
 
 export async function loadOverviewForContext(context: OrganisationContext, searchParams: OverviewSearchParams, db: Prisma.TransactionClient = prisma): Promise<OverviewModel> {
+  // Reuse reads within this one authorised request and database snapshot.
+  let currentAnalytics: ReturnType<typeof buildAnalyticsSnapshot> | undefined;
+  let attentionResult: ReturnType<OverviewPorts<OrganisationContext>["attention"]> | undefined;
 requireCarbonView(context);
 async function computeCoverageWindow(
   context: OrganisationContext,
@@ -386,7 +389,7 @@ async function carbon(context: OrganisationContext, scope: BoardScope): ReturnTy
   // never widen past the caller's own accessible-site set.
   const restrictToSiteIds = scope.siteIds.length === 1 ? scope.siteIds : undefined;
   const [currentSnapshot, previousSnapshot] = await Promise.all([
-    buildAnalyticsSnapshot(context, periodStart, periodEnd, restrictToSiteIds, db),
+    currentAnalytics ??= buildAnalyticsSnapshot(context, periodStart, periodEnd, restrictToSiteIds, db),
     buildAnalyticsSnapshot(context, prior.periodStart, prior.periodEnd, restrictToSiteIds, db),
   ]);
   const current = toAnalyticsWindow(currentSnapshot), previous = toAnalyticsWindow(previousSnapshot);
@@ -436,7 +439,7 @@ async function attention(context: OrganisationContext, scope: BoardScope): Retur
         ? "EMS attention is organisation-wide and cannot be narrowed to one selected site — showing carbon attention for the selected site only."
         : null;
   const [analyticsWindow, coverage, obligations, effectivenessItems, actionResult] = await Promise.all([
-    buildAnalyticsSnapshot(context, periodStart, periodEnd, restrictToSiteIds, db).then(toAnalyticsWindow),
+    (currentAnalytics ??= buildAnalyticsSnapshot(context, periodStart, periodEnd, restrictToSiteIds, db)).then(toAnalyticsWindow),
     computeCoverageWindow(context, [], periodStart, periodEnd), // recomputed below once sites are known
     emsAttentionAllowed && hasPermission(context, "ems.view") ? listOverdueOrUnevaluatedObligations(context, db) : Promise.resolve([]),
     emsAttentionAllowed && hasPermission(context, "ems.view") ? effectivenessReviewAttention(context) : Promise.resolve([]),
@@ -464,7 +467,7 @@ async function attention(context: OrganisationContext, scope: BoardScope): Retur
 
 async function priorities(context: OrganisationContext, scope: BoardScope): ReturnType<OverviewPorts<OrganisationContext>["priorities"]> {
   // Deliberately derived from the same authorized attention read rather than a second query set — a genuine top-3 summary, never fabricated copy.
-  const result = await attention(context, scope);
+  const result = await ports.attention(context, scope);
   if (result.state === "unavailable") return result;
   return {
     state: "ready", asOf: result.asOf,
@@ -477,7 +480,7 @@ async function priorities(context: OrganisationContext, scope: BoardScope): Retu
 }
 
 const ports: OverviewPorts<OrganisationContext> = {
-  authorizeScope, header, carbon, attention, priorities,
+  authorizeScope, header, carbon, attention: (context, scope) => attentionResult ??= attention(context, scope), priorities,
   sectionFailure(section) {
     // Safe operational metadata only — never the underlying exception, credentials or evidence bytes.
     console.error(`[board-overview] section unavailable: ${section}`);

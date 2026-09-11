@@ -3,6 +3,15 @@ $ErrorActionPreference = 'Stop'
 Set-Location (Resolve-Path (Join-Path $PSScriptRoot '../..'))
 if (-not (Test-Path '.env.board-demo') -or -not (Test-Path '.next/BUILD_ID')) { throw 'Configure the guarded demo and run pnpm build first.' }
 $node = (Get-Command node -ErrorAction Stop).Source
+# Keep a board session from losing database connections to Windows idle sleep.
+# This request lasts only for this launcher process; it does not change power settings.
+Add-Type @'
+using System.Runtime.InteropServices;
+public static class BoardDemoPower {
+    [DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint flags);
+}
+'@
+[BoardDemoPower]::SetThreadExecutionState([uint32]2147483649) | Out-Null
 # Verifies identity, READY state, source bytes and replay before exposing a port.
 & $node --env-file=.env.board-demo --import tsx scripts/board-demo/run.ts
 if ($LASTEXITCODE -ne 0) { throw 'Demo verification failed; no server or tunnel started.' }
@@ -33,6 +42,7 @@ try {
   while (-not $serverProcess.HasExited) { Start-Sleep -Seconds 1 }
   if ($serverProcess.ExitCode -ne 0) { throw 'Demo server exited; inspect artifacts/board-runtime/server.log.' }
 } finally {
+  [BoardDemoPower]::SetThreadExecutionState([uint32]2147483648) | Out-Null
   if ($serverProcess -and -not $serverProcess.HasExited) { Stop-Process -Id $serverProcess.Id }
   if ($tunnelProcess -and -not $tunnelProcess.HasExited) { Stop-Process -Id $tunnelProcess.Id }
 }

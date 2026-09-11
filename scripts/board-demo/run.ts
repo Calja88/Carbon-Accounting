@@ -25,6 +25,14 @@ async function main() {
   const pack = await prisma.managementReviewPack.findFirstOrThrow({ where: { id: ids.managementPackId, organisationId: org, status: "ISSUED" } });
   const nc = await prisma.nonconformity.findFirstOrThrow({ where: { id: ids.nonconformityId, organisationId: org }, include: { sourceLinks: true, correctiveActions: true } });
   const links = await prisma.managementReviewInputSnapshot.findMany({ where: { packId: pack.id } });
+  if (links.length !== 3 || links.some((link) => !link.sourceVersionLabel || link.isStale)) throw new Error("Expected three current, revision-pinned review inputs");
+  const control = await prisma.operationalControl.findUniqueOrThrow({ where: { id: nc.operationalControlId! }, include: { aspectLinks: true } });
+  const finding = await prisma.auditFinding.findUniqueOrThrow({ where: { id: nc.sourceId! } });
+  const evaluationLink = nc.sourceLinks.find((s) => s.sourceType === "COMPLIANCE_EVALUATION_ITEM")!;
+  if (!evaluationLink?.sourceId) throw new Error("Linked evaluation item missing");
+  const evaluationItem = await prisma.complianceEvaluationItem.findUniqueOrThrow({ where: { id: evaluationLink.sourceId }, include: { obligationVersion: true } });
+  const evidence = await prisma.evidenceObject.findMany({ where: { organisationId: org }, select: { id: true, filename: true, mimeType: true, byteSize: true, checksumSha256: true } });
+  const sourceDocuments = await prisma.sourceDocument.findMany({ where: { organisationId: org, id: { in: [ids.invoiceSourceDocumentId, ids.meterReadingSourceDocumentId] } }, select: { id: true, filename: true, mimeType: true, byteSize: true, sha256: true, activityEntries: { select: { id: true, calculations: { select: { id: true } } } } } });
   const members = await prisma.organisationMembership.findMany({ where: { organisationId: org }, include: { user: true } });
   const personas = Object.fromEntries(members.map((m) => [m.user.name!.replace("BOARD-1 ", ""), { userId: m.userId, membershipId: m.id, email: m.user.email, status: m.status }]));
   const manifest = {
@@ -33,6 +41,9 @@ async function main() {
     generatedAt: new Date().toISOString(), status: "READY", digest: lease.digest, ids: lease.identityMap, personas,
     routes: { overview: "/?from=2026-01&to=2026-08", carbon: "/carbon?from=2026-01&to=2026-08", attention: "/attention?from=2026-01&to=2026-08", nonconformity: `/ems/nonconformities/${nc.id}`, lca: `/assessments/${ids.lcaAssessmentId}/scenarios`, pack: `/ems/management-reviews/${ids.managementReviewId}/pack`, download: `/ems/management-reviews/${ids.managementReviewId}/pack/download` },
     sources: nc.sourceLinks.map((s) => ({ type: s.sourceType, id: s.sourceId })),
+    connectedChain: { aspectIds: control.aspectLinks.map((a) => a.aspectId), controlId: control.id, requirementId: evaluationItem.obligationVersion.otherRequirementSourceId, obligationId: evaluationItem.obligationVersion.obligationId, obligationVersionId: evaluationItem.obligationVersionId, evaluationId: evaluationItem.evaluationId, evaluationItemId: evaluationItem.id, auditId: finding.auditId, findingId: finding.id },
+    evidence,
+    sourceDocuments,
     reviewInputs: links.map((s) => ({ definition: s.inputDefinitionKey, type: s.sourceType, id: s.sourceRecordId, revision: s.sourceVersionLabel })),
     frozenChecksum: pack.checksumSha256, cutoffDate: pack.cutoffDate,
     liveTransition: { nonconformityStatus: nc.status, reviewCycle: nc.reviewCycle, actions: nc.correctiveActions.map((a) => ({ id: a.id, description: a.description, status: a.status })) },
