@@ -11,7 +11,27 @@
  * renders from it.
  */
 import { randomUUID } from "node:crypto";
-import { beforeAll, describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect, vi } from "vitest";
+
+// live-lca.ts imports @/lib/lca/permissions, which imports
+// requireOrganisationContext from @/lib/organisation/session purely to
+// support the separate, auth-touching getLcaContext() helper this test
+// never calls — but that module-level import still transitively pulls in
+// next-auth, which fails to resolve under Vitest's node environment (the
+// same documented exception as live-nav.ts/live-overview.ts/live-records.ts/
+// live-lca.ts's own top comment). Stub only the session module; every
+// permission check this test actually exercises (canViewLca et al.) still
+// runs its real, unmocked logic against real hasPermission/database grants.
+vi.mock("@/lib/organisation/session", async () => {
+  const { OrganisationAccessError } = await import("@/lib/organisation/context");
+  return {
+    OrganisationAccessError,
+    requireOrganisationContext: async () => {
+      throw new Error("requireOrganisationContext should never be called in this real-Postgres test");
+    },
+  };
+});
+
 import { LcaLifecycleStage, LcaItemType, LcaDataType, LcaEmissionClassification, LcaAllocationMethod, LcaFactorSelectionMode } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resolveOrganisationContext, type OrganisationContext } from "@/lib/organisation/context";
