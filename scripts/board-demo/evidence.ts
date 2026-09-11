@@ -2,11 +2,9 @@ import { createHash } from "node:crypto";
 import { BOARD1 } from "./board1";
 /** Actual UTF-8 bytes, not fake hashes or empty blobs. Convert to PDF only if a real file is generated. */
 export function buildSyntheticEvidence() {
-  // "invoice"/"meter-reading" are NOT generic placeholders here: live-seed-port.ts
-  // generates those two as real SourceDocument rows from the actual persisted
-  // ActivityEntry they document (Checkpoint B fix 7), never from this
-  // fixed-text generator.
   const records = [
+    ["invoice", "Synthetic energy invoice", "Period: January 2026. Fictional metered energy transaction for fixture reconciliation."],
+    ["meter-reading", "Synthetic meter reading", "A fictional observation used to trace a demo activity entry."],
     ["inspection", "Containment inspection checklist", "Checks: containment clear; condition recorded; inspection owner named. DEM-CTL-002 revision 2."],
     ["procedure", "Containment inspection procedure revision 2", "Demo Site Manager performs monthly checks and records condition, owner and review evidence."],
     ["evaluation", "Internal requirement evaluation note", "DEM-OBL-004 revision 2. Review the supplied inspection records. This is a fictional internal requirement, not legal advice."],
