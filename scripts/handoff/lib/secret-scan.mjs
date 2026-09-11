@@ -257,6 +257,32 @@ export function isAllowlistedForSecretScan(relPath) {
  * credential-like, connection-string, key, token, or private-key material
  * appears anywhere in it (the disposable-database URL itself comes only
  * from `assertDisposableDatabase()` in ./disposable, never a literal here).
+ *
+ * tests/board-product/bd08-board1-seed.test.ts,
+ * checkpoint-b-lca-scenarios.test.ts, checkpoint-b-management-pack.test.ts,
+ * checkpoint-b-overview.test.ts (Checkpoint B remediation, board demo
+ * sprint): the same `passwordHash` / `"not-a-login-hash"` fixed, self-
+ * documenting literal already reviewed above for the Checkpoint A suite,
+ * reused verbatim by these later real-Postgres test files' synthetic
+ * membership fixtures — every user they create is likewise `@example.
+ * invalid`/`@example.com`-addressed and discarded with the disposable
+ * database at the end of the CI job; no login ever occurs against it.
+ * `bd08-board1-seed.test.ts` also sets `BOARD_DEMO_PROVISIONING_TOKEN` to
+ * its own local `provisioningToken` variable — a `board1-ci-token-<random
+ * UUID>` string generated fresh per test run (`randomUUID()`, confirmed by
+ * reading the assignment a few lines above), never a hardcoded value; the
+ * matched text is the variable reference itself, not a secret. Each file
+ * confirmed by reading it in full: no other credential-like, connection-
+ * string, key, token, or private-key material appears in any of them.
+ *
+ * tests/board-product/checkpoint-b-seed-guard.test.ts (Checkpoint B
+ * remediation, board demo sprint): a negative-case fixture proving Fix 4's
+ * identity guard — `readConnectedIdentity` must report `disposable: false`
+ * when `BOARD_DEMO_PROVISIONING_TOKEN` does not match the manifest's real
+ * token. The literal `"a-completely-different-token"` exists solely to be
+ * the wrong value in that one assertion; it is never a credential that
+ * grants anything, and is self-documenting as a mismatch fixture. Confirmed
+ * by reading the whole file: no other credential-like content.
  */
 // Built from parts rather than written as literal contiguous strings, same
 // reason as src/lib/__tests__/handoff-secret-scan.test.ts's fixtures: this
@@ -293,6 +319,11 @@ const COOKIE_TEST_SECRET_MATCH = ["NEXTAUTH_SECRET", ' = "test-secret-value-not-
 const CA06_POSTGRES_PASSWORD_MATCH = ["POSTGRES_PASSWORD", ": ca_disposable_only"].join("");
 const CA06_PGPASSWORD_MATCH = ["PGPASSWORD", ": ca_disposable_only"].join("");
 const CA06_POSTGRES_TEST_USER_MATCH = ["passwordHash", ': "not-a-login-hash"'].join("");
+const BD08_PROVISIONING_TOKEN_VAR_MATCH = ["BOARD_DEMO_PROVISIONING_TOKEN", " = provisioningToken"].join("");
+const CHECKPOINT_B_SEED_GUARD_MISMATCH_TOKEN_MATCH = [
+  "BOARD_DEMO_PROVISIONING_TOKEN",
+  ' = "a-completely-different-token"',
+].join("");
 
 const REVIEWED_SAFE_CREDENTIAL_MATCHES = new Map([
   ["scripts/rls-spike/setup-test-db.sh", new Set([RLS_SPIKE_OWNER_MATCH, RLS_SPIKE_APP_MATCH])],
@@ -300,6 +331,14 @@ const REVIEWED_SAFE_CREDENTIAL_MATCHES = new Map([
   ["tests/checkpoint-a/postgres.test.ts", new Set([CA06_POSTGRES_TEST_USER_MATCH])],
   ["tests/board-product/bd06-chain.test.ts", new Set([CA06_POSTGRES_TEST_USER_MATCH])],
   ["tests/board-product/bd08-fixes.test.ts", new Set([CA06_POSTGRES_TEST_USER_MATCH])],
+  ["tests/board-product/bd08-board1-seed.test.ts", new Set([BD08_PROVISIONING_TOKEN_VAR_MATCH])],
+  ["tests/board-product/checkpoint-b-lca-scenarios.test.ts", new Set([CA06_POSTGRES_TEST_USER_MATCH])],
+  ["tests/board-product/checkpoint-b-management-pack.test.ts", new Set([CA06_POSTGRES_TEST_USER_MATCH])],
+  ["tests/board-product/checkpoint-b-overview.test.ts", new Set([CA06_POSTGRES_TEST_USER_MATCH])],
+  [
+    "tests/board-product/checkpoint-b-seed-guard.test.ts",
+    new Set([CHECKPOINT_B_SEED_GUARD_MISMATCH_TOKEN_MATCH]),
+  ],
   ["src/app/invite/[token]/actions.ts", new Set([INVITE_TOKEN_HASH_ASSIGNMENT_MATCH])],
   ["src/app/invite/[token]/page.tsx", new Set([INVITE_TOKEN_HASH_ASSIGNMENT_MATCH])],
   [
