@@ -59,7 +59,7 @@ import { createAssessment } from "@/lib/lca/assessment-service";
 import { upsertProcess, upsertInventoryItem, assignFactor } from "@/lib/lca/model-service";
 import { runCalculation, getLatestRun, runTotals } from "@/lib/lca/calculation-service";
 import { cloneAssessment } from "@/lib/lca/assessment-service";
-import { scheduleManagementReview, startManagementReviewInputCollection } from "@/lib/ems/review/review-service";
+import { scheduleManagementReview, startManagementReviewInputCollection, upsertManagementReviewInputDefinition, linkManagementReviewInput } from "@/lib/ems/review/review-service";
 import { generateBoardManagementPack, issueBoardManagementPack } from "@/lib/board/live-management-pack";
 import { createOtherRequirementSource } from "@/lib/ems/legal/other-requirement-service";
 import {
@@ -166,7 +166,7 @@ export const FIXTURE_ORGANISATION_SLUG_PREFIX = "board-1-";
  * `existingFixture()` below for how a mismatch is handled — never by
  * resetting or reinterpreting the old fixture, only by refusing it.
  */
-const FIXTURE_IMPLEMENTATION_REVISION = 2;
+const FIXTURE_IMPLEMENTATION_REVISION = 3;
 
 /**
  * Every id `verifyAllInvariants`/`createImprovementChain`/etc. need to
@@ -1624,8 +1624,10 @@ export class LiveSeedPort implements DemoSeedPort {
       reference: "BOARD1-MR-2026-Q3",
       periodStart: new Date("2026-01-01"),
       periodEnd: new Date("2026-08-31"),
-      cutoffDate: new Date("2026-08-31"),
-      scheduledDate: new Date("2026-09-08"),
+      // Carbon's reporting period stays Jan–Aug; EMS includes the records
+      // actually issued before this snapshot. Never backdate domain events.
+      cutoffDate: new Date(),
+      scheduledDate: new Date(),
       chairMembershipId: owner.membershipId,
       coordinatorMembershipId: owner.membershipId,
       agendaTemplateVersionId: version.id,
@@ -1634,11 +1636,16 @@ export class LiveSeedPort implements DemoSeedPort {
     this.managementReviewId = review.id;
     await startManagementReviewInputCollection(owner, review.id, owner.userId);
 
-    // Input links require a pre-existing active ManagementReviewInputDefinition
-    // (organisation-configured input catalogue) — out of BD08's scope to add.
-    // A pack with zero linked inputs is still a genuine, real snapshot (the
-    // same shape the pack-service test suite already exercises), not a
-    // partial/fake one.
+    const auditReport = await prisma.auditReportRevision.findFirstOrThrow({ where: { organisationId: owner.organisationId, status: "ISSUED" } });
+    const evaluation = await prisma.complianceEvaluation.findFirstOrThrow({ where: { organisationId: owner.organisationId, status: "ISSUED" } });
+    for (const [key, sourceType, sourceRecordId] of [
+      ["board-audit", "AUDIT_REPORT", auditReport.id],
+      ["board-compliance", "COMPLIANCE_EVALUATION", evaluation.id],
+      ["board-capa", "CORRECTIVE_ACTION", this.correctiveActionId!],
+    ] as const) {
+      await upsertManagementReviewInputDefinition(owner, { key, label: key.replace("board-", ""), sourceType, required: true, actorUserId: owner.userId });
+      await linkManagementReviewInput(owner, review.id, { inputDefinitionKey: key, sourceRecordId, actorUserId: owner.userId });
+    }
 
     // Checkpoint B corrective handoff §7: one management-pack lifecycle —
     // the board-sprint's own FrozenBoardPack (contracts.ts, a real Overview
@@ -1660,13 +1667,14 @@ export class LiveSeedPort implements DemoSeedPort {
       reference: LiveSeedPort.BOARD_MANAGEMENT_PACK_REFERENCE,
       overviewWindow: { from: "2026-01", to: "2026-08" },
       actorUserId: owner.userId,
+      lcaScenarioId: this.lcaScenarioId,
       decisions: [
         {
           title: "Close the containment inspection gap",
           rationale: correctiveAction.completionEvidenceNote ?? correctiveAction.description,
           owner: BOARD1.organisation,
           dueDate: correctiveAction.dueDate.toISOString().slice(0, 10),
-          status: correctiveAction.status === "VERIFIED" || correctiveAction.status === "COMPLETED" ? "approved" : "draft",
+          status: "draft", // Completion of an action is not approval of a management decision.
         },
       ],
       sourceRevisions: [

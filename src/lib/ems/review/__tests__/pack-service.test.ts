@@ -100,6 +100,7 @@ vi.mock("@/lib/prisma", () => {
   const managementReviewAiNarrative = simpleModel(tables.aiNarratives, "narrative", { status: "PENDING_REVIEW" });
 
   const prismaClient = {
+    $queryRaw: vi.fn(async () => []),
     managementReview,
     managementReviewAttendee,
     managementReviewInputLink,

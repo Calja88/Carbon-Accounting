@@ -649,12 +649,12 @@ export interface OverdueOrUnevaluatedObligation {
  * (its most recent item, if any, is still NOT_EVALUATED). Read-only — this
  * is visibility, not a gate on anything.
  */
-export async function listOverdueOrUnevaluatedObligations(context: OrganisationContext): Promise<OverdueOrUnevaluatedObligation[]> {
+export async function listOverdueOrUnevaluatedObligations(context: OrganisationContext, db: Prisma.TransactionClient = prisma): Promise<OverdueOrUnevaluatedObligation[]> {
   requirePermission(context, "ems.view");
   const ctx = toTenantRepositoryContext(context);
   const now = new Date();
 
-  const activeVersions = await prisma.complianceObligationVersion.findMany({
+  const activeVersions = await db.complianceObligationVersion.findMany({
     where: tenantWhere(ctx, { status: "ACTIVE" as const }),
     include: {
       evaluationItems: {

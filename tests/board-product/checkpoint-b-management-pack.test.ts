@@ -21,7 +21,7 @@ import {
   getBoardManagementPack,
   type GenerateBoardManagementPackInput,
 } from "@/lib/board/live-management-pack";
-import { ManagementReviewPackError } from "@/lib/ems/review/pack-service";
+import { ManagementReviewPackError, generateManagementReviewPack, issueManagementReviewPack } from "@/lib/ems/review/pack-service";
 import { scheduleManagementReview, startManagementReviewInputCollection } from "@/lib/ems/review/review-service";
 import { createNonconformityFromSource, recordContainment } from "@/lib/ems/nonconformity/nonconformity-service";
 import { assertDisposableDatabase } from "../checkpoint-a/disposable";
@@ -92,6 +92,16 @@ describe("Checkpoint B fix 8 — the board management pack (FrozenBoardPack) is 
     expect(pack!.decisions.length).toBeGreaterThan(0);
     expect(pack!.sourceRevisions.length).toBeGreaterThan(0);
     expect(pack!.snapshot.carbon.state).toBe("ready"); // a real Overview carbon snapshot, not a stub
+    expect(pack!.inputs).toHaveLength(3);
+    expect(pack!.inputs!.every((input) => input.revision && input.sourceRecordId)).toBe(true);
+    expect(pack!.lca?.comparable).toBe(true);
+    expect(pack!.lca?.baseline.kgPerUnit).toBeCloseTo(0.120, 6);
+    expect(pack!.lca?.scenario.kgPerUnit).toBeCloseTo(0.102, 6);
+    const snapshots = await prisma.managementReviewInputSnapshot.findMany({ where: { packId: pack!.id } });
+    for (const snapshot of snapshots) {
+      const definition = await prisma.managementReviewInputDefinition.findFirstOrThrow({ where: { organisationId: org.id, key: snapshot.inputDefinitionKey } });
+      expect(snapshot.sourceType).toBe(definition.sourceType);
+    }
 
     // The one management pack — never a second standalone BoardManagementPack row.
     const legacyRows = await prisma.boardManagementPack.count({ where: { organisationId: org.id } });
@@ -156,5 +166,54 @@ describe("Checkpoint B fix 8 — generate/issue concurrency", () => {
     const rejected = results.filter((r) => r.status === "rejected");
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
+    const row = await prisma.managementReviewPack.findFirstOrThrow({ where: { reviewId } });
+    expect(await prisma.auditEvent.count({ where: { resourceId: row.id, eventType: "management_review_pack.issued" } })).toBe(1);
+  });
+
+  it("overlapping generate and issue serialize, with no losing generation artefact", async () => {
+    const org = await prisma.organisation.create({ data: { name: "Synthetic overlapping pack", slug: `overlap-${randomUUID()}` } });
+    const owner = await membership(org.id, "owner");
+    const reviewId = await reviewInInputCollection(owner, `OVERLAP-${randomUUID()}`);
+    const draft = await generateManagementReviewPack(owner, reviewId, owner.userId);
+    let release!: () => void;
+    let entered!: () => void;
+    const paused = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const issue = issueManagementReviewPack(owner, reviewId, owner.userId, async () => {
+      entered(); await paused;
+      return { reference: "overlap", overviewWindow: {}, snapshot: {}, sourceRevisions: [], decisions: [] };
+    });
+    await started;
+    const generate = generateManagementReviewPack(owner, reviewId, owner.userId);
+    // Attach rejection handling before releasing the winner.
+    const settled = Promise.allSettled([issue, generate]);
+    release();
+    const results = await settled;
+    expect(results[0].status).toBe("fulfilled");
+    expect(results[1].status).toBe("rejected");
+    expect(await prisma.auditEvent.count({ where: { resourceId: draft.id, eventType: "management_review_pack.generated" } })).toBe(1);
+    expect(await prisma.auditEvent.count({ where: { resourceId: draft.id, eventType: "management_review_pack.issued" } })).toBe(1);
+  });
+
+  it("an input commit during issue cannot mix board reads, input payload and frozen input rows", async () => {
+    const org = await prisma.organisation.create({ data: { name: "Synthetic consistent snapshot", slug: `snapshot-${randomUUID()}` } });
+    const owner = await membership(org.id, "owner");
+    const reviewId = await reviewInInputCollection(owner, `SNAPSHOT-${randomUUID()}`);
+    const link = await prisma.managementReviewInputLink.create({ data: { organisationId: org.id, reviewId, inputDefinitionKey: "probe", sourceType: "OTHER", sourceRecordId: "probe", sourceVersionLabel: "before", summary: { value: "before" }, linkedByMembershipId: owner.membershipId } });
+    await generateManagementReviewPack(owner, reviewId, owner.userId);
+    const issued = await issueManagementReviewPack(owner, reviewId, owner.userId, async (tx) => {
+      const before = await tx.managementReviewInputLink.findUniqueOrThrow({ where: { id: link.id } });
+      // Independent committed writer, after this transaction has read its snapshot.
+      await prisma.managementReviewInputLink.update({ where: { id: link.id }, data: { sourceVersionLabel: "after", summary: { value: "after" } } });
+      const after = await tx.managementReviewInputLink.findUniqueOrThrow({ where: { id: link.id } });
+      expect(after.summary).toEqual(before.summary);
+      return { reference: "snapshot", overviewWindow: {}, snapshot: before.summary, sourceRevisions: [], decisions: [] };
+    });
+    const payload = issued.payload as { inputs: { sourceVersionLabel: string }[]; board: { snapshot: { value: string } } };
+    const frozen = await prisma.managementReviewInputSnapshot.findFirstOrThrow({ where: { packId: issued.id } });
+    expect(payload.board.snapshot.value).toBe("before");
+    expect(payload.inputs[0].sourceVersionLabel).toBe("before");
+    expect(frozen.sourceVersionLabel).toBe("before");
+    expect(frozen.summary).toEqual({ value: "before" });
   });
 });

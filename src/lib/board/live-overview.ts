@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { isVerifiedSyntheticOrganisation } from "./demo-identity";
 import { prisma } from "@/lib/prisma";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import { requireCarbonView } from "@/lib/rbac/carbon-access";
@@ -85,6 +86,9 @@ function sumCoverage(cells: readonly Coverage[]): Coverage {
  * group denominator built over an unknown site/month, per the adapter's own
  * `assertCoverageWindow`).
  */
+class InvalidBoardScopeError extends Error {}
+
+export async function loadOverviewForContext(context: OrganisationContext, searchParams: OverviewSearchParams, db: Prisma.TransactionClient = prisma): Promise<OverviewModel> {
 async function computeCoverageWindow(
   context: OrganisationContext,
   siteIds: readonly string[],
@@ -99,7 +103,7 @@ async function computeCoverageWindow(
 
   const cellKey = (siteId: string, month: string) => `${siteId} ${month}`;
 
-  const entryRows = await prisma.activityEntry.findMany({
+  const entryRows = await db.activityEntry.findMany({
     where: tenantWhere(ctx, { siteId: { in: [...siteIds] }, periodStart: { gte: periodStart, lte: periodEnd } }),
     select: { id: true, siteId: true, periodStart: true, status: true },
   });
@@ -111,7 +115,7 @@ async function computeCoverageWindow(
     else entriesByCell.set(key, [row]);
   }
 
-  const obligationRows = await prisma.carbonSourcePeriodObligation.findMany({
+  const obligationRows = await db.carbonSourcePeriodObligation.findMany({
     where: tenantWhere<Prisma.CarbonSourcePeriodObligationWhereInput>(ctx, {
       siteId: { in: [...siteIds] },
       month: { gte: months[0], lte: months[months.length - 1] },
@@ -133,14 +137,14 @@ async function computeCoverageWindow(
   // valid received/reviewed submission.
   const linkedEntryIds = obligationRows.map((o) => o.submittedActivityEntryId).filter((id): id is string => id !== null);
   const linkedEntries = linkedEntryIds.length
-    ? await prisma.activityEntry.findMany({
+    ? await db.activityEntry.findMany({
         where: tenantWhere(ctx, { id: { in: linkedEntryIds }, siteId: { in: [...siteIds] } }),
         select: { id: true, siteId: true, periodStart: true, status: true, canonicalValue: true, canonicalUnit: true },
       })
     : [];
   const linkedEntryById = new Map(linkedEntries.map((e) => [e.id, e]));
   const linkedCalculations = linkedEntryIds.length
-    ? await prisma.calculation.findMany({
+    ? await db.calculation.findMany({
         where: tenantWhere(ctx, { activityEntryId: { in: linkedEntryIds } }),
         select: { id: true, basis: true, resultKgCo2e: true, activityEntryId: true },
       })
@@ -259,7 +263,7 @@ async function computeScope3CategoryCoverage(
   const screenedCategoriesReason = "Scope 3 screening is not recorded for this reporting boundary.";
   if (siteIds.length === 0) return { quantifiedCategories: 0, screenedCategories: null, screenedCategoriesReason };
   const ctx = toTenantRepositoryContext(context);
-  const quantified = await prisma.calculation.findMany({
+  const quantified = await db.calculation.findMany({
     where: tenantWhere<Prisma.CalculationWhereInput>(ctx, {
       scope: "SCOPE_3",
       scope3Category: { not: null },
@@ -287,7 +291,7 @@ async function computeMarketBasedAvailable(
 ): Promise<boolean> {
   if (siteIds.length === 0) return false;
   const ctx = toTenantRepositoryContext(context);
-  const count = await prisma.calculation.count({
+  const count = await db.calculation.count({
     where: tenantWhere<Prisma.CalculationWhereInput>(ctx, {
       scope: "SCOPE_2",
       basis: { in: ["MARKET_BASED", "RESIDUAL_MIX"] },
@@ -310,7 +314,7 @@ function obligationAttention(rows: Awaited<ReturnType<typeof listOverdueOrUneval
 /** Nonconformities genuinely awaiting an independent effectiveness decision — distinct from the linked corrective-action work itself. */
 async function effectivenessReviewAttention(context: OrganisationContext): Promise<AttentionItem[]> {
   const ctx = toTenantRepositoryContext(context);
-  const rows = await prisma.nonconformity.findMany({
+  const rows = await db.nonconformity.findMany({
     where: tenantWhere<Prisma.NonconformityWhereInput>(ctx, { status: "EFFECTIVENESS_REVIEW" }),
     select: { id: true, reference: true, statement: true, updatedAt: true, ownerMembershipId: true },
   });
@@ -325,11 +329,11 @@ async function effectivenessReviewAttention(context: OrganisationContext): Promi
 async function correctiveActionAndActionItemAttention(context: OrganisationContext, asOfDate: string): Promise<{ items: AttentionItem[]; counts: { open: number; awaitingVerification: number } }> {
   const ctx = toTenantRepositoryContext(context);
   const [actionItems, correctiveActions] = await Promise.all([
-    prisma.actionItem.findMany({
+    db.actionItem.findMany({
       where: tenantWhere(ctx, {}),
       select: { id: true, title: true, status: true, dueDate: true, owner: { select: { user: { select: { name: true } } } }, programme: { select: { title: true } } },
     }),
-    prisma.correctiveAction.findMany({
+    db.correctiveAction.findMany({
       where: tenantWhere(ctx, {}),
       select: { id: true, description: true, status: true, dueDate: true, sharedActionItemId: true, nonconformityId: true, owner: { select: { user: { select: { name: true } } } } },
     }),
@@ -348,7 +352,7 @@ function resolveScopeParams(raw: OverviewSearchParams): { from: string; to: stri
   return boardPeriodSchema.parse(raw);
 }
 
-class InvalidBoardScopeError extends Error {}
+
 
 async function authorizeScope(context: OrganisationContext, scope: BoardScope): Promise<void> {
   requireCarbonView(context); // fails before any read — a denial never becomes empty success
@@ -356,15 +360,17 @@ async function authorizeScope(context: OrganisationContext, scope: BoardScope): 
 }
 
 async function header(context: OrganisationContext, scope: BoardScope): ReturnType<OverviewPorts<OrganisationContext>["header"]> {
-  const organisation = await prisma.organisation.findUnique({ where: { id: context.organisationId }, select: { name: true } });
+  const organisation = await db.organisation.findUnique({ where: { id: context.organisationId }, select: { name: true } });
   const periodStart = monthStringToDate(scope.from, false), periodEnd = monthStringToDate(scope.to, true);
   const prior = priorYear(periodStart, periodEnd);
+  const pack = context.access.mode === "ORGANISATION_WIDE" && hasPermission(context, "ems.view") && hasPermission(context, "lca.view")
+    ? await db.managementReviewPack.findFirst({ where: { organisationId: context.organisationId, status: "ISSUED", payload: { path: ["board", "schemaVersion"], equals: 1 } }, orderBy: { issuedAt: "desc" }, select: { reviewId: true } }) : null;
   return {
     organisationName: organisation?.name ?? context.organisationSlug,
     periodLabel: formatRangeLabel(periodStart, periodEnd),
     previousPeriodLabel: formatRangeLabel(prior.periodStart, prior.periodEnd),
-    synthetic: false, // BD02's guarded-environment identity is not wired to a real disposable database in any environment this branch has run in yet — see Docs/board-sprint/CONTINUITY.md
-    managementPack: null, // /management-packs is BD08-owned and does not exist on this branch yet — no dead link is ever shown
+    synthetic: await isVerifiedSyntheticOrganisation(context.organisationId, db),
+    managementPack: pack ? { label: "Open issued management pack", href: `/ems/management-reviews/${pack.reviewId}/pack` } : null,
   };
 }
 
@@ -379,8 +385,8 @@ async function carbon(context: OrganisationContext, scope: BoardScope): ReturnTy
   // never widen past the caller's own accessible-site set.
   const restrictToSiteIds = scope.siteIds.length === 1 ? scope.siteIds : undefined;
   const [currentSnapshot, previousSnapshot] = await Promise.all([
-    buildAnalyticsSnapshot(context, periodStart, periodEnd, restrictToSiteIds),
-    buildAnalyticsSnapshot(context, prior.periodStart, prior.periodEnd, restrictToSiteIds),
+    buildAnalyticsSnapshot(context, periodStart, periodEnd, restrictToSiteIds, db),
+    buildAnalyticsSnapshot(context, prior.periodStart, prior.periodEnd, restrictToSiteIds, db),
   ]);
   const current = toAnalyticsWindow(currentSnapshot), previous = toAnalyticsWindow(previousSnapshot);
   const permittedSiteIds = current.sites.map((s) => s.siteId);
@@ -429,9 +435,9 @@ async function attention(context: OrganisationContext, scope: BoardScope): Retur
         ? "EMS attention is organisation-wide and cannot be narrowed to one selected site — showing carbon attention for the selected site only."
         : null;
   const [analyticsWindow, coverage, obligations, effectivenessItems, actionResult] = await Promise.all([
-    buildAnalyticsSnapshot(context, periodStart, periodEnd, restrictToSiteIds).then(toAnalyticsWindow),
+    buildAnalyticsSnapshot(context, periodStart, periodEnd, restrictToSiteIds, db).then(toAnalyticsWindow),
     computeCoverageWindow(context, [], periodStart, periodEnd), // recomputed below once sites are known
-    emsAttentionAllowed && hasPermission(context, "ems.view") ? listOverdueOrUnevaluatedObligations(context) : Promise.resolve([]),
+    emsAttentionAllowed && hasPermission(context, "ems.view") ? listOverdueOrUnevaluatedObligations(context, db) : Promise.resolve([]),
     emsAttentionAllowed && hasPermission(context, "ems.view") ? effectivenessReviewAttention(context) : Promise.resolve([]),
     emsAttentionAllowed && (hasPermission(context, "ems.corrective_action.manage") || hasPermission(context, "ems.view"))
       ? correctiveActionAndActionItemAttention(context, scope.asOfDate)
@@ -485,9 +491,9 @@ const ports: OverviewPorts<OrganisationContext> = {
  * requireOrganisationContext()'s auth()/cookies() (unresolvable under
  * Vitest's node environment, same documented exception as live-nav.ts).
  */
-export async function loadOverviewForContext(context: OrganisationContext, searchParams: OverviewSearchParams): Promise<OverviewModel> {
+async function load(): Promise<OverviewModel> {
   const parsed = resolveScopeParams(searchParams);
-  if (parsed.siteId) await requireSiteInScope(context, parsed.siteId); // an invalid or foreign selected site is rejected, never broadened to all sites
+  if (parsed.siteId) await requireSiteInScope(context, parsed.siteId, db); // an invalid or foreign selected site is rejected, never broadened to all sites
   const scope: BoardScope = {
     organisationId: context.organisationId,
     siteIds: parsed.siteId ? [parsed.siteId] : [],
@@ -495,6 +501,9 @@ export async function loadOverviewForContext(context: OrganisationContext, searc
     asOfDate: new Date().toISOString().slice(0, 10), // no guarded synthetic environment is wired in any environment this branch has run in — the real date is always used
   };
   return loadOverview(ports, context, scope);
+}
+
+return load();
 }
 
 export { InvalidBoardScopeError };

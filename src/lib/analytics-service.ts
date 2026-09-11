@@ -117,9 +117,10 @@ async function loadCalculations(
   periodStart: Date,
   periodEnd: Date,
   restrictToSiteIds?: readonly string[],
+  db: Prisma.TransactionClient = prisma,
 ): Promise<CalcWithEntry[]> {
   const ctx = toTenantRepositoryContext(context);
-  return prisma.calculation.findMany({
+  return db.calculation.findMany({
     where: tenantWhere<Prisma.CalculationWhereInput>(ctx, {
       activityEntry: {
         periodStart: { gte: periodStart, lte: periodEnd },
@@ -234,6 +235,7 @@ export async function buildAnalyticsSnapshot(
   periodEnd: Date,
   /** Narrows the already-authorized accessible-site set further (e.g. a caller's explicit single-site selection). Never widens it — always ANDed with accessibleSiteFilter/accessibleActivityEntryFilter, never a substitute for them. */
   restrictToSiteIds?: readonly string[],
+  db: Prisma.TransactionClient = prisma,
 ): Promise<AnalyticsSnapshot> {
   requireCarbonView(context);
   const previous = previousYearPeriod(periodStart, periodEnd);
@@ -242,17 +244,17 @@ export async function buildAnalyticsSnapshot(
   const activityEntrySiteIdFilter = restrictToSiteIds ? { siteId: { in: [...restrictToSiteIds] } } : {};
 
   const [currentCalcs, previousCalcs, sites, awaitingFactorCount, flaggedCount] = await Promise.all([
-    loadCalculations(context, periodStart, periodEnd, restrictToSiteIds),
-    loadCalculations(context, previous.start, previous.end, restrictToSiteIds),
-    prisma.site.findMany({
+    loadCalculations(context, periodStart, periodEnd, restrictToSiteIds, db),
+    loadCalculations(context, previous.start, previous.end, restrictToSiteIds, db),
+    db.site.findMany({
       where: tenantWhere(ctx, { isActive: true, ...accessibleSiteFilter(context), ...siteIdFilter }),
       include: { entity: true },
       orderBy: [{ entity: { name: "asc" } }, { name: "asc" }],
     }),
-    prisma.activityEntry.count({
+    db.activityEntry.count({
       where: tenantWhere<Prisma.ActivityEntryWhereInput>(ctx, { periodStart: { gte: periodStart, lte: periodEnd }, status: "AWAITING_FACTOR", ...accessibleActivityEntryFilter(context), ...activityEntrySiteIdFilter }),
     }),
-    prisma.activityEntry.count({
+    db.activityEntry.count({
       where: tenantWhere<Prisma.ActivityEntryWhereInput>(ctx, { periodStart: { gte: periodStart, lte: periodEnd }, status: "FLAGGED", ...accessibleActivityEntryFilter(context), ...activityEntrySiteIdFilter }),
     }),
   ]);

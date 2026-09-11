@@ -63,9 +63,9 @@ export function accessibleSupplierFilter(context: OrganisationContext): Prisma.S
 }
 
 /** Loads an LcaAssessment the caller's Organisation owns and is Entity-scoped to, or throws TenantOwnershipError/PermissionDeniedError. */
-export async function requireAssessmentInScope(context: OrganisationContext, assessmentId: string) {
+export async function requireAssessmentInScope(context: OrganisationContext, assessmentId: string, db: Prisma.TransactionClient = prisma) {
   const ctx = toTenantRepositoryContext(context);
-  const assessment = await prisma.lcaAssessment.findFirst({ where: tenantWhere(ctx, { id: assessmentId }) });
+  const assessment = await db.lcaAssessment.findFirst({ where: tenantWhere(ctx, { id: assessmentId }) });
   const owned = assertOwned(ctx, assessment);
   assertEntityAccess(context, owned.entityId);
   return owned;

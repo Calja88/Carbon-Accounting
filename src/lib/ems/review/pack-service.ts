@@ -39,11 +39,10 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { OrganisationContext } from "@/lib/organisation/context";
-import { requirePermission } from "@/lib/rbac/authorize";
+import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
 import {
   findTenantManagementReview,
   findTenantManagementReviewPack,
-  findTenantManagementReviewPackByReviewId,
   findTenantManagementReviewAiNarrative,
   toTenantRepositoryContext,
 } from "@/lib/repositories/ems-repository";
@@ -83,7 +82,10 @@ export interface BoardPackInput {
   snapshot: unknown;
   sourceRevisions: unknown[];
   decisions: unknown[];
+  lca?: unknown;
+  preparedBy?: string;
 }
+type BoardPackSource = BoardPackInput | ((tx: Prisma.TransactionClient) => Promise<BoardPackInput>);
 interface BoardPackSection extends BoardPackInput {
   schemaVersion: typeof BOARD_PACK_SCHEMA_VERSION;
 }
@@ -106,15 +108,15 @@ interface ReviewForPack {
 }
 
 /** Pure, deterministic pack payload builder — same live rows always produce the same object shape/ordering. */
-async function buildPackPayload(ctx: TenantRepositoryContext, review: ReviewForPack, board?: BoardPackInput) {
-  const inputLinks = await prisma.managementReviewInputLink.findMany({
+async function buildPackPayload(tx: Prisma.TransactionClient, ctx: TenantRepositoryContext, review: ReviewForPack, board?: BoardPackInput) {
+  const inputLinks = await tx.managementReviewInputLink.findMany({
     where: tenantWhere(ctx, { reviewId: review.id }),
   });
   const sortedLinks = [...inputLinks].sort(
     (a, b) => compareStrings(a.inputDefinitionKey, b.inputDefinitionKey) || compareStrings(a.sourceRecordId, b.sourceRecordId),
   );
 
-  const attendees = await prisma.managementReviewAttendee.findMany({
+  const attendees = await tx.managementReviewAttendee.findMany({
     where: tenantWhere(ctx, { reviewId: review.id }),
   });
   const sortedAttendees = [...attendees].sort((a, b) => compareStrings(a.personId, b.personId));
@@ -156,23 +158,25 @@ function computeChecksum(payload: unknown): string {
 // Generate (repeatable, DRAFT only) / issue (one-way freeze)
 // ---------------------------------------------------------------------------
 
-export async function generateManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string, board?: BoardPackInput) {
+export async function generateManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string, board?: BoardPackSource) {
   requirePermission(context, MANAGE_PERMISSION);
   const ctx = toTenantRepositoryContext(context);
-  const review = await findTenantManagementReview(ctx, reviewId);
+  return prisma.$transaction(async (tx) => {
+  const txCtx = ctx;
+  await tx.$queryRaw`SELECT "id" FROM "ManagementReview" WHERE "id" = ${reviewId} AND "organisationId" = ${ctx.organisationId} FOR UPDATE`;
+  const review = await tx.managementReview.findFirst({ where: tenantWhere(ctx, { id: reviewId }) });
   if (!review) throw new TenantOwnershipError();
   if (review.status !== "INPUT_COLLECTION") {
     throw new ManagementReviewPackError("A pack can only be generated while the review is in input collection.");
   }
 
-  const existing = await findTenantManagementReviewPackByReviewId(ctx, review.id);
+  const existing = await tx.managementReviewPack.findFirst({ where: tenantWhere(ctx, { reviewId }) });
   if (existing && existing.status === "ISSUED") {
     throw new ManagementReviewPackError("This review's pack has already been issued and cannot be regenerated.");
   }
 
-  const payload = await buildPackPayload(ctx, review, board);
-
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+  const savedBoard = (existing?.payload as { board?: BoardPackInput } | null)?.board;
+  const payload = await buildPackPayload(tx, ctx, review, typeof board === "function" ? await board(tx) : board ?? savedBoard);
     // Checkpoint B fix: the previous unconditional upsert let a delayed
     // generate call overwrite a payload issueManagementReviewPack had
     // already frozen, if the issue committed between this function's
@@ -238,26 +242,28 @@ export async function generateManagementReviewPack(context: OrganisationContext,
     });
 
     return pack;
-  });
+  }, { isolationLevel: "RepeatableRead", timeout: 30000 });
 }
 
-export async function issueManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string, board?: BoardPackInput) {
+export async function issueManagementReviewPack(context: OrganisationContext, reviewId: string, actorUserId: string, board?: BoardPackSource) {
   requirePermission(context, MANAGE_PERMISSION);
   const ctx = toTenantRepositoryContext(context);
-  const review = await findTenantManagementReview(ctx, reviewId);
+  return prisma.$transaction(async (tx) => {
+  const txCtx = ctx;
+  await tx.$queryRaw`SELECT "id" FROM "ManagementReview" WHERE "id" = ${reviewId} AND "organisationId" = ${ctx.organisationId} FOR UPDATE`;
+  const review = await tx.managementReview.findFirst({ where: tenantWhere(ctx, { id: reviewId }) });
   if (!review) throw new TenantOwnershipError();
   if (review.status !== "INPUT_COLLECTION") {
     throw new ManagementReviewPackError("Only a review in input collection can have its pack issued.");
   }
 
-  const pack = await findTenantManagementReviewPackByReviewId(ctx, review.id);
+  const pack = await tx.managementReviewPack.findFirst({ where: tenantWhere(ctx, { reviewId }) });
   if (!pack) throw new ManagementReviewPackError("Generate the pack before issuing it.");
   if (pack.status === "ISSUED") throw new ManagementReviewPackError("This pack has already been issued.");
 
-  const payload = await buildPackPayload(ctx, review, board);
-  const inputLinks = await prisma.managementReviewInputLink.findMany({ where: tenantWhere(ctx, { reviewId: review.id }) });
-
-  return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+  const savedBoard = (pack.payload as { board?: BoardPackInput } | null)?.board;
+  const payload = await buildPackPayload(tx, ctx, review, typeof board === "function" ? await board(tx) : board ?? savedBoard);
+  const inputLinks = await tx.managementReviewInputLink.findMany({ where: tenantWhere(ctx, { reviewId: review.id }) });
     // CAS: re-prove DRAFT status inside the transaction rather than trusting
     // the pre-transaction read above (BD08 carried-forward Astra finding —
     // the prior unconditional update let two concurrent issue calls both
@@ -321,7 +327,7 @@ export async function issueManagementReviewPack(context: OrganisationContext, re
     });
 
     return issued;
-  });
+  }, { isolationLevel: "RepeatableRead", timeout: 30000 });
 }
 
 export async function getManagementReviewPack(context: OrganisationContext, reviewId: string) {
@@ -329,13 +335,22 @@ export async function getManagementReviewPack(context: OrganisationContext, revi
   const ctx = toTenantRepositoryContext(context);
   const review = await findTenantManagementReview(ctx, reviewId);
   if (!review) throw new TenantOwnershipError();
-  return prisma.managementReviewPack.findFirst({
+  const pack = await prisma.managementReviewPack.findFirst({
     where: tenantWhere(ctx, { reviewId: review.id }),
     include: {
       inputSnapshots: { orderBy: { inputDefinitionKey: "asc" } },
       aiNarratives: { orderBy: { generatedAt: "desc" } },
     },
   });
+  if (pack && (pack.payload as { board?: unknown } | null)?.board) {
+    requirePermission(context, "carbon.view");
+    requirePermission(context, "lca.view");
+    if (context.access.mode !== "ORGANISATION_WIDE") throw new PermissionDeniedError("ENTITY_NOT_IN_SCOPE");
+  }
+  if (pack?.status === "ISSUED" && pack.checksumSha256 !== computeChecksum(pack.payload)) {
+    throw new ManagementReviewPackError("The issued pack failed its integrity check.");
+  }
+  return pack;
 }
 
 // ---------------------------------------------------------------------------

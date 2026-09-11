@@ -33,5 +33,5 @@ export function AsyncBoundary({ state, message, children, retry }: { state: "rea
   return <div className="bd-empty" role={state === "error" ? "alert" : "status"}><h3>{state === "empty" ? "Nothing needs attention here" : "Section unavailable"}</h3><p>{message ?? "Open the source workspace or try again."}</p>{retry}</div>;
 }
 export function SyntheticDisclosure() {
-  return <div className="bd-demo-banner" role="note"><strong>Synthetic demonstration</strong><span>Fictional records — not company performance</span></div>;
+  return <div className="bd-demo-banner" role="note"><strong>Synthetic demonstration — not company performance</strong><span>Fictional records for evaluation</span></div>;
 }

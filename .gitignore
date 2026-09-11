@@ -37,6 +37,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# neon
+.neon
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
@@ -45,6 +48,7 @@ next-env.d.ts
 
 # AI handoff bundles (generated, may be large, never source-controlled content)
 /artifacts/ai-handoff/
+/artifacts/board-*
 
 # UI14 synthetic browser-smoke harness (Playwright) — local artifacts only,
 # never committed: recorded auth sessions and run output.

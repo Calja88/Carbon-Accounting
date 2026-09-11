@@ -155,6 +155,7 @@ export default async function ManagementReviewDetailPage({ params }: { params: P
           Pack, minutes, decisions, action links and closure for this review. Approval, addenda and closure state are
           shown below; nothing here alters an already-issued pack or approved minutes.
         </p>
+        {pack?.status === "ISSUED" && Boolean((pack.payload as { board?: unknown } | null)?.board) && <a className="bd-button bd-button--primary mt-4" href={`/ems/management-reviews/${id}/pack`}>View issued management pack</a>}
       </div>
 
       <ManagementReviewClosurePackWorkspace

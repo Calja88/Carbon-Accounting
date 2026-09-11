@@ -18,7 +18,7 @@
  * authorization boundary.
  */
 
-import type { LcaAssessmentStatus } from "@prisma/client";
+import type { LcaAssessmentStatus, Prisma } from "@prisma/client";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import { prisma } from "@/lib/prisma";
 import { requireAssessmentInScope, accessibleAssessmentFilter } from "@/lib/repositories/lca-repository";
@@ -35,8 +35,8 @@ import type { ScenarioComparison } from "@/components/board/lca-scenario";
 import { buildScenarioComparability, mergeStageContributions } from "./live-lca-helpers";
 
 /** Every lifecycle stage this assessment's own model currently includes — the assessmentId comes from an already-in-scope assessment, so no further tenant check is needed for this assessment-owned child table. */
-async function includedLifecycleStages(assessmentId: string): Promise<string[]> {
-  const rows = await prisma.lcaProcess.findMany({
+async function includedLifecycleStages(assessmentId: string, db: Prisma.TransactionClient = prisma): Promise<string[]> {
+  const rows = await db.lcaProcess.findMany({
     where: { assessmentId, isIncluded: true },
     select: { stage: true },
     distinct: ["stage"],
@@ -65,12 +65,13 @@ interface ResolvedScenarioComparison {
 async function resolveScenarioComparison(
   context: OrganisationContext,
   scenarioAssessmentId: string,
+  db: Prisma.TransactionClient = prisma,
 ): Promise<ResolvedScenarioComparison | null> {
   if (!canViewLca(context)) return null;
 
   let scenario;
   try {
-    scenario = await requireAssessmentInScope(context, scenarioAssessmentId);
+    scenario = await requireAssessmentInScope(context, scenarioAssessmentId, db);
   } catch (err) {
     if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) return null;
     throw err;
@@ -79,19 +80,19 @@ async function resolveScenarioComparison(
 
   let baseline;
   try {
-    baseline = await requireAssessmentInScope(context, scenario.baselineAssessmentId);
+    baseline = await requireAssessmentInScope(context, scenario.baselineAssessmentId, db);
   } catch (err) {
     if (err instanceof TenantOwnershipError || err instanceof PermissionDeniedError) return null;
     throw err;
   }
 
   const [baselineRun, scenarioRun, baselineStale, scenarioStale, baselineStages, scenarioStages] = await Promise.all([
-    getLatestRun(baseline.id),
-    getLatestRun(scenario.id),
-    isCalculationStale(baseline.id),
-    isCalculationStale(scenario.id),
-    includedLifecycleStages(baseline.id),
-    includedLifecycleStages(scenario.id),
+    getLatestRun(baseline.id, db),
+    getLatestRun(scenario.id, db),
+    isCalculationStale(baseline.id, db),
+    isCalculationStale(scenario.id, db),
+    includedLifecycleStages(baseline.id, db),
+    includedLifecycleStages(scenario.id, db),
   ]);
 
   const judgement = buildScenarioComparability({
@@ -145,8 +146,9 @@ async function resolveScenarioComparison(
 export async function getLcaScenarioModel(
   context: OrganisationContext,
   scenarioAssessmentId: string,
+  db: Prisma.TransactionClient = prisma,
 ): Promise<ScenarioComparison | null> {
-  const resolved = await resolveScenarioComparison(context, scenarioAssessmentId);
+  const resolved = await resolveScenarioComparison(context, scenarioAssessmentId, db);
   if (!resolved) return null;
   return buildBoardSummary(resolved);
 }
@@ -207,8 +209,9 @@ export interface ScenarioPageModel {
 export async function getScenarioPageModel(
   context: OrganisationContext,
   scenarioAssessmentId: string,
+  db: Prisma.TransactionClient = prisma,
 ): Promise<ScenarioPageModel | null> {
-  const resolved = await resolveScenarioComparison(context, scenarioAssessmentId);
+  const resolved = await resolveScenarioComparison(context, scenarioAssessmentId, db);
   if (!resolved) return null;
   const { scenario, baselineRun, scenarioRun, comparable } = resolved;
   const board = buildBoardSummary(resolved);

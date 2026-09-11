@@ -81,6 +81,9 @@ export interface RecordModel {
   nextStep: { title: string; detail: string };
 }
 export interface FrozenBoardPack {
+  cutoffDate?: string;
+  lca?: import("@/components/board/lca-scenario").ScenarioComparison | null;
+  inputs?: { key: string; sourceType: string; sourceRecordId: string; revision: string | null; summary: unknown }[];
   id: string; reference: string; version: number; status: "draft" | "issued";
   issuedAt: string | null; preparedBy: string; approvedBy: string | null;
   snapshot: OverviewModel; sourceRevisions: RecordRef[];

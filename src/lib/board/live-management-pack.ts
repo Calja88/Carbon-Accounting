@@ -19,9 +19,13 @@
  * existing rows are untouched legacy data (no destructive cleanup), but no
  * runtime code path reads or writes it from here on.
  */
-import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import type { OrganisationContext } from "@/lib/organisation/context";
-import { requirePermission } from "@/lib/rbac/authorize";
+import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
+import { canViewLca } from "@/lib/lca/permissions";
+import { getLcaScenarioModel } from "./live-lca";
+import { getLatestRun } from "@/lib/lca/calculation-service";
+import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
 import {
   generateManagementReviewPack,
   issueManagementReviewPack,
@@ -43,6 +47,7 @@ export interface GenerateBoardManagementPackInput {
   sourceRevisions: FrozenBoardPack["sourceRevisions"];
   decisions: FrozenBoardPack["decisions"];
   actorUserId: string;
+  lcaScenarioId?: string;
 }
 
 /**
@@ -52,27 +57,48 @@ export interface GenerateBoardManagementPackInput {
  * actor identity, or approval status. `pack-service.ts` treats the result
  * as opaque data it hashes and stores, never reinterprets.
  */
-async function buildBoardSection(context: OrganisationContext, input: GenerateBoardManagementPackInput): Promise<BoardPackInput> {
-  const overview = await loadOverviewForContext(context, input.overviewWindow);
+async function buildBoardSection(context: OrganisationContext, input: GenerateBoardManagementPackInput, tx: Prisma.TransactionClient): Promise<BoardPackInput> {
+  const overview = await loadOverviewForContext(context, input.overviewWindow, tx);
+  if (overview.carbon.state !== "ready" || overview.attention.state !== "ready") {
+    throw new BoardManagementPackError("The management pack cannot freeze an incomplete performance snapshot.");
+  }
+  const lca = input.lcaScenarioId ? await getLcaScenarioModel(context, input.lcaScenarioId, tx) : null;
+  if (input.lcaScenarioId && !lca) throw new BoardManagementPackError("The LCA scenario is unavailable for this pack.");
+  const preparer = await tx.user.findUnique({ where: { id: context.userId }, select: { name: true } });
+  const sourceRevisions = await Promise.all(input.sourceRevisions.map(async (source) => {
+    if (source.kind === "lca_assessment") {
+      await requireAssessmentInScope(context, source.id, tx);
+      const run = await getLatestRun(source.id, tx);
+      if (!run) throw new BoardManagementPackError("A referenced LCA calculation is missing.");
+      return { ...source, revision: `run ${run.id} · ${run.runAt.toISOString()} · ${run.engineVersion}` };
+    }
+    if (source.kind === "nonconformity" || source.kind === "corrective_action") {
+      const where = { id: source.id, organisationId: context.organisationId };
+      const record = source.kind === "nonconformity" ? await tx.nonconformity.findFirst({ where }) : await tx.correctiveAction.findFirst({ where });
+      if (!record) throw new BoardManagementPackError("A referenced EMS record is missing.");
+      return { ...source, revision: `${record.status} @ ${record.updatedAt.toISOString()}` };
+    }
+    return source;
+  }));
   return {
     reference: input.reference,
     overviewWindow: input.overviewWindow,
     snapshot: overview,
-    sourceRevisions: input.sourceRevisions,
+    sourceRevisions,
     decisions: input.decisions,
+    lca,
+    preparedBy: preparer?.name ?? "Name not recorded",
   };
 }
 
 /** Repeatable while DRAFT — delegates entirely to pack-service.ts's own generate. */
 export async function generateBoardManagementPack(context: OrganisationContext, input: GenerateBoardManagementPackInput) {
-  const board = await buildBoardSection(context, input);
-  return generateManagementReviewPack(context, input.reviewId, input.actorUserId, board);
+  return generateManagementReviewPack(context, input.reviewId, input.actorUserId, (tx) => buildBoardSection(context, input, tx));
 }
 
 /** One-way freeze — delegates entirely to pack-service.ts's own issue. */
 export async function issueBoardManagementPack(context: OrganisationContext, input: GenerateBoardManagementPackInput) {
-  const board = await buildBoardSection(context, input);
-  return issueManagementReviewPack(context, input.reviewId, input.actorUserId, board);
+  return issueManagementReviewPack(context, input.reviewId, input.actorUserId, (tx) => buildBoardSection(context, input, tx));
 }
 
 interface StoredBoardSection {
@@ -81,6 +107,8 @@ interface StoredBoardSection {
   snapshot: FrozenBoardPack["snapshot"];
   sourceRevisions: FrozenBoardPack["sourceRevisions"];
   decisions: FrozenBoardPack["decisions"];
+  lca: FrozenBoardPack["lca"];
+  preparedBy: string;
 }
 
 function parseBoardSection(payload: unknown): StoredBoardSection | null {
@@ -96,6 +124,8 @@ function parseBoardSection(payload: unknown): StoredBoardSection | null {
     snapshot: b.snapshot as FrozenBoardPack["snapshot"],
     sourceRevisions: b.sourceRevisions as FrozenBoardPack["sourceRevisions"],
     decisions: b.decisions as FrozenBoardPack["decisions"],
+    lca: (b.lca ?? null) as FrozenBoardPack["lca"],
+    preparedBy: typeof b.preparedBy === "string" ? b.preparedBy : "Name not recorded in snapshot",
   };
 }
 
@@ -107,12 +137,12 @@ function parseBoardSection(payload: unknown): StoredBoardSection | null {
  */
 export async function getBoardManagementPack(context: OrganisationContext, reviewId: string): Promise<FrozenBoardPack | null> {
   requirePermission(context, VIEW_PERMISSION);
+  requirePermission(context, "carbon.view");
+  if (context.access.mode !== "ORGANISATION_WIDE" || !canViewLca(context)) throw new PermissionDeniedError("MISSING_PERMISSION");
   const pack = await getManagementReviewPack(context, reviewId);
   if (!pack) return null;
   const board = parseBoardSection(pack.payload);
   if (!board) return null;
-
-  const issuer = pack.issuedByUserId ? await prisma.user.findUnique({ where: { id: pack.issuedByUserId } }) : null;
 
   return {
     id: pack.id,
@@ -120,7 +150,7 @@ export async function getBoardManagementPack(context: OrganisationContext, revie
     version: 1,
     status: pack.status === "ISSUED" ? "issued" : "draft",
     issuedAt: pack.issuedAt ? pack.issuedAt.toISOString() : null,
-    preparedBy: issuer?.name ?? "Unknown",
+    preparedBy: board.preparedBy,
     // Checkpoint B corrective handoff §7: the merged lifecycle has one
     // issuer, not a separate preparer/approver pair — ManagementReviewPack
     // carries no approver field of its own, so this is never fabricated.
@@ -129,5 +159,8 @@ export async function getBoardManagementPack(context: OrganisationContext, revie
     sourceRevisions: board.sourceRevisions,
     decisions: board.decisions,
     payloadSha256: pack.checksumSha256 ?? "",
+    cutoffDate: pack.cutoffDate.toISOString(),
+    lca: board.lca,
+    inputs: pack.inputSnapshots.map((s) => ({ key: s.inputDefinitionKey, sourceType: s.sourceType, sourceRecordId: s.sourceRecordId, revision: s.sourceVersionLabel, summary: s.summary })),
   };
 }
