@@ -63,9 +63,11 @@ describe("EMS module registry", () => {
     it("shows every module once ems.view is granted, except ones gated on a further permission", () => {
       const visible = getVisibleEmsModules(context({ permissions: new Set(["ems.view"]) }));
       const visibleIds = new Set(visible.map((m) => m.id));
+      const gatedCount = EMS_MODULES.filter(isAvailable).filter((m) => m.permission).length;
       expect(visibleIds.has("processes")).toBe(true);
       expect(visibleIds.has("legal-provider-health")).toBe(false);
-      expect(visible.length).toBe(EMS_MODULES.length - 1);
+      expect(visibleIds.has("competence-people")).toBe(false);
+      expect(visible.length).toBe(EMS_MODULES.filter(isAvailable).length - gatedCount);
     });
 
     it("shows a permission-gated module once its extra permission is also granted", () => {
@@ -73,6 +75,20 @@ describe("EMS module registry", () => {
         context({ permissions: new Set(["ems.view", "ems.legal_source.manage"]) }),
       );
       expect(visible.some((m) => m.id === "legal-provider-health")).toBe(true);
+    });
+
+    it("shows every competence module once ems.competence.view is also granted", () => {
+      // UI14: competence pages requirePermission(ems.competence.view) beyond
+      // ems.view (see requirements/people/assignments/gaps/expiry page.tsx) —
+      // the registry must gate on it too, or a role like Organisation
+      // Administrator sees a nav tile that always redirects on click.
+      const visible = getVisibleEmsModules(
+        context({ permissions: new Set(["ems.view", "ems.competence.view"]) }),
+      );
+      const visibleIds = new Set(visible.map((m) => m.id));
+      for (const id of ["competence-requirements", "competence-people", "competence-assignments", "competence-gaps", "competence-training"]) {
+        expect(visibleIds.has(id)).toBe(true);
+      }
     });
   });
 });

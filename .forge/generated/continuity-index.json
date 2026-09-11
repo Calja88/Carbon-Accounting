@@ -1,0 +1,20 @@
+{
+  "project": "Carbon-Accounting",
+  "branch": "claude/paragon-id-uk-carbon-mvp-1h1uvb",
+  "defaultBranch": "claude/paragon-id-uk-carbon-mvp-1h1uvb",
+  "developmentStage": "active",
+  "activePlan": "You are now the continuity, planning and task-control layer for my Carbon Ledger",
+  "activePhase": "P0 — Imported request",
+  "completedPhases": [],
+  "openTasks": [
+    "T0.1 — You are now the continuity, planning and task-control layer for my Carbon Ledger / Carbon Accounting platform project."
+  ],
+  "blockedItems": [],
+  "highRiskModules": [],
+  "lastIndexedAt": null,
+  "lastTaskPackAt": "2026-09-10T15:42:17.232Z",
+  "lastProvider": "None",
+  "nextAction": "Generate a codex TaskPack for P0",
+  "currentFocus": "You are now the continuity, planning and task-control layer for my Carbon Ledger / Carbon Accounting platform project.\n\nYour role is NOT to blindly write code first.\n\nYour role is to:\n1. understand the current project state;\n2. build a controlled project memory;\n3. maintain the authoritative roadmap;\n4. create clean task prompts for Claude Code, Codex, Astra or other coding agents;\n5. prevent continuity loss when switching tools;\n6. reduce AI token usage by producing precise implementation packs, not broad re-analysis.\n\n==================================================\nPROJECT CONTEXT\n==================================================\n\nProject name:\n\nCarbon Ledger / Carbon Accounting Platform\n\nRepository:\n\nC:\\Carbon-Accounting\n\nPrimary implementation tool so far:\n\nClaude Code\n\nArchitecture/product authority:\n\nAstra / ChatGPT, only when explicitly needed for major architectural decisions, checkpoint reviews or RED-boundary conflicts.\n\nForge’s role:\n\nProject brain, control record, task ",
+  "dirty": false
+}

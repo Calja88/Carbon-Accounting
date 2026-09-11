@@ -79,7 +79,7 @@ export default async function EmsDashboardPage() {
             <div className="space-y-1">
               <Stat label="Open" value={data.openCount} tone={data.openCount > 0 ? "warning" : "success"} />
               <StatusBreakdown byStatus={data.byStatus} />
-              <p className="mt-2 text-xs text-slate-400">
+              <p className="mt-2 text-xs text-slate-500">
                 Corrective-action effectiveness is reviewed per nonconformity — open the register for detail.
               </p>
             </div>
@@ -120,7 +120,7 @@ export default async function EmsDashboardPage() {
                 {data.latestDecisionCount !== null && <Stat label="Decisions recorded" value={data.latestDecisionCount} tone="neutral" />}
               </div>
             ) : (
-              <p className="text-sm text-slate-400">No management review has been scheduled yet.</p>
+              <p className="text-sm text-slate-500">No management review has been scheduled yet.</p>
             )
           }
         </SummaryCard>
@@ -132,7 +132,7 @@ export default async function EmsDashboardPage() {
                 <Stat label="Effective documents" value={data.effectiveCount} tone="neutral" />
                 <Stat label="Draft / in review" value={data.inReviewOrDraftCount} tone={data.inReviewOrDraftCount > 0 ? "warning" : "success"} />
               </div>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500">
                 {data.evidenceObjectCount} evidence object{data.evidenceObjectCount === 1 ? "" : "s"} in the hub — active storage
                 provider: <span className="font-medium text-slate-500">{data.activeStorageProvider}</span>.
               </p>
@@ -157,7 +157,7 @@ export default async function EmsDashboardPage() {
             open an audit or evaluation and use its report link. There is no bulk EMS report export yet.
           </div>
         ) : (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-400">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
             Reporting/export entry points require the &quot;Export EMS records&quot; permission, which your current
             role does not have.
           </div>
@@ -190,7 +190,7 @@ function SummaryCard<T>({
         {section.available ? (
           children(section.data)
         ) : (
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-slate-500">
             {section.reason === "NO_PERMISSION"
               ? "You don't have permission to view this."
               : "Not available for this organisation yet."}

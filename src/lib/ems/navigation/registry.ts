@@ -300,6 +300,12 @@ export const EMS_MODULES: EmsModuleEntry[] = [
     status: "available",
     href: "/ems/competence/requirements",
     pageFile: "src/app/(app)/ems/competence/requirements/page.tsx",
+    // UI14: every competence page requirePermission()s ems.competence.view
+    // beyond the base ems.view — without this, a membership holding ems.view
+    // but not ems.competence.view (e.g. Organisation Administrator, Finance
+    // read-only per role-templates.ts's "Metadata only"/no-code decision)
+    // saw a nav tile that always redirected away on click.
+    permission: "ems.competence.view",
   },
   {
     id: "competence-people",
@@ -309,6 +315,7 @@ export const EMS_MODULES: EmsModuleEntry[] = [
     status: "available",
     href: "/ems/competence/people",
     pageFile: "src/app/(app)/ems/competence/people/page.tsx",
+    permission: "ems.competence.view",
   },
   {
     id: "competence-assignments",
@@ -318,6 +325,7 @@ export const EMS_MODULES: EmsModuleEntry[] = [
     status: "available",
     href: "/ems/competence/assignments",
     pageFile: "src/app/(app)/ems/competence/assignments/page.tsx",
+    permission: "ems.competence.view",
   },
   {
     id: "competence-gaps",
@@ -327,6 +335,7 @@ export const EMS_MODULES: EmsModuleEntry[] = [
     status: "available",
     href: "/ems/competence/gaps",
     pageFile: "src/app/(app)/ems/competence/gaps/page.tsx",
+    permission: "ems.competence.view",
   },
 
   // --- Training, evidence, assessment and expiry (T71/UI10) ---
@@ -336,6 +345,7 @@ export const EMS_MODULES: EmsModuleEntry[] = [
     description: "Expiring/expired competence, evidence verification and assessment outcomes. Open an assignment for its full evidence and assessment history.",
     category: "people",
     status: "available",
+    permission: "ems.competence.view",
     href: "/ems/competence/expiry",
     pageFile: "src/app/(app)/ems/competence/expiry/page.tsx",
   },

@@ -53,7 +53,7 @@ export default async function CompetenceAssignmentsPage() {
           Which active competence requirement each person has been assigned, and its status. Only an ACTIVE
           requirement version can be assigned; a requirement revision never changes an existing assignment. Open an
           assignment to submit/verify evidence, record an assessment, or see its expiry. See the{" "}
-          <Link href="/ems/competence/expiry" className="text-blue-700 hover:underline">
+          <Link href="/ems/competence/expiry" className="text-blue-700 underline">
             expiry dashboard
           </Link>{" "}
           for what is expiring or already expired.

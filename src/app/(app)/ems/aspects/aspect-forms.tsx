@@ -71,61 +71,61 @@ function Feedback({ state }: { state: AspectActionState }) {
   );
 }
 
-function AspectFields({ processes, aspect }: { processes: ProcessOption[]; aspect?: AspectRow }) {
+function AspectFields({ uid, processes, aspect }: { uid: string; processes: ProcessOption[]; aspect?: AspectRow }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <div>
-        <Label>Aspect name</Label>
-        <Input name="name" required defaultValue={aspect?.name} placeholder="Synthetic example: Packaging material use" />
+        <Label htmlFor={`name-${uid}`}>Aspect name</Label>
+        <Input id={`name-${uid}`} name="name" required defaultValue={aspect?.name} placeholder="Synthetic example: Packaging material use" />
       </div>
       <div>
-        <Label>Process/activity profile</Label>
-        <Select name="processId" required defaultValue={aspect?.processId ?? ""}>
+        <Label htmlFor={`processId-${uid}`}>Process/activity profile</Label>
+        <Select id={`processId-${uid}`} name="processId" required defaultValue={aspect?.processId ?? ""}>
           <option value="">Select…</option>
           {processes.map((process) => <option key={process.id} value={process.id}>{process.name}</option>)}
         </Select>
       </div>
       <div>
-        <Label>Control relationship</Label>
-        <Select name="controlRelationship" defaultValue={aspect?.controlRelationship ?? "DIRECT_CONTROL"}>
+        <Label htmlFor={`controlRelationship-${uid}`}>Control relationship</Label>
+        <Select id={`controlRelationship-${uid}`} name="controlRelationship" defaultValue={aspect?.controlRelationship ?? "DIRECT_CONTROL"}>
           <option value="DIRECT_CONTROL">Direct control</option>
           <option value="INFLUENCE">Influence</option>
         </Select>
       </div>
       <div>
-        <Label>Potential effect</Label>
-        <Select name="effect" defaultValue={aspect?.effect ?? "ADVERSE"}>
+        <Label htmlFor={`effect-${uid}`}>Potential effect</Label>
+        <Select id={`effect-${uid}`} name="effect" defaultValue={aspect?.effect ?? "ADVERSE"}>
           <option value="ADVERSE">Adverse</option>
           <option value="BENEFICIAL">Beneficial</option>
         </Select>
       </div>
       <div>
-        <Label>Lifecycle perspective</Label>
-        <Select name="lifecycleStage" defaultValue={aspect?.lifecycleStage ?? ""}>
+        <Label htmlFor={`lifecycleStage-${uid}`}>Lifecycle perspective</Label>
+        <Select id={`lifecycleStage-${uid}`} name="lifecycleStage" defaultValue={aspect?.lifecycleStage ?? ""}>
           {LIFECYCLE_STAGES.map(([value, label]) => <option key={value || "none"} value={value}>{label}</option>)}
         </Select>
       </div>
       <div>
-        <Label>Operating condition</Label>
-        <Select name="operatingCondition" defaultValue={aspect?.operatingCondition ?? "NORMAL"}>
+        <Label htmlFor={`operatingCondition-${uid}`}>Operating condition</Label>
+        <Select id={`operatingCondition-${uid}`} name="operatingCondition" defaultValue={aspect?.operatingCondition ?? "NORMAL"}>
           {CONDITIONS.map((condition) => <option key={condition} value={condition}>{condition.replaceAll("_", " ").toLowerCase()}</option>)}
         </Select>
       </div>
       <div>
-        <Label>Source / input / output</Label>
-        <Input name="sourceInputOutput" defaultValue={aspect?.sourceInputOutput ?? ""} />
+        <Label htmlFor={`sourceInputOutput-${uid}`}>Source / input / output</Label>
+        <Input id={`sourceInputOutput-${uid}`} name="sourceInputOutput" defaultValue={aspect?.sourceInputOutput ?? ""} />
       </div>
       <div>
-        <Label>Scope</Label>
-        <Input name="scopeDescription" defaultValue={aspect?.scopeDescription ?? ""} />
+        <Label htmlFor={`scopeDescription-${uid}`}>Scope</Label>
+        <Input id={`scopeDescription-${uid}`} name="scopeDescription" defaultValue={aspect?.scopeDescription ?? ""} />
       </div>
       <div className="sm:col-span-2">
-        <Label>Description</Label>
-        <Textarea name="description" defaultValue={aspect?.description ?? ""} rows={2} />
+        <Label htmlFor={`description-${uid}`}>Description</Label>
+        <Textarea id={`description-${uid}`} name="description" defaultValue={aspect?.description ?? ""} rows={2} />
       </div>
       <div className="sm:col-span-2">
-        <Label>Existing controls</Label>
-        <Textarea name="existingControls" defaultValue={aspect?.existingControls ?? ""} rows={2} />
+        <Label htmlFor={`existingControls-${uid}`}>Existing controls</Label>
+        <Textarea id={`existingControls-${uid}`} name="existingControls" defaultValue={aspect?.existingControls ?? ""} rows={2} />
       </div>
     </div>
   );
@@ -138,7 +138,7 @@ function CreateAspectForm({ processes }: { processes: ProcessOption[] }) {
       <CardHeader><CardTitle>Add environmental aspect</CardTitle></CardHeader>
       <CardContent>
         <form action={action} className="space-y-4">
-          <AspectFields processes={processes} />
+          <AspectFields uid="new" processes={processes} />
           <Feedback state={state} />
           <Button type="submit" disabled={pending || processes.length === 0}>{pending ? "Creating…" : "Create aspect"}</Button>
         </form>
@@ -155,12 +155,12 @@ function CreateImpactForm() {
       <CardContent>
         <form action={action} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <div><Label>Impact name</Label><Input name="name" required placeholder="Synthetic example: Resource depletion" /></div>
-            <div><Label>Category</Label><Input name="category" required placeholder="Resource use" /></div>
-            <div><Label>Receptor</Label><Input name="receptor" placeholder="Materials" /></div>
-            <div><Label>Extent</Label><Select name="extent" defaultValue="LOCAL"><option value="LOCAL">Local</option><option value="GLOBAL">Global</option><option value="LOCAL_AND_GLOBAL">Local and global</option></Select></div>
-            <div><Label>Effect</Label><Select name="effect" defaultValue="ADVERSE"><option value="ADVERSE">Adverse</option><option value="BENEFICIAL">Beneficial</option></Select></div>
-            <div><Label>Description</Label><Input name="description" /></div>
+            <div><Label htmlFor="impact-name">Impact name</Label><Input id="impact-name" name="name" required placeholder="Synthetic example: Resource depletion" /></div>
+            <div><Label htmlFor="impact-category">Category</Label><Input id="impact-category" name="category" required placeholder="Resource use" /></div>
+            <div><Label htmlFor="impact-receptor">Receptor</Label><Input id="impact-receptor" name="receptor" placeholder="Materials" /></div>
+            <div><Label htmlFor="impact-extent">Extent</Label><Select id="impact-extent" name="extent" defaultValue="LOCAL"><option value="LOCAL">Local</option><option value="GLOBAL">Global</option><option value="LOCAL_AND_GLOBAL">Local and global</option></Select></div>
+            <div><Label htmlFor="impact-effect">Effect</Label><Select id="impact-effect" name="effect" defaultValue="ADVERSE"><option value="ADVERSE">Adverse</option><option value="BENEFICIAL">Beneficial</option></Select></div>
+            <div><Label htmlFor="impact-description">Description</Label><Input id="impact-description" name="description" /></div>
           </div>
           <Feedback state={state} />
           <Button type="submit" disabled={pending}>{pending ? "Creating…" : "Create impact"}</Button>
@@ -178,10 +178,10 @@ function LinkImpactForm({ aspects, impacts }: { aspects: AspectRow[]; impacts: I
       <CardContent>
         <form action={action} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <div><Label>Aspect</Label><Select name="aspectId" required defaultValue=""><option value="">Select…</option>{aspects.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></div>
-            <div><Label>Impact</Label><Select name="impactId" required defaultValue=""><option value="">Select…</option>{impacts.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</Select></div>
+            <div><Label htmlFor="link-aspectId">Aspect</Label><Select id="link-aspectId" name="aspectId" required defaultValue=""><option value="">Select…</option>{aspects.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></div>
+            <div><Label htmlFor="link-impactId">Impact</Label><Select id="link-impactId" name="impactId" required defaultValue=""><option value="">Select…</option>{impacts.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}</Select></div>
           </div>
-          <div><Label>Causal description</Label><Input name="causalDescription" placeholder="How the aspect may cause the impact" /></div>
+          <div><Label htmlFor="link-causalDescription">Causal description</Label><Input id="link-causalDescription" name="causalDescription" placeholder="How the aspect may cause the impact" /></div>
           <Feedback state={state} />
           <Button type="submit" disabled={pending || aspects.length === 0 || impacts.length === 0}>{pending ? "Linking…" : "Link impact"}</Button>
         </form>
@@ -215,8 +215,8 @@ function AspectCard({ aspect, processes, canEdit }: { aspect: AspectRow; process
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Evidence</p>
           {aspect.evidence.length === 0 ? <p className="mt-1 text-sm text-slate-500">No evidence attached.</p> : <ul className="mt-1 text-sm">{aspect.evidence.map((item) => <li key={item.id}>{item.filename}</li>)}</ul>}
         </div>
-        {canEdit && <details className="rounded-lg border border-slate-200 p-3"><summary className="cursor-pointer text-sm font-medium">Edit aspect</summary><form action={updateAction} className="mt-4 space-y-4"><input type="hidden" name="aspectId" value={aspect.id} /><AspectFields processes={processes} aspect={aspect} /><Feedback state={updateState} /><Button type="submit" disabled={updating}>{updating ? "Saving…" : "Save changes"}</Button></form></details>}
-        {canEdit && <form action={evidenceAction} className="flex flex-wrap items-end gap-3"><input type="hidden" name="aspectId" value={aspect.id} /><div><Label>Attach evidence</Label><Input name="file" type="file" required /></div><div><Label>Purpose (optional)</Label><Input name="purpose" /></div><Button type="submit" variant="secondary" disabled={uploading}>{uploading ? "Uploading…" : "Attach"}</Button><Feedback state={evidenceState} /></form>}
+        {canEdit && <details className="rounded-lg border border-slate-200 p-3"><summary className="cursor-pointer text-sm font-medium">Edit aspect</summary><form action={updateAction} className="mt-4 space-y-4"><input type="hidden" name="aspectId" value={aspect.id} /><AspectFields uid={aspect.id} processes={processes} aspect={aspect} /><Feedback state={updateState} /><Button type="submit" disabled={updating}>{updating ? "Saving…" : "Save changes"}</Button></form></details>}
+        {canEdit && <form action={evidenceAction} className="flex flex-wrap items-end gap-3"><input type="hidden" name="aspectId" value={aspect.id} /><div><Label htmlFor={`aspectEvidenceFile-${aspect.id}`}>Attach evidence</Label><Input id={`aspectEvidenceFile-${aspect.id}`} name="file" type="file" required /></div><div><Label htmlFor={`aspectEvidencePurpose-${aspect.id}`}>Purpose (optional)</Label><Input id={`aspectEvidencePurpose-${aspect.id}`} name="purpose" /></div><Button type="submit" variant="secondary" disabled={uploading}>{uploading ? "Uploading…" : "Attach"}</Button><Feedback state={evidenceState} /></form>}
         {canEdit && <form action={deleteAction} onSubmit={(event) => { if (!window.confirm("Delete this aspect and its impact links?")) event.preventDefault(); }}><input type="hidden" name="aspectId" value={aspect.id} /><Button type="submit" variant="secondary" disabled={deleting}>{deleting ? "Deleting…" : "Delete aspect"}</Button><Feedback state={deleteState} /></form>}
       </CardContent>
     </Card>

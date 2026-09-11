@@ -54,13 +54,13 @@ function CreatePlan({ members }: { members: MemberOption[] }) {
       <CardContent>
         <form action={action} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <div><Label>Subject</Label><Input name="subject" required placeholder="Synthetic annual environmental update" /></div>
-            <div><Label>Audience</Label><Select name="audience" defaultValue="INTERNAL"><option value="INTERNAL">Internal</option><option value="EXTERNAL">External</option><option value="BOTH">Both</option></Select></div>
-            <div><Label>Trigger / frequency</Label><Input name="triggerFrequency" required placeholder="Annually" /></div>
-            <div><Label>Method</Label><Input name="method" required placeholder="Email bulletin" /></div>
-            <div><Label>Responsible owner</Label><Select name="ownerMembershipId" required defaultValue=""><option value="">Select…</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></div>
+            <div><Label htmlFor="comms-plan-subject">Subject</Label><Input id="comms-plan-subject" name="subject" required placeholder="Synthetic annual environmental update" /></div>
+            <div><Label htmlFor="comms-plan-audience">Audience</Label><Select id="comms-plan-audience" name="audience" defaultValue="INTERNAL"><option value="INTERNAL">Internal</option><option value="EXTERNAL">External</option><option value="BOTH">Both</option></Select></div>
+            <div><Label htmlFor="comms-plan-trigger-frequency">Trigger / frequency</Label><Input id="comms-plan-trigger-frequency" name="triggerFrequency" required placeholder="Annually" /></div>
+            <div><Label htmlFor="comms-plan-method">Method</Label><Input id="comms-plan-method" name="method" required placeholder="Email bulletin" /></div>
+            <div><Label htmlFor="comms-plan-owner">Responsible owner</Label><Select id="comms-plan-owner" name="ownerMembershipId" required defaultValue=""><option value="">Select…</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></div>
             <div className="flex items-end gap-2"><Label className="flex items-center gap-2"><input type="checkbox" name="approvalRequired" value="true" className="h-4 w-4" /> Requires approval before use</Label></div>
-            <div className="sm:col-span-2"><Label>Source requirements (optional)</Label><Textarea name="sourceRequirements" rows={2} /></div>
+            <div className="sm:col-span-2"><Label htmlFor="comms-plan-source-requirements">Source requirements (optional)</Label><Textarea id="comms-plan-source-requirements" name="sourceRequirements" rows={2} /></div>
           </div>
           <Feedback state={state} />
           <Button type="submit" disabled={pending || members.length === 0}>{pending ? "Creating…" : "Create plan"}</Button>
@@ -72,22 +72,23 @@ function CreatePlan({ members }: { members: MemberOption[] }) {
 
 function RecordForm({ planId, audience, approvalRequired, members, documents }: { planId?: string; audience?: string; approvalRequired: boolean; members: MemberOption[]; documents: DocumentOption[] }) {
   const [state, action, pending] = useActionState(recordCommunicationAction, emptyState);
+  const idPrefix = `comms-record-${planId ?? "adhoc"}`;
   return (
     <form action={action} className="space-y-3 rounded-lg border border-slate-200 p-3">
       {planId && <input type="hidden" name="planId" value={planId} />}
       <p className="text-sm font-medium">Record communication{approvalRequired ? " (approval required)" : ""}</p>
       <div className="grid gap-3 sm:grid-cols-2">
-        <div><Label>Occurred on</Label><Input name="occurredAt" type="date" required /></div>
-        <div><Label>Audience</Label><Select name="audience" defaultValue={audience ?? "INTERNAL"}><option value="INTERNAL">Internal</option><option value="EXTERNAL">External</option><option value="BOTH">Both</option></Select></div>
+        <div><Label htmlFor={`${idPrefix}-occurred-at`}>Occurred on</Label><Input id={`${idPrefix}-occurred-at`} name="occurredAt" type="date" required /></div>
+        <div><Label htmlFor={`${idPrefix}-audience`}>Audience</Label><Select id={`${idPrefix}-audience`} name="audience" defaultValue={audience ?? "INTERNAL"}><option value="INTERNAL">Internal</option><option value="EXTERNAL">External</option><option value="BOTH">Both</option></Select></div>
       </div>
-      <div><Label>Parties / audience reached</Label><Input name="parties" required /></div>
-      <div><Label>Content summary</Label><Textarea name="contentSummary" rows={2} required /></div>
-      <div className="sm:col-span-2"><Label>Approved content revision (optional)</Label><Select name="approvedContentRevisionId" defaultValue=""><option value="">None</option>{documents.map((document) => <option key={document.id} value={document.id}>{document.label}</option>)}</Select></div>
+      <div><Label htmlFor={`${idPrefix}-parties`}>Parties / audience reached</Label><Input id={`${idPrefix}-parties`} name="parties" required /></div>
+      <div><Label htmlFor={`${idPrefix}-content-summary`}>Content summary</Label><Textarea id={`${idPrefix}-content-summary`} name="contentSummary" rows={2} required /></div>
+      <div className="sm:col-span-2"><Label htmlFor={`${idPrefix}-content-revision`}>Approved content revision (optional)</Label><Select id={`${idPrefix}-content-revision`} name="approvedContentRevisionId" defaultValue=""><option value="">None</option>{documents.map((document) => <option key={document.id} value={document.id}>{document.label}</option>)}</Select></div>
       <div className="grid gap-3 sm:grid-cols-3">
-        <div><Label>Approved by</Label><Select name="approverMembershipId" defaultValue=""><option value="">Not yet approved</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></div>
-        <div><Label>Approved on</Label><Input name="approvedAt" type="date" /></div>
+        <div><Label htmlFor={`${idPrefix}-approver`}>Approved by</Label><Select id={`${idPrefix}-approver`} name="approverMembershipId" defaultValue=""><option value="">Not yet approved</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></div>
+        <div><Label htmlFor={`${idPrefix}-approved-at`}>Approved on</Label><Input id={`${idPrefix}-approved-at`} name="approvedAt" type="date" /></div>
       </div>
-      <div><Label>Response / follow-up (optional)</Label><Textarea name="responseFollowUp" rows={2} /></div>
+      <div><Label htmlFor={`${idPrefix}-response-followup`}>Response / follow-up (optional)</Label><Textarea id={`${idPrefix}-response-followup`} name="responseFollowUp" rows={2} /></div>
       <Feedback state={state} /><Button type="submit" variant="secondary" disabled={pending}>{pending ? "Recording…" : "Record communication"}</Button>
     </form>
   );
@@ -103,7 +104,7 @@ function RecordItem({ record }: { record: RecordRow }) {
       {record.responseFollowUp && <p className="mt-1 text-slate-500">Follow-up: {record.responseFollowUp}</p>}
       <form action={action} className="mt-2 flex flex-wrap items-end gap-2">
         <input type="hidden" name="recordId" value={record.id} />
-        <div><Label>Attach evidence</Label><Input name="file" type="file" required /></div>
+        <div><Label htmlFor={`comms-evidence-${record.id}`}>Attach evidence</Label><Input id={`comms-evidence-${record.id}`} name="file" type="file" required /></div>
         <Input name="purpose" placeholder="Purpose (optional)" />
         <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Uploading…" : "Attach"}</Button>
         <Feedback state={state} />

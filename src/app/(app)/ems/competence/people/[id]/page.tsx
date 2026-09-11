@@ -134,7 +134,7 @@ export default async function PersonDetailPage({ params }: { params: Promise<{ i
           </CardContent>
         </Card>
       ) : (
-        <p className="text-xs text-slate-400">Restricted contact detail is hidden — you do not hold the sensitive-profile permission.</p>
+        <p className="text-xs text-slate-500">Restricted contact detail is hidden — you do not hold the sensitive-profile permission.</p>
       )}
 
       {canManage && (

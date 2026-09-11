@@ -171,7 +171,7 @@ export default async function CompetenceAssignmentDetailPage({ params }: { param
           </CardContent>
         </Card>
       ) : (
-        <p className="text-xs text-slate-400">Evidence detail is hidden — you do not hold the sensitive-competence permission.</p>
+        <p className="text-xs text-slate-500">Evidence detail is hidden — you do not hold the sensitive-competence permission.</p>
       )}
 
       {canViewSensitive && (

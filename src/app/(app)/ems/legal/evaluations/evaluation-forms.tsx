@@ -99,32 +99,32 @@ function CreateProgrammeForm({ members }: { members: Option[] }) {
     <form action={action} className="space-y-4 rounded-lg border border-slate-200 p-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Name</Label>
-          <Input name="name" required placeholder="Synthetic example: 2026 Annual Compliance Evaluation" />
+          <Label htmlFor="programme-name">Name</Label>
+          <Input id="programme-name" name="name" required placeholder="Synthetic example: 2026 Annual Compliance Evaluation" />
         </div>
         <div>
-          <Label>Lead</Label>
-          <Select name="leadMembershipId" required defaultValue="">
+          <Label htmlFor="programme-lead">Lead</Label>
+          <Select id="programme-lead" name="leadMembershipId" required defaultValue="">
             <option value="" disabled>Choose a lead</option>
             {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
           </Select>
         </div>
         <div>
-          <Label>Period start</Label>
-          <Input name="periodStart" type="date" required />
+          <Label htmlFor="programme-periodStart">Period start</Label>
+          <Input id="programme-periodStart" name="periodStart" type="date" required />
         </div>
         <div>
-          <Label>Period end</Label>
-          <Input name="periodEnd" type="date" required />
+          <Label htmlFor="programme-periodEnd">Period end</Label>
+          <Input id="programme-periodEnd" name="periodEnd" type="date" required />
         </div>
         <div>
-          <Label>Recurrence (optional)</Label>
-          <Input name="recurrence" placeholder="e.g. ANNUAL" />
+          <Label htmlFor="programme-recurrence">Recurrence (optional)</Label>
+          <Input id="programme-recurrence" name="recurrence" placeholder="e.g. ANNUAL" />
         </div>
       </div>
       <div>
-        <Label>Description (optional)</Label>
-        <Textarea name="description" rows={2} placeholder="Synthetic example only." />
+        <Label htmlFor="programme-description">Description (optional)</Label>
+        <Textarea id="programme-description" name="description" rows={2} placeholder="Synthetic example only." />
       </div>
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Create programme"}</Button>
@@ -149,31 +149,31 @@ function CreateEvaluationForm({
       <input type="hidden" name="programmeId" value={programmeId} />
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Lead</Label>
-          <Select name="leadMembershipId" required defaultValue="">
+          <Label htmlFor={`eval-lead-${programmeId}`}>Lead</Label>
+          <Select id={`eval-lead-${programmeId}`} name="leadMembershipId" required defaultValue="">
             <option value="" disabled>Choose a lead</option>
             {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
           </Select>
         </div>
         <div>
-          <Label>Period start</Label>
-          <Input name="periodStart" type="date" required />
+          <Label htmlFor={`eval-periodStart-${programmeId}`}>Period start</Label>
+          <Input id={`eval-periodStart-${programmeId}`} name="periodStart" type="date" required />
         </div>
         <div>
-          <Label>Period end</Label>
-          <Input name="periodEnd" type="date" required />
+          <Label htmlFor={`eval-periodEnd-${programmeId}`}>Period end</Label>
+          <Input id={`eval-periodEnd-${programmeId}`} name="periodEnd" type="date" required />
         </div>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Entities in scope (optional)</Label>
-          <select name="entityIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
+          <Label htmlFor={`eval-entityIds-${programmeId}`}>Entities in scope (optional)</Label>
+          <select id={`eval-entityIds-${programmeId}`} name="entityIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
             {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.name}</option>)}
           </select>
         </div>
         <div>
-          <Label>Sites in scope (optional)</Label>
-          <select name="siteIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
+          <Label htmlFor={`eval-siteIds-${programmeId}`}>Sites in scope (optional)</Label>
+          <select id={`eval-siteIds-${programmeId}`} name="siteIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
             {sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
           </select>
         </div>
@@ -227,8 +227,8 @@ function RecordItemResultForm({ evaluationItemId }: { evaluationItemId: string }
     <form action={action} className="space-y-3 rounded-lg border border-slate-200 p-3">
       <input type="hidden" name="evaluationItemId" value={evaluationItemId} />
       <div>
-        <Label>Outcome</Label>
-        <Select name="status" required defaultValue="">
+        <Label htmlFor={`outcome-${evaluationItemId}`}>Outcome</Label>
+        <Select id={`outcome-${evaluationItemId}`} name="status" required defaultValue="">
           <option value="" disabled>Choose an outcome</option>
           <option value="COMPLIANT">Compliant</option>
           <option value="PARTIALLY_COMPLIANT">Partially compliant</option>
@@ -237,12 +237,12 @@ function RecordItemResultForm({ evaluationItemId }: { evaluationItemId: string }
         </Select>
       </div>
       <div>
-        <Label>Rationale</Label>
-        <Textarea name="rationale" required rows={2} placeholder="Synthetic example only." />
+        <Label htmlFor={`itemRationale-${evaluationItemId}`}>Rationale</Label>
+        <Textarea id={`itemRationale-${evaluationItemId}`} name="rationale" required rows={2} placeholder="Synthetic example only." />
       </div>
       <div>
-        <Label>Follow-up date (optional)</Label>
-        <Input name="followUpDate" type="date" />
+        <Label htmlFor={`followUpDate-${evaluationItemId}`}>Follow-up date (optional)</Label>
+        <Input id={`followUpDate-${evaluationItemId}`} name="followUpDate" type="date" />
       </div>
       <Feedback state={state} />
       <Button type="submit" size="sm" disabled={pending}>{pending ? "Recording…" : "Record outcome"}</Button>
@@ -261,15 +261,15 @@ function FindingLinkForm({ evaluationItemId }: { evaluationItemId: string }) {
         <Link href="/ems/nonconformities" className="underline">nonconformities &amp; CAPA</Link> page.
       </p>
       <div>
-        <Label>Link type</Label>
-        <Select name="linkType" required defaultValue="NONCONFORMITY">
+        <Label htmlFor={`linkType-${evaluationItemId}`}>Link type</Label>
+        <Select id={`linkType-${evaluationItemId}`} name="linkType" required defaultValue="NONCONFORMITY">
           <option value="NONCONFORMITY">Nonconformity</option>
           <option value="CORRECTIVE_ACTION">Corrective action</option>
         </Select>
       </div>
       <div>
-        <Label>Reference note</Label>
-        <Textarea name="referenceNote" required rows={2} placeholder="Synthetic example only." />
+        <Label htmlFor={`referenceNote-${evaluationItemId}`}>Reference note</Label>
+        <Textarea id={`referenceNote-${evaluationItemId}`} name="referenceNote" required rows={2} placeholder="Synthetic example only." />
       </div>
       <Feedback state={state} />
       <Button type="submit" size="sm" variant="secondary" disabled={pending}>{pending ? "Requesting…" : "Request finding link"}</Button>

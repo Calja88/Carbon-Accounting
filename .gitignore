@@ -42,3 +42,10 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# UI14 synthetic browser-smoke harness (Playwright) — local artifacts only,
+# never committed: recorded auth sessions and run output.
+/e2e/.auth
+/test-results
+/playwright-report
+/blob-report

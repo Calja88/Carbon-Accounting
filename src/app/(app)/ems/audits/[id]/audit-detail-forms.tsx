@@ -136,17 +136,17 @@ function AddChecklistItemForm({ checklistVersionId }: { checklistVersionId: stri
     <form action={action} className="space-y-2 rounded-md border border-slate-200 p-3">
       <input type="hidden" name="checklistVersionId" value={checklistVersionId} />
       <div>
-        <Label>Question</Label>
-        <Textarea name="question" rows={2} required placeholder="Synthetic example: Is the site's waste segregation procedure followed?" />
+        <Label htmlFor="checklist-item-question">Question</Label>
+        <Textarea id="checklist-item-question" name="question" rows={2} required placeholder="Synthetic example: Is the site's waste segregation procedure followed?" />
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         <div>
-          <Label>Criteria reference (optional)</Label>
-          <Input name="criteriaReference" placeholder="e.g. ISO 14001 §8.1" />
+          <Label htmlFor="checklist-item-criteria-reference">Criteria reference (optional)</Label>
+          <Input id="checklist-item-criteria-reference" name="criteriaReference" placeholder="e.g. ISO 14001 §8.1" />
         </div>
         <div>
-          <Label>Expected evidence (optional)</Label>
-          <Input name="expectedEvidence" placeholder="Synthetic example only." />
+          <Label htmlFor="checklist-item-expected-evidence">Expected evidence (optional)</Label>
+          <Input id="checklist-item-expected-evidence" name="expectedEvidence" placeholder="Synthetic example only." />
         </div>
       </div>
       <Feedback state={state} />
@@ -200,8 +200,8 @@ function RecordResponseForm({ checklistItemId, auditingTeam }: { checklistItemId
       <input type="hidden" name="checklistItemId" value={checklistItemId} />
       <div className="grid gap-2 sm:grid-cols-2">
         <div>
-          <Label>Result</Label>
-          <Select name="result" required defaultValue="">
+          <Label htmlFor={`response-result-${checklistItemId}`}>Result</Label>
+          <Select id={`response-result-${checklistItemId}`} name="result" required defaultValue="">
             <option value="" disabled>Choose a result</option>
             <option value="CONFORMS">Conforms</option>
             <option value="NONCONFORMANCE">Nonconformance</option>
@@ -209,16 +209,16 @@ function RecordResponseForm({ checklistItemId, auditingTeam }: { checklistItemId
           </Select>
         </div>
         <div>
-          <Label>Responding auditor</Label>
-          <Select name="auditorMembershipId" required defaultValue="">
+          <Label htmlFor={`response-auditor-${checklistItemId}`}>Responding auditor</Label>
+          <Select id={`response-auditor-${checklistItemId}`} name="auditorMembershipId" required defaultValue="">
             <option value="" disabled>Choose the auditor</option>
             {auditingTeam.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
           </Select>
         </div>
       </div>
       <div>
-        <Label>Notes (optional)</Label>
-        <Textarea name="notes" rows={2} placeholder="Synthetic example only." />
+        <Label htmlFor={`response-notes-${checklistItemId}`}>Notes (optional)</Label>
+        <Textarea id={`response-notes-${checklistItemId}`} name="notes" rows={2} placeholder="Synthetic example only." />
       </div>
       <Feedback state={state} />
       <Button type="submit" size="sm" disabled={pending}>{pending ? "Recording…" : "Record response"}</Button>
@@ -236,6 +236,7 @@ function FindingsSection({ auditId, findings, auditStatus }: { auditId: string; 
           A finding&apos;s classification is a working category the audit team assigns — it is never inferred automatically and is not a certification decision.
         </p>
         <div className="space-y-2">
+          {findings.length === 0 && <p className="text-sm text-slate-500">No findings raised yet.</p>}
           {findings.map((finding) => (
             <FindingCard key={finding.id} finding={finding} canRaise={canRaise} />
           ))}
@@ -312,8 +313,8 @@ function CreateFindingForm({ auditId }: { auditId: string }) {
       <input type="hidden" name="auditId" value={auditId} />
       <div className="grid gap-2 sm:grid-cols-2">
         <div>
-          <Label>Classification</Label>
-          <Select name="classification" required defaultValue="">
+          <Label htmlFor="finding-classification">Classification</Label>
+          <Select id="finding-classification" name="classification" required defaultValue="">
             <option value="" disabled>Choose a classification</option>
             <option value="OBSERVATION">Observation</option>
             <option value="OPPORTUNITY_FOR_IMPROVEMENT">Opportunity for improvement</option>
@@ -322,17 +323,17 @@ function CreateFindingForm({ auditId }: { auditId: string }) {
           </Select>
         </div>
         <div>
-          <Label>Criterion reference (optional)</Label>
-          <Input name="criterionReference" placeholder="e.g. ISO 14001 §8.1" />
+          <Label htmlFor="finding-criterion-reference">Criterion reference (optional)</Label>
+          <Input id="finding-criterion-reference" name="criterionReference" placeholder="e.g. ISO 14001 §8.1" />
         </div>
       </div>
       <div>
-        <Label>Statement</Label>
-        <Textarea name="statement" rows={2} required placeholder="Synthetic example only." />
+        <Label htmlFor="finding-statement">Statement</Label>
+        <Textarea id="finding-statement" name="statement" rows={2} required placeholder="Synthetic example only." />
       </div>
       <div>
-        <Label>Objective evidence (optional)</Label>
-        <Textarea name="objectiveEvidence" rows={2} placeholder="Synthetic example only." />
+        <Label htmlFor="finding-objective-evidence">Objective evidence (optional)</Label>
+        <Textarea id="finding-objective-evidence" name="objectiveEvidence" rows={2} placeholder="Synthetic example only." />
       </div>
       <Feedback state={state} />
       <Button type="submit" size="sm" disabled={pending}>{pending ? "Raising…" : "Raise finding"}</Button>
@@ -371,7 +372,7 @@ function ReportSection({ auditId, auditStatus, report }: { auditId: string; audi
         {report && report.status === "ISSUED" && (
           <div className="space-y-2 text-sm text-slate-600">
             <p>Issued {report.issuedAt}. This report is frozen and cannot be edited.</p>
-            {report.checksumSha256 && <p className="break-all text-xs text-slate-400">SHA-256: {report.checksumSha256}</p>}
+            {report.checksumSha256 && <p className="break-all text-xs text-slate-500">SHA-256: {report.checksumSha256}</p>}
             <a href={`/api/ems/audits/${auditId}/report`} className="text-sm font-medium text-blue-700 hover:underline">
               Download frozen report
             </a>

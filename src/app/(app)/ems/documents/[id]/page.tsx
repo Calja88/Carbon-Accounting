@@ -102,7 +102,7 @@ export default async function ControlledDocumentDetailPage({ params }: { params:
               SharePoint or upload edit never changes this issued reference; only a new successor revision can.
             </p>
           )}
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-500">
             Storage provider: {PROVIDER_LABELS[providerName] ?? providerName}
             {providerName === "database" && " — SharePoint connection not yet configured for this organisation (pending SP01+)."}
           </p>
@@ -120,7 +120,7 @@ export default async function ControlledDocumentDetailPage({ params }: { params:
                 <p className="font-medium text-slate-900">
                   Revision {revision.revisionNumber}
                   {revision.id === document.currentRevisionId && (
-                    <span className="ml-2 text-xs font-normal text-slate-400">(current)</span>
+                    <span className="ml-2 text-xs font-normal text-slate-500">(current)</span>
                   )}
                 </p>
                 <Badge tone={STATUS_TONE[revision.status] ?? "neutral"}>{revision.status}</Badge>
@@ -130,7 +130,7 @@ export default async function ControlledDocumentDetailPage({ params }: { params:
 
               <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-500 sm:grid-cols-4">
                 <div>
-                  <dt className="text-xs uppercase tracking-wide text-slate-400">Content</dt>
+                  <dt className="text-xs uppercase tracking-wide text-slate-500">Content</dt>
                   <dd>
                     {revision.evidenceObject
                       ? `${revision.evidenceObject.filename} (${formatBytes(revision.evidenceObject.byteSize)})`
@@ -138,15 +138,15 @@ export default async function ControlledDocumentDetailPage({ params }: { params:
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-xs uppercase tracking-wide text-slate-400">Checksum</dt>
+                  <dt className="text-xs uppercase tracking-wide text-slate-500">Checksum</dt>
                   <dd className="font-mono text-xs">{revision.checksumSha256 ? `${revision.checksumSha256.slice(0, 12)}…` : "—"}</dd>
                 </div>
                 <div>
-                  <dt className="text-xs uppercase tracking-wide text-slate-400">Effective</dt>
+                  <dt className="text-xs uppercase tracking-wide text-slate-500">Effective</dt>
                   <dd>{revision.effectiveDate?.toISOString().slice(0, 10) ?? "—"}</dd>
                 </div>
                 <div>
-                  <dt className="text-xs uppercase tracking-wide text-slate-400">Review due</dt>
+                  <dt className="text-xs uppercase tracking-wide text-slate-500">Review due</dt>
                   <dd>{revision.reviewDueDate?.toISOString().slice(0, 10) ?? "—"}</dd>
                 </div>
               </dl>
@@ -197,7 +197,7 @@ export default async function ControlledDocumentDetailPage({ params }: { params:
                         {!d.acknowledgedAt && <AcknowledgeDistributionButton documentId={document.id} distributionId={d.id} />}
                       </li>
                     ))}
-                    {revision.distributions.length === 0 && <li className="text-slate-400">Not yet distributed.</li>}
+                    {revision.distributions.length === 0 && <li className="text-slate-500">Not yet distributed.</li>}
                   </ul>
                   {canManage && <DistributeRevisionForm documentId={document.id} revisionId={revision.id} members={memberOptions} />}
                 </div>

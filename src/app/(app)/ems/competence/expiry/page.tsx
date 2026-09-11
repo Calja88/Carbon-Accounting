@@ -66,7 +66,7 @@ export default async function CompetenceExpiryPage() {
             Competence assignments already expired, and those due to expire within {UPCOMING_WINDOW_DAYS} days.
             Expiry never deletes evidence or assessment history — it turns an assignment back into a gap. Reminders
             for approaching and passed expiry appear in the{" "}
-            <Link href="/ems/notifications?type=expiry.upcoming" className="text-blue-700 hover:underline">
+            <Link href="/ems/notifications?type=expiry.upcoming" className="text-blue-700 underline">
               work queue
             </Link>{" "}
             using the existing notification/reminder engine; no real notifications are sent from this dashboard.

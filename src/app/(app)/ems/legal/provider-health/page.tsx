@@ -57,7 +57,7 @@ export default async function LegalProviderHealthPage() {
           <Badge tone={health.recentJobFailures > 0 ? "warning" : "success"}>
             Last hour: {health.recentJobRuns} run{health.recentJobRuns === 1 ? "" : "s"}, {health.recentJobFailures} failed
           </Badge>
-          <span className="text-xs text-slate-400">as of {health.generatedAt.toLocaleString("en-GB")}</span>
+          <span className="text-xs text-slate-500">as of {health.generatedAt.toLocaleString("en-GB")}</span>
         </CardContent>
       </Card>
 
@@ -81,13 +81,13 @@ export default async function LegalProviderHealthPage() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
-                        <th className="pb-2 pr-4">Stream</th>
-                        <th className="pb-2 pr-4">Filter</th>
-                        <th className="pb-2 pr-4">Status</th>
-                        <th className="pb-2 pr-4">Last success</th>
-                        <th className="pb-2 pr-4">Last attempt</th>
-                        <th className="pb-2">Diagnostic</th>
+                      <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+                        <th scope="col" className="pb-2 pr-4">Stream</th>
+                        <th scope="col" className="pb-2 pr-4">Filter</th>
+                        <th scope="col" className="pb-2 pr-4">Status</th>
+                        <th scope="col" className="pb-2 pr-4">Last success</th>
+                        <th scope="col" className="pb-2 pr-4">Last attempt</th>
+                        <th scope="col" className="pb-2">Diagnostic</th>
                       </tr>
                     </thead>
                     <tbody>

@@ -82,30 +82,30 @@ function statusTone(status: string): "neutral" | "success" | "warning" | "danger
   return "info";
 }
 
-function ScopePicker({ entities, sites, processes, aspects }: { entities: Option[]; sites: Option[]; processes: Option[]; aspects: Option[] }) {
+function ScopePicker({ uid, entities, sites, processes, aspects }: { uid: string; entities: Option[]; sites: Option[]; processes: Option[]; aspects: Option[] }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <div>
-        <Label>Entities</Label>
-        <select name="entityIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
+        <Label htmlFor={`entityIds-${uid}`}>Entities</Label>
+        <select id={`entityIds-${uid}`} name="entityIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
           {entities.map((entity) => <option key={entity.id} value={entity.id}>{entity.name}</option>)}
         </select>
       </div>
       <div>
-        <Label>Sites</Label>
-        <select name="siteIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
+        <Label htmlFor={`siteIds-${uid}`}>Sites</Label>
+        <select id={`siteIds-${uid}`} name="siteIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
           {sites.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
         </select>
       </div>
       <div>
-        <Label>Processes</Label>
-        <select name="processIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
+        <Label htmlFor={`processIds-${uid}`}>Processes</Label>
+        <select id={`processIds-${uid}`} name="processIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
           {processes.map((process) => <option key={process.id} value={process.id}>{process.name}</option>)}
         </select>
       </div>
       <div>
-        <Label>Aspects</Label>
-        <select name="aspectIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
+        <Label htmlFor={`aspectIds-${uid}`}>Aspects</Label>
+        <select id={`aspectIds-${uid}`} name="aspectIds" multiple size={4} className="w-full rounded-md border border-slate-300 text-sm">
           {aspects.map((aspect) => <option key={aspect.id} value={aspect.id}>{aspect.name}</option>)}
         </select>
       </div>
@@ -115,6 +115,7 @@ function ScopePicker({ entities, sites, processes, aspects }: { entities: Option
 }
 
 function CreateAssessmentForm({
+  uid,
   sourceKind,
   sourceId,
   changeEventId,
@@ -125,6 +126,7 @@ function CreateAssessmentForm({
   aspects,
   onCreated,
 }: {
+  uid: string;
   sourceKind: SourceKind;
   sourceId: string;
   changeEventId?: string | null;
@@ -147,8 +149,8 @@ function CreateAssessmentForm({
       {supersedesAssessmentId && <input type="hidden" name="supersedesAssessmentId" value={supersedesAssessmentId} />}
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Proposed decision</Label>
-          <Select name="decision" defaultValue="APPLICABLE" required>
+          <Label htmlFor={`decision-${uid}`}>Proposed decision</Label>
+          <Select id={`decision-${uid}`} name="decision" defaultValue="APPLICABLE" required>
             <option value="APPLICABLE">Applicable</option>
             <option value="NOT_APPLICABLE">Not applicable</option>
             <option value="UNCERTAIN">Uncertain</option>
@@ -156,10 +158,10 @@ function CreateAssessmentForm({
         </div>
       </div>
       <div>
-        <Label>Rationale</Label>
-        <Textarea name="rationale" required rows={3} placeholder="Synthetic example: applies to Site A's packaging line under GB-ENG jurisdiction." />
+        <Label htmlFor={`rationale-${uid}`}>Rationale</Label>
+        <Textarea id={`rationale-${uid}`} name="rationale" required rows={3} placeholder="Synthetic example: applies to Site A's packaging line under GB-ENG jurisdiction." />
       </div>
-      <ScopePicker entities={entities} sites={sites} processes={processes} aspects={aspects} />
+      <ScopePicker uid={uid} entities={entities} sites={sites} processes={processes} aspects={aspects} />
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Create draft assessment"}</Button>
     </form>
@@ -200,7 +202,7 @@ function CandidateRow({
           <details>
             <summary className="cursor-pointer text-sm font-medium text-blue-700">Assess this candidate</summary>
             <div className="mt-3">
-              <CreateAssessmentForm sourceKind="instrument" sourceId={event.instrumentId} changeEventId={event.id} entities={entities} sites={sites} processes={processes} aspects={aspects} />
+              <CreateAssessmentForm uid={`candidate-${event.id}`} sourceKind="instrument" sourceId={event.instrumentId} changeEventId={event.id} entities={entities} sites={sites} processes={processes} aspects={aspects} />
             </div>
           </details>
         )}
@@ -240,7 +242,7 @@ function OtherRequirementCandidateRow({
           <details>
             <summary className="cursor-pointer text-sm font-medium text-blue-700">Assess this source</summary>
             <div className="mt-3">
-              <CreateAssessmentForm sourceKind="other_requirement" sourceId={source.id} entities={entities} sites={sites} processes={processes} aspects={aspects} />
+              <CreateAssessmentForm uid={`other-${source.id}`} sourceKind="other_requirement" sourceId={source.id} entities={entities} sites={sites} processes={processes} aspects={aspects} />
             </div>
           </details>
         )}
@@ -265,8 +267,8 @@ function UploadEvidenceForm({ assessmentId }: { assessmentId: string }) {
   return (
     <form action={action} className="flex flex-wrap items-end gap-3">
       <input type="hidden" name="assessmentId" value={assessmentId} />
-      <div><Label>Attach evidence</Label><Input name="file" type="file" required /></div>
-      <div><Label>Purpose (optional)</Label><Input name="purpose" /></div>
+      <div><Label htmlFor={`evidenceFile-${assessmentId}`}>Attach evidence</Label><Input id={`evidenceFile-${assessmentId}`} name="file" type="file" required /></div>
+      <div><Label htmlFor={`evidencePurpose-${assessmentId}`}>Purpose (optional)</Label><Input id={`evidencePurpose-${assessmentId}`} name="purpose" /></div>
       <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Uploading…" : "Attach"}</Button>
       <Feedback state={state} />
     </form>
@@ -280,28 +282,28 @@ function DecideForm({ assessmentId, members, defaultDecision }: { assessmentId: 
       <input type="hidden" name="assessmentId" value={assessmentId} />
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Final decision</Label>
-          <Select name="decision" defaultValue={defaultDecision ?? "APPLICABLE"} required>
+          <Label htmlFor={`finalDecision-${assessmentId}`}>Final decision</Label>
+          <Select id={`finalDecision-${assessmentId}`} name="decision" defaultValue={defaultDecision ?? "APPLICABLE"} required>
             <option value="APPLICABLE">Applicable</option>
             <option value="NOT_APPLICABLE">Not applicable</option>
             <option value="UNCERTAIN">Uncertain</option>
           </Select>
         </div>
         <div>
-          <Label>Next review date</Label>
-          <Input name="nextReviewAt" type="date" required />
+          <Label htmlFor={`nextReviewAt-${assessmentId}`}>Next review date</Label>
+          <Input id={`nextReviewAt-${assessmentId}`} name="nextReviewAt" type="date" required />
         </div>
         <div className="sm:col-span-2">
-          <Label>Follow-up owner (required for Uncertain)</Label>
-          <Select name="followUpOwnerMembershipId" defaultValue="">
+          <Label htmlFor={`followUpOwnerMembershipId-${assessmentId}`}>Follow-up owner (required for Uncertain)</Label>
+          <Select id={`followUpOwnerMembershipId-${assessmentId}`} name="followUpOwnerMembershipId" defaultValue="">
             <option value="">None</option>
             {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
           </Select>
         </div>
       </div>
       <div>
-        <Label>Rationale</Label>
-        <Textarea name="rationale" required rows={3} />
+        <Label htmlFor={`decideRationale-${assessmentId}`}>Rationale</Label>
+        <Textarea id={`decideRationale-${assessmentId}`} name="rationale" required rows={3} />
       </div>
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>{pending ? "Recording…" : "Record decision"}</Button>
@@ -388,6 +390,7 @@ function AssessmentCard({
               <summary className="cursor-pointer text-sm font-medium text-blue-700">Re-assess (creates a new draft)</summary>
               <div className="mt-3">
                 <CreateAssessmentForm
+                  uid={`reassess-${assessment.id}`}
                   sourceKind={assessment.sourceKind}
                   sourceId={(assessment.instrumentId ?? assessment.otherRequirementSourceId) as string}
                   changeEventId={assessment.changeEventId}

@@ -91,7 +91,7 @@ export default async function EvidenceHubPage({
           <tbody className="divide-y divide-slate-100">
             {evidence.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
                   No evidence objects match this organisation{q ? " and search" : ""} yet.
                 </td>
               </tr>
@@ -103,7 +103,7 @@ export default async function EvidenceHubPage({
                 <tr id={`evidence-${item.id}`} key={item.id} className="scroll-mt-24 hover:bg-slate-50">
                   <td className="px-4 py-2">
                     <span className="font-medium text-slate-900">{item.filename}</span>
-                    <span className="ml-2 text-xs text-slate-400">{formatBytes(item.byteSize)}</span>
+                    <span className="ml-2 text-xs text-slate-500">{formatBytes(item.byteSize)}</span>
                   </td>
                   <td className="px-4 py-2">
                     <Badge tone={item.classification === "RESTRICTED" ? "warning" : "neutral"}>{item.classification}</Badge>
@@ -119,7 +119,7 @@ export default async function EvidenceHubPage({
                   <td className="px-4 py-2 text-slate-500">{item.uploadedAt.toISOString().slice(0, 10)}</td>
                   <td className="px-4 py-2">
                     {tombstoned || item.malwareScanStatus === "INFECTED" || !cleared ? (
-                      <span className="text-xs text-slate-400">
+                      <span className="text-xs text-slate-500">
                         {tombstoned ? "Bytes removed under retention" : !cleared ? "Not authorised" : "Blocked"}
                       </span>
                     ) : (
@@ -138,7 +138,7 @@ export default async function EvidenceHubPage({
         </table>
       </div>
       {!canManage && (
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-slate-500">
           Restricted-classification evidence is hidden from download unless you hold document-management permission.
         </p>
       )}

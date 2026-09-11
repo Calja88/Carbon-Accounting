@@ -154,13 +154,13 @@ export default async function EmsHomePage() {
               }
               return (
                 <li key={mod.id}>
-                  <div className="flex h-full flex-col gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-slate-400">
+                  <div className="flex h-full flex-col gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-slate-500">
                     <span className="flex items-center gap-2 font-medium">
                       <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                       {mod.label}
                     </span>
                     <span className="text-sm">{mod.description}</span>
-                    <span className="mt-auto text-xs font-medium uppercase tracking-wide text-slate-400">
+                    <span className="mt-auto text-xs font-medium uppercase tracking-wide text-slate-500">
                       Planned — {mod.plannedTask}
                     </span>
                   </div>

@@ -75,19 +75,19 @@ function CreateTemplateForm({ inputDefinitionKeys }: { inputDefinitionKeys: stri
       <h3 className="font-medium text-slate-900">New agenda template</h3>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Template key</Label>
-          <Input name="templateKey" required placeholder="e.g. standard-annual" />
+          <Label htmlFor="new-template-key">Template key</Label>
+          <Input id="new-template-key" name="templateKey" required placeholder="e.g. standard-annual" />
         </div>
         <div>
-          <Label>Name</Label>
-          <Input name="name" required placeholder="e.g. Standard annual management review" />
+          <Label htmlFor="new-template-name">Name</Label>
+          <Input id="new-template-name" name="name" required placeholder="e.g. Standard annual management review" />
         </div>
       </div>
       <div>
-        <Label>Agenda items (JSON array of order/title/description/inputDefinitionKey)</Label>
-        <Textarea name="itemsJson" required rows={8} defaultValue={NEW_TEMPLATE_PLACEHOLDER} className="font-mono text-xs" />
+        <Label htmlFor="new-template-items">Agenda items (JSON array of order/title/description/inputDefinitionKey)</Label>
+        <Textarea id="new-template-items" name="itemsJson" required rows={8} defaultValue={NEW_TEMPLATE_PLACEHOLDER} className="font-mono text-xs" />
         {inputDefinitionKeys.length > 0 && (
-          <p className="mt-1 text-xs text-slate-400">Known input keys: {inputDefinitionKeys.join(", ")}</p>
+          <p className="mt-1 text-xs text-slate-500">Known input keys: {inputDefinitionKeys.join(", ")}</p>
         )}
       </div>
       <Feedback state={state} />
@@ -102,14 +102,14 @@ function EditDraftForm({ version, inputDefinitionKeys }: { version: AgendaTempla
     <form action={action} className="space-y-3 rounded border border-dashed border-slate-300 p-3">
       <input type="hidden" name="versionId" value={version.id} />
       <div>
-        <Label>Name</Label>
-        <Input name="name" required defaultValue={version.name} />
+        <Label htmlFor={`draft-name-${version.id}`}>Name</Label>
+        <Input id={`draft-name-${version.id}`} name="name" required defaultValue={version.name} />
       </div>
       <div>
-        <Label>Agenda items (JSON)</Label>
-        <Textarea name="itemsJson" required rows={8} defaultValue={itemsToTemplateJson(version.items)} className="font-mono text-xs" />
+        <Label htmlFor={`draft-items-${version.id}`}>Agenda items (JSON)</Label>
+        <Textarea id={`draft-items-${version.id}`} name="itemsJson" required rows={8} defaultValue={itemsToTemplateJson(version.items)} className="font-mono text-xs" />
         {inputDefinitionKeys.length > 0 && (
-          <p className="mt-1 text-xs text-slate-400">Known input keys: {inputDefinitionKeys.join(", ")}</p>
+          <p className="mt-1 text-xs text-slate-500">Known input keys: {inputDefinitionKeys.join(", ")}</p>
         )}
       </div>
       <Feedback state={state} />
@@ -147,19 +147,19 @@ function SuccessorForm({ templateId, latest, inputDefinitionKeys }: { templateId
       <input type="hidden" name="templateId" value={templateId} />
       <h5 className="text-sm font-semibold text-slate-700">Create successor version (revises v{latest.version})</h5>
       <div>
-        <Label>Name</Label>
-        <Input name="name" required defaultValue={latest.name} />
+        <Label htmlFor={`successor-name-${templateId}`}>Name</Label>
+        <Input id={`successor-name-${templateId}`} name="name" required defaultValue={latest.name} />
       </div>
       <div>
-        <Label>Agenda items (JSON)</Label>
-        <Textarea name="itemsJson" required rows={8} defaultValue={itemsToTemplateJson(latest.items)} className="font-mono text-xs" />
+        <Label htmlFor={`successor-items-${templateId}`}>Agenda items (JSON)</Label>
+        <Textarea id={`successor-items-${templateId}`} name="itemsJson" required rows={8} defaultValue={itemsToTemplateJson(latest.items)} className="font-mono text-xs" />
         {inputDefinitionKeys.length > 0 && (
-          <p className="mt-1 text-xs text-slate-400">Known input keys: {inputDefinitionKeys.join(", ")}</p>
+          <p className="mt-1 text-xs text-slate-500">Known input keys: {inputDefinitionKeys.join(", ")}</p>
         )}
       </div>
       <div>
-        <Label>Revision rationale</Label>
-        <Textarea name="revisionRationale" required rows={2} placeholder="Why this version replaces the previous one" />
+        <Label htmlFor={`successor-rationale-${templateId}`}>Revision rationale</Label>
+        <Textarea id={`successor-rationale-${templateId}`} name="revisionRationale" required rows={2} placeholder="Why this version replaces the previous one" />
       </div>
       <Feedback state={state} />
       <Button type="submit" size="sm" disabled={pending}>{pending ? "Creating..." : "Create successor version"}</Button>
@@ -208,7 +208,7 @@ function TemplateCard({ template, inputDefinitionKeys }: { template: AgendaTempl
                   <li key={item.id}>
                     <span className="font-medium text-slate-900">{item.title}</span>
                     {item.description && <span className="text-slate-500"> — {item.description}</span>}
-                    {item.inputDefinitionKey && <span className="ml-2 text-xs uppercase tracking-wide text-slate-400">{item.inputDefinitionKey}</span>}
+                    {item.inputDefinitionKey && <span className="ml-2 text-xs uppercase tracking-wide text-slate-500">{item.inputDefinitionKey}</span>}
                   </li>
                 ))}
               </ol>

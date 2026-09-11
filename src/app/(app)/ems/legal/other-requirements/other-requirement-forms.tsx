@@ -67,53 +67,53 @@ function typeLabel(type: string): string {
   return SOURCE_TYPES.find((option) => option.value === type)?.label ?? type;
 }
 
-function SourceFieldset({ defaults }: { defaults?: Partial<OtherRequirementSourceRow> }) {
+function SourceFieldset({ uid, defaults }: { uid: string; defaults?: Partial<OtherRequirementSourceRow> }) {
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Source type</Label>
-          <Select name="type" defaultValue={defaults?.type ?? "PERMIT"} required>
+          <Label htmlFor={`type-${uid}`}>Source type</Label>
+          <Select id={`type-${uid}`} name="type" defaultValue={defaults?.type ?? "PERMIT"} required>
             {SOURCE_TYPES.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </Select>
         </div>
         <div>
-          <Label>Issuing party / authority</Label>
-          <Input name="issuingParty" required defaultValue={defaults?.issuingParty} placeholder="Synthetic example: Aster Environment Agency" />
+          <Label htmlFor={`issuingParty-${uid}`}>Issuing party / authority</Label>
+          <Input id={`issuingParty-${uid}`} name="issuingParty" required defaultValue={defaults?.issuingParty} placeholder="Synthetic example: Aster Environment Agency" />
         </div>
       </div>
       <div>
-        <Label>Title</Label>
-        <Input name="title" required defaultValue={defaults?.title} placeholder="Synthetic example: Site A discharge consent" />
+        <Label htmlFor={`title-${uid}`}>Title</Label>
+        <Input id={`title-${uid}`} name="title" required defaultValue={defaults?.title} placeholder="Synthetic example: Site A discharge consent" />
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Reference (optional)</Label>
-          <Input name="reference" defaultValue={defaults?.reference ?? ""} />
+          <Label htmlFor={`reference-${uid}`}>Reference (optional)</Label>
+          <Input id={`reference-${uid}`} name="reference" defaultValue={defaults?.reference ?? ""} />
         </div>
       </div>
       <div>
-        <Label>Description (optional)</Label>
-        <Textarea name="description" rows={3} defaultValue={defaults?.description ?? ""} />
+        <Label htmlFor={`description-${uid}`}>Description (optional)</Label>
+        <Textarea id={`description-${uid}`} name="description" rows={3} defaultValue={defaults?.description ?? ""} />
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <Label>Issued date (optional)</Label>
-          <Input name="issuedAt" type="date" defaultValue={defaults?.issuedAt?.slice(0, 10)} />
+          <Label htmlFor={`issuedAt-${uid}`}>Issued date (optional)</Label>
+          <Input id={`issuedAt-${uid}`} name="issuedAt" type="date" defaultValue={defaults?.issuedAt?.slice(0, 10)} />
         </div>
         <div>
-          <Label>Effective from (optional)</Label>
-          <Input name="effectiveFrom" type="date" defaultValue={defaults?.effectiveFrom?.slice(0, 10)} />
+          <Label htmlFor={`effectiveFrom-${uid}`}>Effective from (optional)</Label>
+          <Input id={`effectiveFrom-${uid}`} name="effectiveFrom" type="date" defaultValue={defaults?.effectiveFrom?.slice(0, 10)} />
         </div>
         <div>
-          <Label>Expiry date (optional)</Label>
-          <Input name="expiryDate" type="date" defaultValue={defaults?.expiryDate?.slice(0, 10)} />
+          <Label htmlFor={`expiryDate-${uid}`}>Expiry date (optional)</Label>
+          <Input id={`expiryDate-${uid}`} name="expiryDate" type="date" defaultValue={defaults?.expiryDate?.slice(0, 10)} />
         </div>
         <div>
-          <Label>Next review date (optional)</Label>
-          <Input name="nextReviewAt" type="date" defaultValue={defaults?.nextReviewAt?.slice(0, 10)} />
+          <Label htmlFor={`nextReviewAt-${uid}`}>Next review date (optional)</Label>
+          <Input id={`nextReviewAt-${uid}`} name="nextReviewAt" type="date" defaultValue={defaults?.nextReviewAt?.slice(0, 10)} />
         </div>
       </div>
     </>
@@ -124,10 +124,10 @@ function CreateSourceForm({ members }: { members: Option[] }) {
   const [state, action, pending] = useActionState(createOtherRequirementSourceAction, emptyState);
   return (
     <form action={action} className="space-y-4 rounded-lg border border-slate-200 p-4">
-      <SourceFieldset />
+      <SourceFieldset uid="new" />
       <div>
-        <Label>Owner</Label>
-        <Select name="ownerMembershipId" defaultValue="" required>
+        <Label htmlFor="ownerMembershipId-new">Owner</Label>
+        <Select id="ownerMembershipId-new" name="ownerMembershipId" defaultValue="" required>
           <option value="" disabled>Choose an owner</option>
           {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
         </Select>
@@ -143,10 +143,10 @@ function EditSourceForm({ source, members }: { source: OtherRequirementSourceRow
   return (
     <form action={action} className="space-y-4 rounded-lg border border-slate-200 p-4">
       <input type="hidden" name="sourceId" value={source.id} />
-      <SourceFieldset defaults={source} />
+      <SourceFieldset uid={source.id} defaults={source} />
       <div>
-        <Label>Owner</Label>
-        <Select name="ownerMembershipId" defaultValue={members.find((m) => m.name === source.ownerName)?.id ?? ""} required>
+        <Label htmlFor={`ownerMembershipId-${source.id}`}>Owner</Label>
+        <Select id={`ownerMembershipId-${source.id}`} name="ownerMembershipId" defaultValue={members.find((m) => m.name === source.ownerName)?.id ?? ""} required>
           {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
         </Select>
       </div>
@@ -162,8 +162,8 @@ function StatusForm({ sourceId }: { sourceId: string }) {
     <form action={action} className="flex flex-wrap items-end gap-3">
       <input type="hidden" name="sourceId" value={sourceId} />
       <div>
-        <Label>Change status</Label>
-        <Select name="status" defaultValue="EXPIRED">
+        <Label htmlFor={`status-${sourceId}`}>Change status</Label>
+        <Select id={`status-${sourceId}`} name="status" defaultValue="EXPIRED">
           <option value="EXPIRED">Expired</option>
           <option value="SUPERSEDED">Superseded</option>
           <option value="WITHDRAWN">Withdrawn</option>
@@ -180,8 +180,8 @@ function UploadEvidenceForm({ sourceId }: { sourceId: string }) {
   return (
     <form action={action} className="flex flex-wrap items-end gap-3">
       <input type="hidden" name="sourceId" value={sourceId} />
-      <div><Label>Attach evidence</Label><Input name="file" type="file" required /></div>
-      <div><Label>Purpose (optional)</Label><Input name="purpose" /></div>
+      <div><Label htmlFor={`evidenceFile-${sourceId}`}>Attach evidence</Label><Input id={`evidenceFile-${sourceId}`} name="file" type="file" required /></div>
+      <div><Label htmlFor={`evidencePurpose-${sourceId}`}>Purpose (optional)</Label><Input id={`evidencePurpose-${sourceId}`} name="purpose" /></div>
       <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Uploading…" : "Attach"}</Button>
       <Feedback state={state} />
     </form>

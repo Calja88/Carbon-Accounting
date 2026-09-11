@@ -77,14 +77,14 @@ function CreateScenario({ aspects }: { aspects: AspectOption[] }) {
       <CardContent>
         <form action={action} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <div><Label>Name</Label><Input name="name" required placeholder="Synthetic chemical spill" /></div>
-            <div><Label>Priority</Label><Select name="priority" defaultValue="MEDIUM"><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="CRITICAL">Critical</option></Select></div>
-            <div><Label>Linked aspect (optional)</Label><Select name="aspectId" defaultValue=""><option value="">None</option>{aspects.map((aspect) => <option key={aspect.id} value={aspect.id}>{aspect.name}</option>)}</Select></div>
-            <div><Label>Review due</Label><Input name="reviewDueDate" type="date" required /></div>
-            <div className="sm:col-span-2"><Label>Trigger</Label><Textarea name="triggerDescription" rows={2} required /></div>
-            <div className="sm:col-span-2"><Label>Receptors</Label><Textarea name="receptors" rows={2} required /></div>
-            <div className="sm:col-span-2"><Label>Credible consequence</Label><Textarea name="credibleConsequence" rows={2} required /></div>
-            <div className="sm:col-span-2"><Label>Existing controls summary (optional)</Label><Textarea name="controlsSummary" rows={2} /></div>
+            <div><Label htmlFor="scenario-name">Name</Label><Input id="scenario-name" name="name" required placeholder="Synthetic chemical spill" /></div>
+            <div><Label htmlFor="scenario-priority">Priority</Label><Select id="scenario-priority" name="priority" defaultValue="MEDIUM"><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="CRITICAL">Critical</option></Select></div>
+            <div><Label htmlFor="scenario-aspect">Linked aspect (optional)</Label><Select id="scenario-aspect" name="aspectId" defaultValue=""><option value="">None</option>{aspects.map((aspect) => <option key={aspect.id} value={aspect.id}>{aspect.name}</option>)}</Select></div>
+            <div><Label htmlFor="scenario-review-due">Review due</Label><Input id="scenario-review-due" name="reviewDueDate" type="date" required /></div>
+            <div className="sm:col-span-2"><Label htmlFor="scenario-trigger">Trigger</Label><Textarea id="scenario-trigger" name="triggerDescription" rows={2} required /></div>
+            <div className="sm:col-span-2"><Label htmlFor="scenario-receptors">Receptors</Label><Textarea id="scenario-receptors" name="receptors" rows={2} required /></div>
+            <div className="sm:col-span-2"><Label htmlFor="scenario-consequence">Credible consequence</Label><Textarea id="scenario-consequence" name="credibleConsequence" rows={2} required /></div>
+            <div className="sm:col-span-2"><Label htmlFor="scenario-controls-summary">Existing controls summary (optional)</Label><Textarea id="scenario-controls-summary" name="controlsSummary" rows={2} /></div>
           </div>
           <Feedback state={state} />
           <Button type="submit" disabled={pending}>{pending ? "Recording…" : "Record scenario"}</Button>
@@ -94,15 +94,15 @@ function CreateScenario({ aspects }: { aspects: AspectOption[] }) {
   );
 }
 
-function PlanFields({ plan, documents, commsPlans }: { plan?: PlanRow; documents: DocumentOption[]; commsPlans: CommsPlanOption[] }) {
+function PlanFields({ idPrefix, plan, documents, commsPlans }: { idPrefix: string; plan?: PlanRow; documents: DocumentOption[]; commsPlans: CommsPlanOption[] }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
-      <div className="sm:col-span-2"><Label>Controlled procedure revision</Label><Select name="controlledDocumentRevisionId" required defaultValue={plan?.controlledDocumentRevisionId ?? ""}><option value="">Select…</option>{documents.map((document) => <option key={document.id} value={document.id}>{document.label}</option>)}</Select></div>
-      <div><Label>Effective date</Label><Input name="effectiveDate" type="date" required /></div>
-      <div><Label>Review due</Label><Input name="reviewDueDate" type="date" required /></div>
-      <div className="sm:col-span-2"><Label>Communication plan (optional)</Label><Select name="communicationPlanId" defaultValue={plan?.communicationPlanId ?? ""}><option value="">None</option>{commsPlans.map((commsPlan) => <option key={commsPlan.id} value={commsPlan.id}>{commsPlan.subject}</option>)}</Select></div>
-      <div className="sm:col-span-2"><Label>Roles and responsibilities (labels only — no real contact details)</Label><Textarea name="roles" rows={3} required defaultValue={plan?.roles ?? ""} /></div>
-      <div className="sm:col-span-2"><Label>Resources</Label><Textarea name="resources" rows={2} required defaultValue={plan?.resources ?? ""} /></div>
+      <div className="sm:col-span-2"><Label htmlFor={`${idPrefix}-document-revision`}>Controlled procedure revision</Label><Select id={`${idPrefix}-document-revision`} name="controlledDocumentRevisionId" required defaultValue={plan?.controlledDocumentRevisionId ?? ""}><option value="">Select…</option>{documents.map((document) => <option key={document.id} value={document.id}>{document.label}</option>)}</Select></div>
+      <div><Label htmlFor={`${idPrefix}-effective-date`}>Effective date</Label><Input id={`${idPrefix}-effective-date`} name="effectiveDate" type="date" required /></div>
+      <div><Label htmlFor={`${idPrefix}-review-due`}>Review due</Label><Input id={`${idPrefix}-review-due`} name="reviewDueDate" type="date" required /></div>
+      <div className="sm:col-span-2"><Label htmlFor={`${idPrefix}-comms-plan`}>Communication plan (optional)</Label><Select id={`${idPrefix}-comms-plan`} name="communicationPlanId" defaultValue={plan?.communicationPlanId ?? ""}><option value="">None</option>{commsPlans.map((commsPlan) => <option key={commsPlan.id} value={commsPlan.id}>{commsPlan.subject}</option>)}</Select></div>
+      <div className="sm:col-span-2"><Label htmlFor={`${idPrefix}-roles`}>Roles and responsibilities (labels only — no real contact details)</Label><Textarea id={`${idPrefix}-roles`} name="roles" rows={3} required defaultValue={plan?.roles ?? ""} /></div>
+      <div className="sm:col-span-2"><Label htmlFor={`${idPrefix}-resources`}>Resources</Label><Textarea id={`${idPrefix}-resources`} name="resources" rows={2} required defaultValue={plan?.resources ?? ""} /></div>
     </div>
   );
 }
@@ -113,7 +113,7 @@ function CreatePlanForm({ scenarioId, documents, commsPlans }: { scenarioId: str
     <form action={action} className="space-y-3 rounded-lg border border-slate-200 p-3">
       <input type="hidden" name="scenarioId" value={scenarioId} />
       <p className="text-sm font-medium">Create emergency plan</p>
-      <PlanFields documents={documents} commsPlans={commsPlans} />
+      <PlanFields idPrefix={`plan-new-${scenarioId}`} documents={documents} commsPlans={commsPlans} />
       <Feedback state={state} /><Button type="submit" variant="secondary" disabled={pending}>{pending ? "Creating…" : "Create plan"}</Button>
     </form>
   );
@@ -126,7 +126,7 @@ function RevisePlanForm({ plan, documents, commsPlans }: { plan: PlanRow; docume
       <summary className="cursor-pointer text-sm font-medium">Revise plan (creates a controlled successor version)</summary>
       <form action={action} className="mt-4 space-y-3">
         <input type="hidden" name="planId" value={plan.id} />
-        <PlanFields plan={plan} documents={documents} commsPlans={commsPlans} />
+        <PlanFields idPrefix={`plan-revise-${plan.id}`} plan={plan} documents={documents} commsPlans={commsPlans} />
         <Feedback state={state} /><Button type="submit" disabled={pending}>{pending ? "Recording revision…" : "Create successor version"}</Button>
       </form>
     </details>
@@ -154,14 +154,14 @@ function AddExerciseActionForm({ exerciseId, members }: { exerciseId: string; me
     <form action={action} className="space-y-2 rounded border border-dashed border-slate-300 p-2 text-xs">
       <input type="hidden" name="exerciseId" value={exerciseId} />
       <p className="font-medium text-slate-600">Add follow-up action</p>
-      <Textarea name="description" rows={2} placeholder="Describe the follow-up action" required />
+      <Textarea aria-label="Follow-up action description" name="description" rows={2} placeholder="Describe the follow-up action" required />
       <div className="grid gap-2 sm:grid-cols-2">
-        <Select name="ownerMembershipId" defaultValue=""><option value="">No owner</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</Select>
-        <Input name="dueDate" type="date" />
+        <Select aria-label="Owner" name="ownerMembershipId" defaultValue=""><option value="">No owner</option>{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</Select>
+        <Input aria-label="Due date" name="dueDate" type="date" />
       </div>
-      <Input name="actionReference" placeholder="Action reference (optional)" />
-      <Input name="incidentReference" placeholder="Incident reference — explicit only, never automatic (optional)" />
-      <Input name="nonconformityReference" placeholder="Nonconformity reference — explicit only, never automatic (optional)" />
+      <Input aria-label="Action reference (optional)" name="actionReference" placeholder="Action reference (optional)" />
+      <Input aria-label="Incident reference (optional)" name="incidentReference" placeholder="Incident reference — explicit only, never automatic (optional)" />
+      <Input aria-label="Nonconformity reference (optional)" name="nonconformityReference" placeholder="Nonconformity reference — explicit only, never automatic (optional)" />
       <Feedback state={state} /><Button type="submit" variant="secondary" disabled={pending}>{pending ? "Recording…" : "Add action"}</Button>
     </form>
   );
@@ -183,7 +183,7 @@ function ExerciseItem({ exercise, members }: { exercise: ExerciseRow; members: M
       {exercise.lessons && <p className="mt-1 text-slate-600">Lessons: {exercise.lessons}</p>}
       <form action={action} className="mt-2 flex flex-wrap items-end gap-2">
         <input type="hidden" name="exerciseId" value={exercise.id} />
-        <div><Label>Attach evidence</Label><Input name="file" type="file" required /></div>
+        <div><Label htmlFor={`exercise-evidence-${exercise.id}`}>Attach evidence</Label><Input id={`exercise-evidence-${exercise.id}`} name="file" type="file" required /></div>
         <Input name="purpose" placeholder="Purpose (optional)" />
         <Button type="submit" variant="secondary" disabled={pending}>{pending ? "Uploading…" : "Attach"}</Button>
         <Feedback state={state} />
@@ -206,14 +206,14 @@ function RecordExerciseForm({ scenarioId, activePlan, members }: { scenarioId: s
       <input type="hidden" name="planId" value={activePlan.id} />
       <p className="text-sm font-medium">Record exercise against plan v{activePlan.version}</p>
       <div className="grid gap-3 sm:grid-cols-3">
-        <div><Label>Type</Label><Select name="type" defaultValue="TABLETOP"><option value="TABLETOP">Tabletop</option><option value="DRILL">Drill</option><option value="FULL_SCALE">Full scale</option></Select></div>
-        <div><Label>Date</Label><Input name="exerciseDate" type="date" required /></div>
-        <div><Label>Outcome</Label><Select name="outcome" defaultValue="SUCCESSFUL"><option value="SUCCESSFUL">Successful</option><option value="PARTIAL">Partial</option><option value="FAILED">Failed</option></Select></div>
+        <div><Label htmlFor={`exercise-type-${scenarioId}`}>Type</Label><Select id={`exercise-type-${scenarioId}`} name="type" defaultValue="TABLETOP"><option value="TABLETOP">Tabletop</option><option value="DRILL">Drill</option><option value="FULL_SCALE">Full scale</option></Select></div>
+        <div><Label htmlFor={`exercise-date-${scenarioId}`}>Date</Label><Input id={`exercise-date-${scenarioId}`} name="exerciseDate" type="date" required /></div>
+        <div><Label htmlFor={`exercise-outcome-${scenarioId}`}>Outcome</Label><Select id={`exercise-outcome-${scenarioId}`} name="outcome" defaultValue="SUCCESSFUL"><option value="SUCCESSFUL">Successful</option><option value="PARTIAL">Partial</option><option value="FAILED">Failed</option></Select></div>
       </div>
-      <div><Label>Participants (Ctrl/Cmd to select multiple)</Label><Select name="participantMembershipIds" multiple required className="min-h-20">{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></div>
-      <div><Label>Objectives</Label><Textarea name="objectives" rows={2} required /></div>
-      <div><Label>Observations (optional)</Label><Textarea name="observations" rows={2} /></div>
-      <div><Label>Lessons (optional)</Label><Textarea name="lessons" rows={2} /></div>
+      <div><Label htmlFor={`exercise-participants-${scenarioId}`}>Participants (Ctrl/Cmd to select multiple)</Label><Select id={`exercise-participants-${scenarioId}`} name="participantMembershipIds" multiple required className="min-h-20">{members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></div>
+      <div><Label htmlFor={`exercise-objectives-${scenarioId}`}>Objectives</Label><Textarea id={`exercise-objectives-${scenarioId}`} name="objectives" rows={2} required /></div>
+      <div><Label htmlFor={`exercise-observations-${scenarioId}`}>Observations (optional)</Label><Textarea id={`exercise-observations-${scenarioId}`} name="observations" rows={2} /></div>
+      <div><Label htmlFor={`exercise-lessons-${scenarioId}`}>Lessons (optional)</Label><Textarea id={`exercise-lessons-${scenarioId}`} name="lessons" rows={2} /></div>
       <Feedback state={state} /><Button type="submit" variant="secondary" disabled={pending}>{pending ? "Recording…" : "Record exercise"}</Button>
     </form>
   );
