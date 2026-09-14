@@ -1,3 +1,4 @@
+import { boardPeriodSchema } from "./schemas";
 import type { AuthorizedAnalyticsWindow, WindowCoverage } from "./carbon-adapter";
 import type { AuthorizedAction } from "./attention";
 import type { AttentionItem, Coverage } from "./contracts";
@@ -9,6 +10,26 @@ import type { AttentionItem, Coverage } from "./contracts";
  * server runtime, which Vitest's plain node environment can't resolve).
  * No Prisma import here, ever.
  */
+
+export interface ScopeSelection { from?: string; to?: string; siteId?: string }
+
+/**
+ * Resolves the URL's scope selection against the organisation's default
+ * period. Pure: the caller supplies the default, so this never queries.
+ *
+ * Two rules matter and are deliberately different:
+ *  - NO period at all is a request for the default period, and may still
+ *    carry a site (`?siteId=x` alone is a valid, complete selection).
+ *  - HALF a period is a malformed selection and stays malformed — it is
+ *    surfaced as a rejected scope rather than silently completed with a
+ *    default the user never chose.
+ */
+export function resolveScopeSelection(raw: ScopeSelection, defaults: { from: string; to: string }): { from: string; to: string; siteId?: string } {
+  const selected = !raw.from && !raw.to
+    ? { ...defaults, ...(raw.siteId ? { siteId: raw.siteId } : {}) }
+    : raw;
+  return boardPeriodSchema.parse(selected);
+}
 
 export const unknownCoverage = (): Coverage => ({
   expected: null,

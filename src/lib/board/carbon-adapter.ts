@@ -1,4 +1,4 @@
-import type { CarbonMetric, CarbonTotals, Coverage, LocalHref, OverviewModel } from "./contracts";
+import type { CarbonMetric, CarbonTotals, CategoryRow, Coverage, LocalHref, OverviewModel, ScopeBreakdownRow } from "./contracts";
 import { assertCoverage, isComplete } from "./metrics";
 import { carbonHref } from "./navigation";
 
@@ -7,6 +7,8 @@ export interface AuthorizedAnalyticsWindow {
   group: CarbonTotals;
   sites: { siteId: string; siteName: string; entityName: string; totals: CarbonTotals }[];
   monthly: { month: string; label: string; total: number }[];
+  /** Group category split, exactly as analytics-service derived it. Not re-aggregated here. */
+  byCategory: { key: string; label: string; kgCo2e: number }[];
 }
 export interface WindowCoverage {
   group: Coverage; sites: Record<string, Coverage>; months: Record<string, Coverage>;
@@ -78,14 +80,14 @@ export function buildCarbonSection(input: CarbonAdapterInput): OverviewModel["ca
       throw new Error("Invalid Scope 3 coverage");
     }
   }
-  const currentHref = carbonHref("/carbon", { ...input, siteId: input.selectedSiteId }), previousHref = carbonHref("/carbon", { from: input.previousFrom, to: input.previousTo, siteId: input.selectedSiteId });
+  const currentHref = carbonHref("/", { ...input, siteId: input.selectedSiteId }), previousHref = carbonHref("/", { from: input.previousFrom, to: input.previousTo, siteId: input.selectedSiteId });
   const current = metric(input.current.group.total, input.currentCoverage.group, input.currentComparisonKey, currentHref);
   const previous = metric(input.previous.group.total, input.previousCoverage.group, input.previousComparisonKey, previousHref);
   const previousSites = new Map(input.previous.sites.map(s => [s.siteId,s]));
   const sites = input.current.sites.map(site => {
     const prior = previousSites.get(site.siteId), coverage = input.currentCoverage.sites[site.siteId] ?? unknownCoverage();
-    const current = metric(site.totals.total, coverage, `${input.currentComparisonKey}:${site.siteId}`, carbonHref("/carbon", { ...input, siteId: site.siteId }));
-    const previous = metric(prior?.totals.total ?? 0, input.previousCoverage.sites[site.siteId] ?? unknownCoverage(), `${input.previousComparisonKey}:${site.siteId}`, carbonHref("/carbon", { from: input.previousFrom, to: input.previousTo, siteId: site.siteId }));
+    const current = metric(site.totals.total, coverage, `${input.currentComparisonKey}:${site.siteId}`, carbonHref("/", { ...input, siteId: site.siteId }));
+    const previous = metric(prior?.totals.total ?? 0, input.previousCoverage.sites[site.siteId] ?? unknownCoverage(), `${input.previousComparisonKey}:${site.siteId}`, carbonHref("/", { from: input.previousFrom, to: input.previousTo, siteId: site.siteId }));
     return { id: site.siteId, name: site.siteName, entity: site.entityName, current, previous, scope1Kg: current.kgCO2e === null ? null : site.totals.scope1, scope2LocationKg: current.kgCO2e === null ? null : site.totals.scope2Location, scope3Kg: current.kgCO2e === null ? null : site.totals.scope3 };
   });
   const priorMonths = new Map(input.previous.monthly.map(m => [m.month,m]));
@@ -93,7 +95,26 @@ export function buildCarbonSection(input: CarbonAdapterInput): OverviewModel["ca
     const previousMonth = `${Number(month.month.slice(0,4))-1}${month.month.slice(4)}`;
     const prior = priorMonths.get(previousMonth), currentCoverage = input.currentCoverage.months[month.month] ?? unknownCoverage();
     const previousCoverage = input.previousCoverage.months[previousMonth] ?? unknownCoverage();
-    return { month: month.month, label: month.label, currentKg: currentCoverage.received ? month.total : null, previousKg: previousCoverage.received && prior ? prior.total : null, href: carbonHref("/carbon", { from: month.month, to: month.month, siteId: input.selectedSiteId }) };
+    return { month: month.month, label: month.label, currentKg: currentCoverage.received ? month.total : null, previousKg: previousCoverage.received && prior ? prior.total : null, href: carbonHref("/", { from: month.month, to: month.month, siteId: input.selectedSiteId }) };
   });
-  return { state: "ready", asOf: input.asOf, data: { current, previous, marketBasedKg: current.kgCO2e === null || !input.marketBasedAvailable ? null : input.current.group.scope2Market, quantifiedCategories: input.quantifiedCategories, screenedCategories: input.screenedCategories, screenedCategoriesReason: input.screenedCategoriesReason, sites, trend } };
+  // A scope figure follows its own period's headline: if that period has no
+  // confirmed result, every scope in it is null too. Never a zero, and never
+  // the other period's number standing in for the missing one.
+  const scopeBreakdown: ScopeBreakdownRow[] = ([
+    ["scope1", "Scope 1 — direct"],
+    ["scope2Location", "Scope 2 — electricity (location-based)"],
+    ["scope3", "Scope 3 — value chain"],
+  ] as const).map(([key, label]) => ({
+    key, label,
+    currentKg: current.kgCO2e === null ? null : input.current.group[key],
+    previousKg: previous.kgCO2e === null ? null : input.previous.group[key],
+  }));
+  // The split of a headline that does not exist is not an empty split with a
+  // zero in every row — it is simply absent.
+  const categories: CategoryRow[] = current.kgCO2e === null
+    ? []
+    : [...input.current.byCategory]
+        .map((c) => ({ key: c.key, label: c.label, kgCO2e: c.kgCo2e }))
+        .sort((a, b) => b.kgCO2e - a.kgCO2e);
+  return { state: "ready", asOf: input.asOf, data: { current, previous, scopeBreakdown, categories, marketBasedKg: current.kgCO2e === null || !input.marketBasedAvailable ? null : input.current.group.scope2Market, quantifiedCategories: input.quantifiedCategories, screenedCategories: input.screenedCategories, screenedCategoriesReason: input.screenedCategoriesReason, sites, trend } };
 }

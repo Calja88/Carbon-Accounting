@@ -1,6 +1,7 @@
 "use client";
-import type { OverviewModel, AttentionItem, SiteRow } from "../../lib/board/contracts";
+import type { CategoryRow, OverviewModel, AttentionItem, ScopeBreakdownRow, SiteRow } from "../../lib/board/contracts";
 import { compareCarbon, formatPercent, formatTonnes } from "../../lib/board/metrics";
+import { TONNES_CO2E, formatShare, formatTonnesCO2e } from "../../lib/format";
 import { AsyncBoundary, BoardLink, MetricValue, PageHeader, SetupState, StatusBadge, Surface } from "./primitives";
 import { DataTable } from "./data-table";
 import { TrendChart } from "./trend-chart";
@@ -12,6 +13,24 @@ export function AttentionPanel({ items, total, compact = false }: { items: Atten
         <h3><BoardLink href={item.source.href}>{item.title}</BoardLink></h3><p className="bd-muted">{item.implication}</p><div className="bd-attention-footer"><span>{item.owner}{item.dueDate ? ` · Due ${item.dueDate}` : ""}</span><BoardLink href={item.source.href} className="bd-text-link">{item.nextAction} →</BoardLink></div></div>
     </li>)}</ol>}
   </Surface>;
+}
+/**
+ * Scope 1 / Scope 2 location-based / Scope 3 for the selected scope.
+ * A change is shown only where the two periods are genuinely comparable —
+ * the same gate the headline comparison uses — so a scope can never read as
+ * an improvement on the strength of a period that has no confirmed result.
+ */
+function ScopeSplit({ rows, comparable }: { rows: ScopeBreakdownRow[]; comparable: boolean }) {
+  return <div className="bd-scope-split">{rows.map(row => {
+    const change = comparable && row.currentKg !== null && row.previousKg !== null && row.previousKg > 0
+      ? ((row.currentKg - row.previousKg) / row.previousKg) * 100
+      : null;
+    return <div key={row.key} data-scope={row.key} data-value={row.currentKg ?? undefined}>
+      <p className="bd-metric-label">{row.label}</p>
+      <p className="bd-metric-number">{formatTonnesCO2e(row.currentKg, { digits: 0 })}{row.currentKg !== null && <span>{TONNES_CO2E}</span>}</p>
+      <StatusBadge tone={change === null ? "neutral" : change < 0 ? "success" : "warning"}>{formatPercent(change)}</StatusBadge>
+    </div>;
+  })}</div>;
 }
 export function ExecutiveOverview({ model }: { model: OverviewModel }) {
   const carbon = model.carbon.state === "ready" ? model.carbon.data : null;
@@ -26,11 +45,11 @@ export function ExecutiveOverview({ model }: { model: OverviewModel }) {
     <div className="bd-overview-top"><Surface className="bd-carbon-hero">
       {!carbon ? <AsyncBoundary state="unavailable" message={carbonMessage} />
       : noSites ? <SetupState title="No sites set up yet" detail="Add the entities and sites you report on, then activity data can be recorded against them." actions={[{ label: "Set up sites", href: "/admin/organisation" }]} />
-      : noCarbonData ? <SetupState title="No emissions data loaded yet" detail={`Nothing has been submitted for ${model.periodLabel} or the comparison period. Record activity data for a site, or choose a different period on the carbon inventory.`} actions={[{ label: "Enter activity data", href: "/entry" }, { label: "Open the carbon inventory", href: "/carbon" }]} />
+      : noCarbonData ? <SetupState title="No emissions data loaded yet" detail={`Nothing has been submitted for ${model.periodLabel} or the comparison period. Record activity data for a site, or widen the period in the scope bar above.`} actions={[{ label: "Enter activity data", href: "/entry" }]} />
       : <><div className="bd-hero-top"><div data-testid="board-total-kg" data-value={carbon.current.kgCO2e ?? undefined}><MetricValue metric={carbon.current} label="Corporate emissions" large /></div><div className="bd-comparison" data-testid="board-comparison-percent" data-value={comparison?.percent ?? undefined}><StatusBadge tone={comparison?.percent !== null && comparison?.percent !== undefined && comparison.percent < 0 ? "success" : "neutral"}>{formatPercent(comparison?.percent ?? null)}</StatusBadge><p>vs {model.previousPeriodLabel}</p><strong>{formatTonnes(carbon.previous.kgCO2e)} tCO₂e</strong></div></div>
         {comparison?.reason && <p className="bd-notice">{comparison.reason}</p>}
         <TrendChart points={carbon.trend} /><div className="bd-carbon-disclosure"><p><strong>Scope 1 + Scope 2 location-based + covered Scope 3</strong><br />Scope 2 market-based companion: <span data-testid="board-scope2-market-kg" data-value={carbon.marketBasedKg ?? undefined}>{formatTonnes(carbon.marketBasedKg)} tCO₂e</span>. Not added to the headline.</p><p><strong>{carbon.quantifiedCategories}/15 Scope 3 categories quantified</strong><br />{carbon.screenedCategories === null ? (carbon.screenedCategoriesReason ?? "Screening not recorded.") : `${carbon.screenedCategories}/15 screened.`} Coverage and exclusions stay visible.</p></div>
-        <BoardLink href={carbon.current.source.href} className="bd-text-link bd-source-link">Explore the carbon inventory →</BoardLink></>}
+        <ScopeSplit rows={carbon.scopeBreakdown} comparable={comparison?.percent !== null && comparison?.percent !== undefined} /></>}
     </Surface>
     {model.attention.state === "ready" ? <AttentionPanel items={model.attention.data.items} total={model.attention.data.total} compact /> : <Surface title="What needs attention"><AsyncBoundary state="unavailable" message={model.attention.message} /></Surface>}</div>
     <div className="bd-overview-bottom"><Surface title="Where emissions come from" subtitle="Open a site to follow the result back to its source and evidence">
@@ -44,7 +63,16 @@ export function ExecutiveOverview({ model }: { model: OverviewModel }) {
         { id: "total", label: "Total tCO₂e", numeric: true, sortValue: r => r.current.kgCO2e, render: r => <strong>{formatTonnes(r.current.kgCO2e)}</strong> },
         { id: "change", label: "Change", numeric: true, render: r => formatPercent(compareCarbon(r.current, r.previous).percent) },
       ]} />}
-    </Surface><Surface title="Management focus" subtitle="A connected view of risk, control and improvement">
+    </Surface><Surface title="Largest sources" subtitle="Group emissions by activity category, largest first">
+      {!carbon ? <AsyncBoundary state="unavailable" message={carbonMessage} />
+      : carbon.categories.length === 0 ? <SetupState title="No category split for this period" detail="A breakdown appears once activity data in this period has been matched to an emission factor. Nothing is being hidden — there is no confirmed result to split yet." actions={[{ label: "Enter activity data", href: "/entry" }]} />
+      : <DataTable<CategoryRow> caption="Group emissions by category" rows={carbon.categories} rowKey={r => r.key} columns={[
+        { id: "category", label: "Category", rowHeader: true, sortValue: r => r.label, render: r => r.label },
+        { id: "kg", label: `Total ${TONNES_CO2E}`, numeric: true, sortValue: r => r.kgCO2e, render: r => formatTonnesCO2e(r.kgCO2e, { digits: 0 }) },
+        { id: "share", label: "Share", numeric: true, sortValue: r => r.kgCO2e, render: r => formatShare(r.kgCO2e, carbon.current.kgCO2e) },
+      ]} />}
+    </Surface></div>
+    <div className="bd-overview-bottom"><Surface title="Management focus" subtitle="A connected view of risk, control and improvement">
       {model.priorities.state !== "ready" ? <AsyncBoundary state="unavailable" message={model.priorities.message} />
       : model.priorities.data.length === 0 ? <SetupState title="Nothing is competing for management attention" detail="No overdue obligation evaluation, blocked action or open nonconformity is outstanding in your permitted scope. Start an EMS assessment or a management review pack to build the next cycle." actions={[{ label: "Aspects & controls", href: "/ems/aspects" }, { label: "Management reviews", href: "/ems/management-reviews" }]} />
       : <div className="bd-priorities">{model.priorities.data.map(item => <article key={item.source.href + item.title}><StatusBadge tone={item.tone}>{item.title}</StatusBadge><p>{item.detail}</p><BoardLink href={item.source.href} className="bd-text-link">{item.source.label} →</BoardLink></article>)}</div>}

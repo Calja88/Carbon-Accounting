@@ -11,13 +11,13 @@ import { monthInputValue, formatRangeLabel } from "@/lib/report-period";
 import { listOverdueOrUnevaluatedObligations } from "@/lib/ems/legal/evaluation-service";
 import { computeReviewFingerprint } from "@/lib/carbon/source-period-obligation-service";
 import { logEvent } from "@/lib/observability/logger";
-import { boardPeriodSchema } from "./schemas";
 import { loadOverview, type OverviewPorts, type BoardScope } from "./overview-service";
 import { buildCarbonSection, type AuthorizedAnalyticsWindow, type WindowCoverage } from "./carbon-adapter";
 import { actionAttention, actionCounts, mergeAttention } from "./attention";
 import type { OverviewModel, AttentionItem, Coverage } from "./contracts";
 import {
   carbonGapAttention, mapCanonicalActionRows, monthKeyOf, monthKeysInRange, priorYear, monthStringToDate,
+  resolveScopeSelection,
 } from "./live-overview-helpers";
 
 /**
@@ -88,6 +88,23 @@ function sumCoverage(cells: readonly Coverage[]): Coverage {
  * `assertCoverageWindow`).
  */
 class InvalidBoardScopeError extends Error {}
+
+/**
+ * The period the dashboard shows when the URL carries no selection.
+ *
+ * Exported because the scope bar lives in the app layout, which never
+ * receives a page's searchParams — the control and the page resolve their
+ * empty-URL default through this one function so they cannot drift apart.
+ * Costs no query at all outside the synthetic demo organisation.
+ */
+export async function defaultScopePeriod(organisationId: string, synthetic: boolean, db: Prisma.TransactionClient = prisma): Promise<{ from: string; to: string }> {
+  if (synthetic) {
+    const latest = await db.carbonSourcePeriodObligation.findFirst({ where: { organisationId }, orderBy: { month: "desc" }, select: { month: true } });
+    if (latest) return { from: `${latest.month.slice(0, 4)}-01`, to: latest.month };
+  }
+  const now = new Date();
+  return { from: monthInputValue(new Date(Date.UTC(now.getUTCFullYear(), 0, 1))), to: monthInputValue(now) };
+}
 
 export async function loadOverviewForContext(context: OrganisationContext, searchParams: OverviewSearchParams, db: Prisma.TransactionClient = prisma): Promise<OverviewModel> {
   // Reuse reads within this one authorised request and database snapshot.
@@ -233,6 +250,7 @@ function toAnalyticsWindow(snapshot: AnalyticsSnapshot): AuthorizedAnalyticsWind
     group: snapshot.group,
     sites: snapshot.sites.map((s) => ({ siteId: s.siteId, siteName: s.siteName, entityName: s.entityName, totals: s.totals })),
     monthly: snapshot.monthly.map((m) => ({ month: m.month, label: m.label, total: m.total })),
+    byCategory: snapshot.byCategory.map((c) => ({ key: c.key, label: c.label, kgCo2e: c.kgCo2e })),
   };
 }
 
@@ -346,18 +364,6 @@ async function correctiveActionAndActionItemAttention(context: OrganisationConte
   const rows = mapCanonicalActionRows(actionItems, correctiveActions);
   return { items: actionAttention(rows, asOfDate), counts: actionCounts(rows) };
 }
-
-function resolveScopeParams(raw: OverviewSearchParams): { from: string; to: string; siteId?: string } {
-  if (!raw.from && !raw.to && !raw.siteId) {
-    const now = new Date();
-    const start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-    return { from: monthInputValue(start), to: monthInputValue(now) };
-  }
-  // A partial or malformed selection is never silently replaced by today's/default period — surfaced as a rejected scope instead (see authorizeScope).
-  return boardPeriodSchema.parse(raw);
-}
-
-
 
 async function authorizeScope(context: OrganisationContext, scope: BoardScope): Promise<void> {
   requireCarbonView(context); // fails before any read — a denial never becomes empty success
@@ -511,12 +517,10 @@ const ports: OverviewPorts<OrganisationContext> = {
  * Vitest's node environment, same documented exception as live-nav.ts).
  */
 async function load(): Promise<OverviewModel> {
-  let selected = searchParams;
-  if (!selected.from && !selected.to && !selected.siteId && await isVerifiedSyntheticOrganisation(context.organisationId, db)) {
-    const latest = await db.carbonSourcePeriodObligation.findFirst({ where: { organisationId: context.organisationId }, orderBy: { month: "desc" }, select: { month: true } });
-    if (latest) selected = { from: `${latest.month.slice(0, 4)}-01`, to: latest.month };
-  }
-  const parsed = resolveScopeParams(selected);
+  const defaults = searchParams.from || searchParams.to
+    ? { from: "", to: "" } // an explicit (even if half-written) period is never completed from a default
+    : await defaultScopePeriod(context.organisationId, await isVerifiedSyntheticOrganisation(context.organisationId, db), db);
+  const parsed = resolveScopeSelection(searchParams, defaults);
   if (parsed.siteId) await requireSiteInScope(context, parsed.siteId, db); // an invalid or foreign selected site is rejected, never broadened to all sites
   const scope: BoardScope = {
     organisationId: context.organisationId,

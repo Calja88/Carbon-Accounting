@@ -18,7 +18,7 @@ export const BOARD_NAV: BoardNavItem[] = [
     id: "advanced",
     label: "Advanced",
     href: "/advanced",
-    matches: ["/advanced", "/ems", "/assessments", "/products", "/suppliers", "/admin/ai", "/carbon", "/calculations"],
+    matches: ["/advanced", "/ems", "/assessments", "/products", "/suppliers", "/admin/ai", "/calculations"],
     group: "administration",
   },
 ];
@@ -35,6 +35,22 @@ export function localHref(href: string): LocalHref {
   const url = new URL(href, "https://board.invalid");
   if (url.origin !== "https://board.invalid") throw new Error("Expected same-origin URL");
   return href as LocalHref;
+}
+/**
+ * /carbon was the second carbon dashboard; it is now one dashboard at /.
+ * Old links, bookmarks and the report drilldowns keep working: the scope
+ * they carry is translated rather than dropped. Months may arrive as
+ * YYYY-MM or as a full YYYY-MM-DD date (the shape /carbon's own links used),
+ * and anything that is neither is discarded rather than guessed at.
+ */
+export function carbonRedirectTarget(params: Record<string, string | string[] | undefined>): LocalHref {
+  const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
+  const month = (value: string | string[] | undefined) => /^(\d{4})-(0[1-9]|1[0-2])(?:-|$)/.exec(first(value)?.trim() ?? "")?.slice(1, 3).join("-");
+  const from = month(params.from), to = month(params.to);
+  const siteId = first(params.siteId)?.trim() || undefined;
+  if (from && to) return carbonHref("/", { from, to, siteId });
+  // No usable period: / resolves its own default, and any site selection still travels with the visitor.
+  return localHref(siteId ? `/?siteId=${encodeURIComponent(siteId)}` : "/");
 }
 export function carbonHref(path: string, scope: { from: string; to: string; siteId?: string }): LocalHref {
   const url = new URL(localHref(path), "https://board.invalid");

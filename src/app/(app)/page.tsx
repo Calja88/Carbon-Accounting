@@ -5,12 +5,18 @@ import { OrganisationAccessError } from "@/lib/organisation/session";
 import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { getBoardOverview, InvalidBoardScopeError, type BoardOverviewSearchParams } from "@/lib/board/overview-entry";
 import { ExecutiveOverview } from "@/components/board/overview";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader, Surface } from "@/components/ui/primitives";
+import { logEvent } from "@/lib/observability/logger";
 
 /**
- * BD05: the real executive Overview. Supersedes BD04's temporary
- * `redirect("/carbon")` — the working emissions dashboard stays reachable
- * at `/carbon`, unchanged, per INTEGRATION/LIVE_BINDINGS.md §1.
+ * The one carbon dashboard. Phase 1B folded /carbon's figures in here and
+ * left that route as a redirect, so there is a single place a period or site
+ * selection has to be understood.
+ *
+ * The four handled cases below are all rejected *selections* — a denial or an
+ * unusable scope, which the visitor can correct. Anything else is a genuine
+ * fault: it is logged with its root cause and rethrown to the error boundary
+ * rather than being flattened into an empty dashboard.
  */
 export default async function OverviewPage({
   searchParams,
@@ -32,6 +38,16 @@ export default async function OverviewPage({
     } else if (err instanceof ZodError) {
       model = { unavailable: { title: "Invalid period selected", detail: "The selected date range or site could not be understood. Use the period picker on the Carbon page to choose a valid range." } };
     } else {
+      // Structured and redacted by the logger — the cause is recorded, no secret is.
+      logEvent({
+        level: "error",
+        message: "overview.load_failed",
+        fields: {
+          route: "/",
+          error: err instanceof Error ? err.name : typeof err,
+          detail: err instanceof Error ? err.message : String(err),
+        },
+      });
       throw err;
     }
   }
@@ -39,19 +55,17 @@ export default async function OverviewPage({
   return <ExecutiveOverview model={model} />;
 }
 
+/** A selection this visitor cannot be shown — not a failure, and not an empty dashboard either. */
 function Unavailable({ title, detail }: { title: string; detail: string }) {
   return (
-    <div className="flex min-h-[50vh] items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <Card>
-          <CardHeader>
-            <CardTitle>{title}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-slate-600">{detail}</p>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+    <>
+      <PageHeader eyebrow="Dashboard" title={title} />
+      <Surface>
+        <div className="bd-empty" role="status">
+          <h3>{title}</h3>
+          <p>{detail}</p>
+        </div>
+      </Surface>
+    </>
   );
 }

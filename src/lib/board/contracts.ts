@@ -28,6 +28,15 @@ export interface SiteRow {
   id: string; name: string; entity: string; current: CarbonMetric; previous: CarbonMetric;
   scope1Kg: number | null; scope2LocationKg: number | null; scope3Kg: number | null;
 }
+/** Group scope split for the selected scope. A period with no confirmed result carries null, never a zero. */
+export interface ScopeBreakdownRow {
+  key: "scope1" | "scope2Location" | "scope3";
+  label: string;
+  currentKg: number | null;
+  previousKg: number | null;
+}
+/** Largest-first activity/GHG category split for the current period only. */
+export interface CategoryRow { key: string; label: string; kgCO2e: number }
 export interface TrendPoint { month: string; label: string; currentKg: number | null; previousKg: number | null; href: LocalHref }
 export type ActionState = "OPEN" | "IN_PROGRESS" | "BLOCKED" | "COMPLETED" | "VERIFIED" | "REOPENED" | "CANCELLED";
 export type AttentionReason = "overdue" | "blocked" | "verification" | "review" | "missing" | "upcoming";
@@ -51,6 +60,10 @@ export interface OverviewModel {
     screenedCategories: number | null;
     screenedCategoriesReason: string | null;
     sites: SiteRow[]; trend: TrendPoint[];
+    /** Scope 1 / Scope 2 location-based / Scope 3, with the prior period alongside. */
+    scopeBreakdown: ScopeBreakdownRow[];
+    /** Empty when the current period has no confirmed result — an absent split, not a zero one. */
+    categories: CategoryRow[];
   }>;
   attention: Section<{
     items: AttentionItem[]; total: number; openActions: number; awaitingVerification: number;

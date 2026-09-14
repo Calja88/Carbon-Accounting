@@ -22,7 +22,7 @@ function model(overrides: Partial<OverviewModel> = {}): OverviewModel {
     carbon: { state: "ready", asOf: "2026-09-11T09:00:00.000Z", data: {
       current: missing(), previous: missing(), marketBasedKg: null, quantifiedCategories: 0,
       screenedCategories: null, screenedCategoriesReason: "Scope 3 screening is not recorded for this reporting boundary.",
-      sites: [], trend: [],
+      sites: [], trend: [], scopeBreakdown: [], categories: [],
     } },
     attention: { state: "ready", asOf: "2026-09-11T09:00:00.000Z", data: { items: [], total: 0, openActions: 0, awaitingVerification: 0, emsAvailable: true, emsUnavailableReason: null } },
     priorities: { state: "ready", asOf: "2026-09-11T09:00:00.000Z", data: [] },
