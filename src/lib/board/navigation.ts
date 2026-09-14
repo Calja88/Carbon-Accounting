@@ -1,20 +1,26 @@
 import type { LocalHref } from "./contracts";
 
 export interface BoardNavItem { id: string; label: string; href: LocalHref; matches: string[]; group: "workspace" | "environment" | "assurance" | "resources" | "administration" }
-/** Candidate routes only. Pass ONLY entries whose route and current user's grant have been verified server-side. */
+/**
+ * Phase 0 product reset: carbon-first nav. Candidate routes only — pass
+ * ONLY entries whose route and current user's grant have been verified
+ * server-side (see live-nav.ts). EMS/LCA/AI live behind "Advanced" now
+ * rather than as top-level nav entries; every href below is a route that
+ * exists on this branch today.
+ */
 export const BOARD_NAV: BoardNavItem[] = [
-  { id: "overview", label: "Overview", href: "/", matches: ["/", "/overview"], group: "workspace" },
-  { id: "attention", label: "Attention", href: "/attention", matches: ["/attention"], group: "workspace" },
-  { id: "carbon", label: "Carbon", href: "/carbon", matches: ["/carbon", "/entry", "/calculations", "/reports"], group: "workspace" },
-  { id: "products", label: "Products", href: "/assessments", matches: ["/assessments", "/products", "/suppliers"], group: "workspace" },
-  { id: "aspects", label: "Aspects & controls", href: "/ems/aspects", matches: ["/ems/aspects", "/ems/processes", "/ems/controls"], group: "environment" },
-  { id: "compliance", label: "Compliance", href: "/ems/legal/obligations", matches: ["/ems/legal"], group: "environment" },
-  { id: "objectives", label: "Objectives", href: "/ems/objectives", matches: ["/ems/objectives", "/ems/actions"], group: "environment" },
-  { id: "audits", label: "Audits", href: "/ems/audits", matches: ["/ems/audits"], group: "assurance" },
-  { id: "nonconformities", label: "Nonconformities", href: "/ems/nonconformities", matches: ["/ems/nonconformities"], group: "assurance" },
-  { id: "evidence", label: "Evidence", href: "/evidence", matches: ["/evidence", "/ems/evidence", "/ems/documents"], group: "resources" },
-  { id: "packs", label: "Management packs", href: "/management-packs", matches: ["/management-packs", "/ems/management-reviews"], group: "resources" },
-  { id: "admin", label: "Administration", href: "/admin", matches: ["/admin"], group: "administration" },
+  { id: "overview", label: "Dashboard", href: "/", matches: ["/", "/overview"], group: "workspace" },
+  { id: "entry", label: "Activity Data", href: "/entry", matches: ["/entry"], group: "workspace" },
+  { id: "factors", label: "Factor Datasets", href: "/admin/factors", matches: ["/admin/factors"], group: "workspace" },
+  { id: "evidence", label: "Evidence", href: "/documents", matches: ["/documents"], group: "workspace" },
+  { id: "reports", label: "Reports", href: "/reports", matches: ["/reports"], group: "workspace" },
+  {
+    id: "advanced",
+    label: "Advanced",
+    href: "/advanced",
+    matches: ["/advanced", "/ems", "/assessments", "/products", "/suppliers", "/admin/ai", "/carbon", "/calculations"],
+    group: "administration",
+  },
 ];
 export function pathMatches(pathname: string, prefix: string): boolean {
   return prefix === "/" ? pathname === "/" : pathname === prefix || pathname.startsWith(`${prefix}/`);

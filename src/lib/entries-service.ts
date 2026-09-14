@@ -9,6 +9,7 @@ import {
   EntryStatus,
   FactorBasis,
   FactorSourceType,
+  FactorVisibility,
   Scope,
   TariffType,
 } from "@prisma/client";
@@ -27,6 +28,22 @@ import { requirePermission } from "@/lib/rbac/authorize";
  * a save; the entry is stored and surfaced as "awaiting emission factor"
  * (see EntryStatus.AWAITING_FACTOR) instead. */
 export class FactorNotFoundError extends Error {}
+
+/**
+ * Phase 1 tenancy (T18): a SUPPLIER_SPECIFIC set is ORGANISATION-visibility,
+ * owned by the importing tenant only — without this filter, two
+ * organisations naming the same supplier would resolve each other's
+ * supplier-specific factors. Mirrors `visibleFactorSetFilter` in
+ * factor-sets-service.ts / lca/factor-library.ts.
+ */
+function visibleFactorSetFilter(organisationId: string): Prisma.EmissionFactorSetWhereInput {
+  return {
+    OR: [
+      { visibility: FactorVisibility.PLATFORM },
+      { visibility: FactorVisibility.ORGANISATION, ownerOrganisationId: organisationId },
+    ],
+  };
+}
 
 function toFactorRow(factor: EmissionFactor, factorSet: EmissionFactorSet): FactorRow {
   return {
@@ -49,25 +66,37 @@ function toFactorRow(factor: EmissionFactor, factorSet: EmissionFactorSet): Fact
 async function findFactorSet(
   sourceType: Exclude<FactorSourceType, "SUPPLIER_SPECIFIC">,
   asOfDate: Date,
+  organisationId: string,
   db: Prisma.TransactionClient = prisma,
 ): Promise<EmissionFactorSet | null> {
   return db.emissionFactorSet.findFirst({
     where: {
       sourceType,
       effectiveFrom: { lte: asOfDate },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOfDate } }],
+      AND: [
+        { OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOfDate } }] },
+        visibleFactorSetFilter(organisationId),
+      ],
     },
     orderBy: { effectiveFrom: "desc" },
   });
 }
 
-async function findSupplierFactorSet(supplierName: string, asOfDate: Date, db: Prisma.TransactionClient = prisma): Promise<EmissionFactorSet | null> {
+async function findSupplierFactorSet(
+  supplierName: string,
+  asOfDate: Date,
+  organisationId: string,
+  db: Prisma.TransactionClient = prisma,
+): Promise<EmissionFactorSet | null> {
   return db.emissionFactorSet.findFirst({
     where: {
       sourceType: FactorSourceType.SUPPLIER_SPECIFIC,
       supplierName,
       effectiveFrom: { lte: asOfDate },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOfDate } }],
+      AND: [
+        { OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOfDate } }] },
+        visibleFactorSetFilter(organisationId),
+      ],
     },
     orderBy: { effectiveFrom: "desc" },
   });
@@ -103,11 +132,12 @@ async function resolveFactorMultiSource(
   subtypeKey: string | null,
   basis: FactorBasis,
   asOfDate: Date,
+  organisationId: string,
   supplierName?: string | null,
   db: Prisma.TransactionClient = prisma,
 ): Promise<ResolvedFactor | null> {
   if (supplierName) {
-    const supplierSet = await findSupplierFactorSet(supplierName, asOfDate, db);
+    const supplierSet = await findSupplierFactorSet(supplierName, asOfDate, organisationId, db);
     if (supplierSet) {
       const factor =
         (await findFactorInSet(supplierSet.id, category, subtypeKey, basis, db)) ??
@@ -116,13 +146,13 @@ async function resolveFactorMultiSource(
     }
   }
 
-  const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, asOfDate, db);
+  const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, asOfDate, organisationId, db);
   if (officialSet) {
     const factor = await findFactorInSet(officialSet.id, category, subtypeKey, basis, db);
     if (factor) return { factor, factorSet: officialSet, tierOverride: null };
   }
 
-  const eeioSet = await findFactorSet(FactorSourceType.EEIO_SPEND_BASED, asOfDate, db);
+  const eeioSet = await findFactorSet(FactorSourceType.EEIO_SPEND_BASED, asOfDate, organisationId, db);
   if (eeioSet) {
     const factor = await findFactorInSet(eeioSet.id, category, subtypeKey, basis, db);
     if (factor) return { factor, factorSet: eeioSet, tierOverride: null };
@@ -257,7 +287,7 @@ export async function runCalculationsForEntry(ctx: TenantRepositoryContext, entr
   try {
     if (dataPoint.scope === Scope.SCOPE_2 && dataPoint.factorCategory === "grid_electricity") {
       const contract = await findActiveEnergyContract(entry.siteId, entry.periodStart, tx);
-      const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, entry.periodStart, tx);
+      const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, entry.periodStart, ctx.organisationId, tx);
       if (!officialSet) {
         throw new FactorNotFoundError("No official DEFRA/DESNZ factor set is effective for this period.");
       }
@@ -289,6 +319,7 @@ export async function runCalculationsForEntry(ctx: TenantRepositoryContext, entr
         entry.factorOption?.subtypeKey ?? null,
         FactorBasis.STANDARD,
         entry.periodStart,
+        ctx.organisationId,
         entry.supplierName,
         tx,
       );
@@ -300,7 +331,7 @@ export async function runCalculationsForEntry(ctx: TenantRepositoryContext, entr
       const result = calculateEmission(inputValue, inputUnit, toFactorRow(resolved.factor, resolved.factorSet));
       results = [{ basis: FactorBasis.STANDARD, result, tierOverride: resolved.tierOverride }];
     } else {
-      const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, entry.periodStart, tx);
+      const officialSet = await findFactorSet(FactorSourceType.OFFICIAL_DEFRA_DESNZ, entry.periodStart, ctx.organisationId, tx);
       if (!officialSet) {
         throw new FactorNotFoundError("No official DEFRA/DESNZ factor set is effective for this period.");
       }
@@ -371,19 +402,20 @@ export async function runCalculationsForEntry(ctx: TenantRepositoryContext, entr
 }
 
 /**
- * Re-runs calculation for every entry stuck at AWAITING_FACTOR — call this
- * right after a new EmissionFactorSet is imported so any Scope 3 data
- * collected before the factor existed gets its figure the moment it's
- * available, with no separate manual step. A newly-imported platform factor
- * set is global, so this is a controlled platform fan-out (Phase 1 spec:
- * "background functions require explicit organisation or controlled
- * platform fan-out") — it builds one audited system context per distinct
- * organisation among the pending entries rather than updating across
- * tenants in one unscoped query. An entry not yet backfilled with an
- * organisationId (T12) is skipped, not guessed at.
+ * Re-runs calculation for every entry stuck at AWAITING_FACTOR, scoped to a
+ * single organisation — call this right after that organisation imports a
+ * new EmissionFactorSet, so any Scope 3 data collected before the factor
+ * existed gets its figure the moment it's available, with no separate
+ * manual step. Phase 0: one organisation's factor import must not trigger
+ * recalculation of another organisation's entries, so this only ever scans
+ * the importing organisation's own AWAITING_FACTOR entries — never a
+ * cross-tenant fan-out. An entry not yet backfilled with an organisationId
+ * (T12) is skipped, not guessed at.
  */
-export async function recalculatePendingEntries() {
-  const pending = await prisma.activityEntry.findMany({ where: { status: EntryStatus.AWAITING_FACTOR } });
+export async function recalculatePendingEntries(organisationId: string) {
+  const pending = await prisma.activityEntry.findMany({
+    where: { status: EntryStatus.AWAITING_FACTOR, organisationId },
+  });
   let recalculated = 0;
   let checked = 0;
   for (const entry of pending) {
@@ -446,6 +478,7 @@ export async function deriveCategory3Calculations(ctx: TenantRepositoryContext, 
       subtypeKey,
       FactorBasis.STANDARD,
       source.activityEntry.periodStart,
+      ctx.organisationId,
       null,
     );
 

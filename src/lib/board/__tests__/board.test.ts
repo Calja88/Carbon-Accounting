@@ -31,7 +31,7 @@ describe("date and route boundaries", () => {
   it("rejects impossible dates", () => expect(() => dateOnly("2026-02-30")).toThrow());
   it.each(["//evil.test", "/\\evil.test", "javascript:alert(1)", "/\n/evil.test"])("rejects unsafe URL %s", href => expect(() => localHref(href)).toThrow());
   it("avoids partial route prefix collisions", () => expect(activeNavId(BOARD_NAV, "/entry-other")).toBeNull());
-  it("uses the correct carbon destination", () => expect(activeNavId(BOARD_NAV, "/calculations/abc")).toBe("carbon"));
+  it("uses the correct carbon destination", () => expect(activeNavId(BOARD_NAV, "/calculations/abc")).toBe("advanced"));
   it("preserves exact source filters", () => expect(carbonHref("/entry?status=missing", { from: "2026-01", to: "2026-08", siteId: "a b" })).toBe("/entry?status=missing&from=2026-01&to=2026-08&siteId=a+b"));
   it("validates period order", () => expect(boardPeriodSchema.safeParse({ from: "2026-08", to: "2026-01" }).success).toBe(false));
   it("rejects actor/policy injection", () => expect(boardTransitionSchema.safeParse({ recordId: "x", expectedRevision: "1", decision: "effective", rationale: "Review evidence meets the stated criteria", evidenceIds: [], effectiveDate: "2026-09-08", fourEyesEnabled: false }).success).toBe(false));

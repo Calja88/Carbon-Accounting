@@ -1,13 +1,29 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { prisma } from "@/lib/prisma";
 import { ExpenseInImportForm } from "./import-form";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { requireSiteInScope } from "@/lib/repositories/carbon-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 
 export default async function BusinessTravelImportPage({ params }: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await params;
-  const site = await prisma.site.findUnique({ where: { id: siteId } });
-  if (!site) notFound();
+
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
+
+  let site;
+  try {
+    site = await requireSiteInScope(context, siteId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) notFound();
+    throw err;
+  }
 
   return (
     <div className="max-w-3xl">

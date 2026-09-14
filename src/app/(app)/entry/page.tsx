@@ -1,12 +1,26 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { MapPin } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent } from "@/components/ui/card";
 import { ENTITY_LOGOS } from "@/lib/entity-logos";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { accessibleSiteFilter, accessibleEntityFilter, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 export default async function EntrySiteListPage() {
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
+
+  const ctx = toTenantRepositoryContext(context);
   const entities = await prisma.entity.findMany({
-    include: { sites: { where: { isActive: true }, orderBy: { name: "asc" } } },
+    where: tenantWhere(ctx, accessibleEntityFilter(context)),
+    include: { sites: { where: { isActive: true, ...accessibleSiteFilter(context) }, orderBy: { name: "asc" } } },
     orderBy: { name: "asc" },
   });
 

@@ -17,6 +17,9 @@
     "backfill:organisation": "tsx scripts/backfill-organisation.ts",
     "migrate:contract-preflight": "tsx scripts/contract-migration-preflight.ts",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:board": "vitest run tests/board-product",
+    "test:postgres": "vitest run tests/checkpoint-a/postgres.test.ts",
     "handoff:full": "node scripts/handoff/full-handoff.mjs",
     "handoff:review": "node scripts/handoff/review-handoff.mjs",
     "handoff:secret-audit": "node scripts/handoff/secret-audit.mjs"

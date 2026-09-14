@@ -1,23 +1,39 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { defaultPeriodInputValue } from "@/lib/period";
 import { EntryForm } from "./entry-form";
 import { SurveyForm } from "./survey-form";
+import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
+import { requireSiteInScope } from "@/lib/repositories/carbon-repository";
+import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 
 export default async function EntryFormPage({ params }: { params: Promise<{ siteId: string; code: string }> }) {
   const { siteId, code } = await params;
 
-  const [site, dataPoint] = await Promise.all([
-    prisma.site.findUnique({ where: { id: siteId } }),
-    prisma.activityDataPoint.findUnique({
-      where: { code },
-      include: { factorOptions: { orderBy: { sortOrder: "asc" } } },
-    }),
-  ]);
+  let context;
+  try {
+    context = await requireOrganisationContext();
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    throw err;
+  }
 
-  if (!site || !dataPoint || (dataPoint.formType !== "QUANTITY" && dataPoint.formType !== "SURVEY")) notFound();
+  let site;
+  try {
+    site = await requireSiteInScope(context, siteId);
+  } catch (err) {
+    if (err instanceof TenantOwnershipError) notFound();
+    throw err;
+  }
+
+  const dataPoint = await prisma.activityDataPoint.findUnique({
+    where: { code },
+    include: { factorOptions: { orderBy: { sortOrder: "asc" } } },
+  });
+
+  if (!dataPoint || (dataPoint.formType !== "QUANTITY" && dataPoint.formType !== "SURVEY")) notFound();
 
   return (
     <div>
