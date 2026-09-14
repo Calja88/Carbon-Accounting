@@ -30,7 +30,7 @@ function isPermitted(id: string, context: OrganisationContext): boolean {
         hasPermission(context, "ai.settings.manage")
       );
     default:
-      // overview, entry, evidence, reports
+      // overview, entry, sources, evidence, reports
       return hasPermission(context, "carbon.view");
   }
 }

@@ -158,6 +158,7 @@ model Organisation {
   reportSnapshots     ReportSnapshot[]
   sourceDocuments     SourceDocument[]
   carbonSourcePeriodObligations CarbonSourcePeriodObligation[]
+  sourceConfigs                 OrganisationSourceConfig[]
 
   // LCA-domain roots (T17). lcaMethodologyProfiles stays nullable/optional —
   // a methodology profile may be platform-shared (organisationId null) —
@@ -671,6 +672,7 @@ model Site {
   energyContracts  SiteEnergyContract[]
   commutingSurveys CommutingSurvey[]
   carbonSourcePeriodObligations CarbonSourcePeriodObligation[]
+  sourceConfigs                 OrganisationSourceConfig[]
 
   // Product LCA / PCF
   productManufacturingLocations ProductManufacturingLocation[]
@@ -830,6 +832,7 @@ model ActivityDataPoint {
 
   factorOptions FactorOption[]
   entries       ActivityEntry[]
+  sourceConfigs OrganisationSourceConfig[]
 }
 
 /// Selectable sub-type options for a data point that needs one (fuel type,
@@ -8953,4 +8956,52 @@ model BoardManagementPack {
   updatedAt        DateTime                  @updatedAt
 
   @@unique([organisationId, reference])
+}
+
+/// Reporting-frequency cadence a site is expected to supply an emission
+/// source on. Deliberately coarse and machine-readable, unlike the free-text
+/// `ActivityDataPoint.frequency` hint (e.g. "Annually / on contract change")
+/// which stays a human-facing suggestion. AD_HOC means "no fixed cadence" —
+/// never "unknown", and never "nothing expected".
+enum CarbonSourceFrequency {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+  AD_HOC
+}
+
+/// Phase 2A: the thin per-organisation/per-site configuration layer over the
+/// GLOBAL `ActivityDataPoint` catalogue — which emission sources a given site
+/// is expected to report, and how often. The catalogue itself is never forked
+/// per tenant; only this join carries tenant state.
+///
+/// A row here is a plan, not evidence: it creates no
+/// `CarbonSourcePeriodObligation`, no `ActivityEntry`, and takes no part in
+/// any calculation, factor resolution or report snapshot. Phase 2B turns
+/// enabled configs into period obligations; until then this table is read
+/// only by the /sources screen.
+///
+/// Disabling is a state change (`enabled = false`), never a delete: "this
+/// site used to report this source" stays visible, and the unique key below
+/// means re-enabling reuses the same row rather than creating a second,
+/// contradictory configuration for the same site and source.
+model OrganisationSourceConfig {
+  id                  String                @id @default(cuid())
+  organisationId      String
+  organisation        Organisation          @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  siteId              String
+  site                Site                  @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  activityDataPointId String
+  activityDataPoint   ActivityDataPoint     @relation(fields: [activityDataPointId], references: [id], onDelete: Restrict)
+  enabled             Boolean               @default(true)
+  frequency           CarbonSourceFrequency
+  /// When this source started applying to the site — set the first time it
+  /// is enabled, never back-dated by the service on its own.
+  effectiveFrom       DateTime              @default(now())
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  @@unique([organisationId, siteId, activityDataPointId], name: "organisationSiteSource", map: "OrganisationSourceConfig_org_site_source_key")
+  @@index([organisationId, siteId])
+  @@index([organisationId, enabled])
 }
