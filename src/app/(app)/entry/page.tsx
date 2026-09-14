@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { MapPin } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent } from "@/components/ui/card";
+import { PageHeader, SetupState } from "@/components/ui/primitives";
 import { ENTITY_LOGOS } from "@/lib/entity-logos";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { accessibleSiteFilter, accessibleEntityFilter, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
@@ -24,12 +25,23 @@ export default async function EntrySiteListPage() {
     orderBy: { name: "asc" },
   });
 
+  const hasSites = entities.some((entity) => entity.sites.length > 0);
+
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Data entry</h1>
-        <p className="mt-1 text-sm text-slate-500">Pick a site to enter its activity data.</p>
-      </div>
+      <PageHeader
+        eyebrow="Activity data"
+        title="Data entry"
+        description="Pick a site to enter or review its activity data for a period. Each entry is matched to an emission factor when it is saved."
+      />
+
+      {!hasSites && (
+        <SetupState
+          title="No sites available to you yet"
+          detail="Activity data is entered per site. Once a site is added to your organisation and you have access to it, it appears here."
+          actions={[{ label: "Open admin", href: "/admin" }]}
+        />
+      )}
 
       <div className="space-y-6">
         {entities.map((entity) => (

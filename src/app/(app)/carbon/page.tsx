@@ -19,6 +19,8 @@ import { GroupedColumnChart } from "@/components/charts/grouped-column-chart";
 import { TrendLineChart } from "@/components/charts/trend-line-chart";
 import { DeltaBadge } from "@/components/charts/chart-parts";
 import { PERIOD_COLORS, SCOPE_COLORS, SCOPE_SERIES, formatTonnes } from "@/components/charts/palette";
+import { PageHeader } from "@/components/ui/primitives";
+import { CO2E, TONNES_CO2E, formatShare } from "@/lib/format";
 
 const SCOPE_LEGEND = SCOPE_SERIES.map((s) => ({ label: s.label, color: s.color }));
 
@@ -101,16 +103,17 @@ export default async function DashboardPage({
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Emissions dashboard</h1>
-          <p className="mt-1 text-sm text-slate-500">
+      <PageHeader
+        eyebrow="Corporate inventory"
+        title="Emissions dashboard"
+        description={
+          <>
             {formatRangeLabel(range.periodStart, range.periodEnd)} · compared with{" "}
             {formatRangeLabel(analytics.previousPeriodStart, analytics.previousPeriodEnd)}
-          </p>
-        </div>
-        <PeriodSelector action="/carbon" startMonth={range.startMonth} endMonth={range.endMonth} />
-      </div>
+          </>
+        }
+        actions={<PeriodSelector action="/carbon" startMonth={range.startMonth} endMonth={range.endMonth} />}
+      />
 
       {!analytics.hasAnyData && (
         <Card className="border-amber-200 bg-amber-50/50">
@@ -138,13 +141,13 @@ export default async function DashboardPage({
             <div className="mt-1 text-5xl font-semibold leading-none text-slate-900">
               {formatTonnes(analytics.group.total)}
             </div>
-            <div className="mt-1 text-sm text-slate-500">tonnes CO2e</div>
+            <div className="mt-1 text-sm text-[var(--bd-muted)]">tonnes {CO2E}</div>
             <div className="mt-3">
               <DeltaBadge delta={analytics.groupDelta} />
             </div>
             <p className="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-400">
               Scope 1 + Scope 2 (location-based) + Scope 3. Market-based Scope 2 is{" "}
-              {formatTonnes(analytics.group.scope2Market)} t, reported alongside rather than added in.
+              {formatTonnes(analytics.group.scope2Market)} {TONNES_CO2E}, reported alongside rather than added in.
             </p>
           </CardContent>
         </Card>
@@ -158,7 +161,7 @@ export default async function DashboardPage({
                   <span className="text-sm font-medium text-slate-600">{card.label}</span>
                 </div>
                 <div className="mt-2 text-3xl font-semibold text-slate-900">{formatTonnes(card.value)}</div>
-                <div className="text-xs text-slate-400">tonnes CO2e</div>
+                <div className="text-xs text-[var(--bd-muted)]">tonnes {CO2E}</div>
                 <div className="mt-2">
                   <DeltaBadge delta={card.delta} />
                 </div>
@@ -181,7 +184,7 @@ export default async function DashboardPage({
           {/* Table view — the figures are never available only as a chart. */}
           <div className="mt-5 overflow-x-auto">
             <table className="w-full min-w-[560px] text-sm">
-              <caption className="sr-only">Emissions by site and scope, in tonnes CO2e</caption>
+              <caption className="sr-only">Emissions by site and scope, in tonnes {CO2E}</caption>
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-500">
                   <th scope="col" className="pb-2 font-medium">Site</th>
@@ -223,7 +226,7 @@ export default async function DashboardPage({
                 </tr>
               </tbody>
             </table>
-            <p className="mt-2 text-xs text-slate-400">All figures in tonnes CO2e. Scope 2 shown location-based.</p>
+            <p className="mt-3 text-xs text-[var(--bd-muted)]">All figures in tonnes {CO2E}. Scope 2 shown location-based.</p>
           </div>
         </CardContent>
       </Card>
@@ -270,11 +273,11 @@ export default async function DashboardPage({
           </CardHeader>
           <CardContent className="overflow-x-auto">
             <table className="w-full min-w-[420px] text-sm">
-              <caption className="sr-only">Group emissions by category, in tonnes CO2e</caption>
+              <caption className="sr-only">Group emissions by category, in tonnes {CO2E}</caption>
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-500">
                   <th scope="col" className="pb-2 font-medium">Category</th>
-                  <th scope="col" className="pb-2 text-right font-medium">tCO2e</th>
+                  <th scope="col" className="pb-2 text-right font-medium">{TONNES_CO2E}</th>
                   <th scope="col" className="pb-2 text-right font-medium">Share</th>
                 </tr>
               </thead>
@@ -283,9 +286,7 @@ export default async function DashboardPage({
                   <tr key={c.key} className="border-b border-slate-100 last:border-0">
                     <th scope="row" className="py-2 text-left font-normal text-slate-700">{c.label}</th>
                     <td className="py-2 text-right text-slate-900">{formatTonnes(c.kgCo2e)}</td>
-                    <td className="py-2 text-right text-slate-500">
-                      {analytics.group.total > 0 ? `${((c.kgCo2e / analytics.group.total) * 100).toFixed(1)}%` : "—"}
-                    </td>
+                    <td className="py-2 text-right text-slate-500">{formatShare(c.kgCo2e, analytics.group.total)}</td>
                   </tr>
                 ))}
               </tbody>

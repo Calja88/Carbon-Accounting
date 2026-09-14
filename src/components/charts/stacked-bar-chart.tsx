@@ -1,4 +1,5 @@
 import { CHART_INK, formatTonnes } from "./palette";
+import { TONNES_CO2E } from "@/lib/format";
 import { ChartEmptyState, ChartLegend, type LegendItem } from "./chart-parts";
 
 export interface StackedBarSegment {
@@ -113,7 +114,7 @@ export function StackedBarChart({
                         height={BAR_HEIGHT}
                         fill={seg.color}
                       >
-                        <title>{`${row.label} — ${seg.label}: ${formatTonnes(value)} t CO2e`}</title>
+                        <title>{`${row.label} — ${seg.label}: ${formatTonnes(value)} ${TONNES_CO2E}`}</title>
                       </rect>
                     );
                   })}
@@ -127,7 +128,7 @@ export function StackedBarChart({
                   fontWeight={600}
                   fill={CHART_INK.secondary}
                 >
-                  {formatTonnes(total)} t
+                  {formatTonnes(total)} {TONNES_CO2E}
                 </text>
               </g>
             );

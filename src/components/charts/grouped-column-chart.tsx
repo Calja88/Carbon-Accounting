@@ -1,4 +1,5 @@
 import { CHART_INK, formatTonnes, niceAxisMax } from "./palette";
+import { TONNES_CO2E } from "@/lib/format";
 import { ChartEmptyState, ChartLegend, type LegendItem } from "./chart-parts";
 
 export interface GroupedColumnGroup {
@@ -116,7 +117,7 @@ export function GroupedColumnChart({
                       </defs>
                       {colHeight > 0 && (
                         <rect x={x} y={y} width={COL_WIDTH} height={colHeight} fill={v.color} clipPath={`url(#${clipId})`}>
-                          <title>{`${group.label} — ${v.seriesLabel}: ${formatTonnes(value)} t CO2e`}</title>
+                          <title>{`${group.label} — ${v.seriesLabel}: ${formatTonnes(value)} ${TONNES_CO2E}`}</title>
                         </rect>
                       )}
                       <text
@@ -147,7 +148,7 @@ export function GroupedColumnChart({
 
           {/* Right-aligned into the tick column so it reads as that axis's unit. */}
           <text x={axisWidth - 8} y={12} fontSize={10} textAnchor="end" fill={CHART_INK.muted}>
-            tCO2e
+            {TONNES_CO2E}
           </text>
         </svg>
       </div>

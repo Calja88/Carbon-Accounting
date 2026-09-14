@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { FileText, ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader, SetupState } from "@/components/ui/primitives";
 import { GenerateReportForm } from "./generate-report-form";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
@@ -34,13 +35,11 @@ export default async function ReportsPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Reports</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Every report is a permanent, versioned snapshot — generating a new one never overwrites an old one, so past
-          reports stay reproducible even if data or factors change later.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Disclosure"
+        title="Reports"
+        description="Every report is a permanent, versioned snapshot — generating a new one never overwrites an old one, so past reports stay reproducible even if data or factors change later."
+      />
 
       <Card>
         <CardHeader>
@@ -52,9 +51,12 @@ export default async function ReportsPage() {
       </Card>
 
       <div className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Past reports</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--bd-muted)]">Past reports</h2>
         {reports.length === 0 && (
-          <p className="text-sm text-slate-500">No reports generated yet.</p>
+          <SetupState
+            title="No reports generated yet"
+            detail="Generate your first snapshot above. It freezes the figures, factors and evidence for a period so the numbers stay reproducible later."
+          />
         )}
         <div className="space-y-2">
           {reports.map((r) => (
