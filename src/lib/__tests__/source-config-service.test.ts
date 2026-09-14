@@ -26,6 +26,7 @@ vi.mock("@/lib/repositories/audit-repository", () => ({
 }));
 
 const {
+  SOURCE_CONFIG_MANAGE_PERMISSION,
   SourceConfigError,
   disableSourceForSite,
   enableSourceForSite,
@@ -195,7 +196,7 @@ function makeDb(store: Store) {
   return db as unknown as Parameters<typeof enableSourceForSite>[2];
 }
 
-const MANAGE = ["carbon.view", "carbon.contract.manage"];
+const MANAGE = ["carbon.view", "carbon.entry.review"];
 
 function context(organisationId: string, permissions: string[] = MANAGE, access?: OrganisationContext["access"]) {
   return makeOrganisationContext(organisationId, {
@@ -364,6 +365,14 @@ describe("tenant isolation", () => {
 });
 
 describe("RBAC", () => {
+  it("manages behind a grant the carbon roles actually hold", () => {
+    // carbon.contract.manage reads well but is granted to nobody in the
+    // deployed role sets, so /sources was read-only for every user
+    // including the Sustainability Lead. carbon.entry.review is part of
+    // CARBON_ENTRY_FULL and is what those roles really carry.
+    expect(SOURCE_CONFIG_MANAGE_PERMISSION).toBe("carbon.entry.review");
+  });
+
   it("a view-only member can read configurations but cannot change one", async () => {
     await enableSourceForSite(
       context(ORG_A),

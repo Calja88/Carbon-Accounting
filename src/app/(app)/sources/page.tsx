@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { resolveMonthRange, formatRangeLabel } from "@/lib/report-period";
+import { logEvent } from "@/lib/observability/logger";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,6 +77,22 @@ export default async function SourcesPage({ searchParams }: { searchParams: Prom
   } catch (err) {
     if (err instanceof OrganisationAccessError) redirect("/login");
     if (err instanceof PermissionDeniedError) redirect("/");
+    // The real exception is what makes a failure fixable. Without this the
+    // card below is all anyone ever sees, and a genuine fault (a missing
+    // table, a dead database) is indistinguishable from any other. Same
+    // pattern as the board overview's sectionFailure: name/message/stack
+    // are recorded server-side and nothing from here reaches the browser.
+    logEvent({
+      level: "error",
+      message: "sources catalogue load failed",
+      organisationId: context.organisationId,
+      correlationId: context.correlationId,
+      fields: {
+        errorName: err instanceof Error ? err.name : typeof err,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      },
+    });
     return (
       <div className="space-y-8">
         <SourcesHeader range={range} />

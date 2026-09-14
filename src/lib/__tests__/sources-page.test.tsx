@@ -58,6 +58,9 @@ vi.mock("@/lib/carbon/source-config-service", async () => {
   };
 });
 
+const logEvent = vi.fn();
+vi.mock("@/lib/observability/logger", () => ({ logEvent: (...a: unknown[]) => logEvent(...a) }));
+
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 
 const SourcesPage = (await import("@/app/(app)/sources/page")).default;
@@ -90,11 +93,12 @@ async function render(searchParams: Record<string, string> = {}) {
 }
 
 beforeEach(() => {
-  requireOrganisationContext.mockResolvedValue(context(["carbon.view", "carbon.contract.manage"]));
+  requireOrganisationContext.mockResolvedValue(context(["carbon.view", "carbon.entry.review"]));
   listConfigurableSites.mockResolvedValue([site]);
   listSourceCatalogue.mockResolvedValue([catalogueSource]);
   listSiteSourceConfigs.mockResolvedValue([]);
   getFactorAvailability.mockResolvedValue(new Map());
+  logEvent.mockClear();
 });
 
 describe("/sources", () => {
@@ -121,11 +125,27 @@ describe("/sources", () => {
     expect(html).not.toContain("Section unavailable");
   });
 
-  it("shows a real error card when the catalogue genuinely fails to load", async () => {
-    listSourceCatalogue.mockRejectedValue(new Error("database unavailable"));
+  it("shows a real error card when the catalogue genuinely fails to load, and logs the real exception", async () => {
+    listSourceCatalogue.mockRejectedValue(new Error('relation "OrganisationSourceConfig" does not exist'));
     const html = await render();
     expect(html).toContain("Section unavailable");
     expect(html).not.toContain("No emission source catalogue yet");
+
+    // Without this the card is all anyone ever sees and the fault cannot be
+    // diagnosed. The real message stays server-side; it is never rendered.
+    expect(logEvent).toHaveBeenCalledTimes(1);
+    const entry = logEvent.mock.calls[0][0];
+    expect(entry.level).toBe("error");
+    expect(entry.message).toBe("sources catalogue load failed");
+    expect(entry.organisationId).toBe(ORG_A);
+    expect(entry.fields.errorMessage).toContain("OrganisationSourceConfig");
+    expect(entry.fields.stack).toBeTruthy();
+    expect(html).not.toContain("OrganisationSourceConfig");
+  });
+
+  it("does not log when the page renders normally", async () => {
+    await render();
+    expect(logEvent).not.toHaveBeenCalled();
   });
 
   it("shows an enabled source with its cadence, and a disabled one honestly", async () => {

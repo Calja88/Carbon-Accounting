@@ -40,14 +40,20 @@ export { CarbonSourceFrequency };
 export class SourceConfigError extends Error {}
 
 /**
- * Managing a site's reporting plan is site-level carbon configuration, so it
- * reuses the existing `carbon.contract.manage` grant rather than inventing a
- * permission: the roles that already configure a site's carbon setup
- * (Sustainability Lead, EMS Contributor, Site Manager, Organisation
- * Administrator) hold it, while the read-only roles (Auditor, Finance) keep
- * `carbon.view` and cannot change what a site is asked to report.
+ * Deciding what a site is expected to report is the same authority as
+ * reviewing what it submitted, so this reuses the existing
+ * `carbon.entry.review` grant rather than inventing a permission.
+ *
+ * It was originally `carbon.contract.manage`, which reads well against that
+ * permission's own description but is not granted to anyone in the deployed
+ * role sets — every role would have seen a read-only /sources, including the
+ * Sustainability Lead the screen exists for. `carbon.entry.review` is held by
+ * Sustainability Lead, EMS Contributor, Site Manager and Organisation
+ * Administrator in the role templates (via CARBON_ENTRY_FULL), while the
+ * read-only roles (Auditor, Finance) keep `carbon.view` and cannot change
+ * what a site is asked to report.
  */
-export const SOURCE_CONFIG_MANAGE_PERMISSION = "carbon.contract.manage" as const;
+export const SOURCE_CONFIG_MANAGE_PERMISSION = "carbon.entry.review" as const;
 
 export function canManageSourceConfig(context: OrganisationContext): boolean {
   return context.permissions.has(SOURCE_CONFIG_MANAGE_PERMISSION);
