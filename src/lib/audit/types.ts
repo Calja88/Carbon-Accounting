@@ -284,6 +284,11 @@ export const AUDIT_EVENT_TYPES = [
   "carbon_source_config.enabled",
   "carbon_source_config.disabled",
   "carbon_source_config.frequency_changed",
+  // Phase 2B-i carbon data-collection plan.
+  "carbon_collection_requirement.generated",
+  "carbon_collection_requirement.reviewed",
+  "carbon_collection_requirement.excluded",
+  "carbon_collection_requirement.reopened",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -373,7 +378,8 @@ export type AuditResourceType =
   | "legal_hold"
   | "organisation_export"
   | "carbon_source_period_obligation"
-  | "carbon_source_config";
+  | "carbon_source_config"
+  | "carbon_collection_requirement";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

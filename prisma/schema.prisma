@@ -159,6 +159,7 @@ model Organisation {
   sourceDocuments     SourceDocument[]
   carbonSourcePeriodObligations CarbonSourcePeriodObligation[]
   sourceConfigs                 OrganisationSourceConfig[]
+  collectionRequirements        CarbonCollectionRequirement[]
 
   // LCA-domain roots (T17). lcaMethodologyProfiles stays nullable/optional —
   // a methodology profile may be platform-shared (organisationId null) —
@@ -394,6 +395,9 @@ model OrganisationMembership {
   // Carbon source-period obligation review (Checkpoint B corrective handoff §1).
   reviewedCarbonSourcePeriodObligations CarbonSourcePeriodObligation[] @relation("CarbonSourcePeriodObligationReviewedBy")
   excludedCarbonSourcePeriodObligations CarbonSourcePeriodObligation[] @relation("CarbonSourcePeriodObligationExcludedBy")
+  reviewedCollectionRequirements CarbonCollectionRequirement[] @relation("CollectionRequirementReviewedBy")
+  excludedCollectionRequirements CarbonCollectionRequirement[] @relation("CollectionRequirementExcludedBy")
+  reopenedCollectionRequirements CarbonCollectionRequirement[] @relation("CollectionRequirementReopenedBy")
 
   // Process/activity profiles (T30): record authorship.
   createdActivityProcesses ActivityProcess[] @relation("ActivityProcessCreatedBy")
@@ -673,6 +677,7 @@ model Site {
   commutingSurveys CommutingSurvey[]
   carbonSourcePeriodObligations CarbonSourcePeriodObligation[]
   sourceConfigs                 OrganisationSourceConfig[]
+  collectionRequirements        CarbonCollectionRequirement[]
 
   // Product LCA / PCF
   productManufacturingLocations ProductManufacturingLocation[]
@@ -833,6 +838,7 @@ model ActivityDataPoint {
   factorOptions FactorOption[]
   entries       ActivityEntry[]
   sourceConfigs OrganisationSourceConfig[]
+  collectionRequirements CarbonCollectionRequirement[]
 }
 
 /// Selectable sub-type options for a data point that needs one (fuel type,
@@ -9002,6 +9008,87 @@ model OrganisationSourceConfig {
   updatedAt           DateTime              @updatedAt
 
   @@unique([organisationId, siteId, activityDataPointId], name: "organisationSiteSource", map: "OrganisationSourceConfig_org_site_source_key")
+
+  collectionRequirements CarbonCollectionRequirement[]
   @@index([organisationId, siteId])
   @@index([organisationId, enabled])
+}
+
+/// Phase 2B: which carbon data each site is expected to supply, for which
+/// period. Generated from `OrganisationSourceConfig`, and deliberately NOT
+/// `CarbonSourcePeriodObligation`: that table is keyed by a free-text
+/// `sourceKey` plus a `YYYY-MM` string, is counted un-filtered by the
+/// dashboard's coverage denominator (see computeCoverageWindow), and cannot
+/// express a quarter or a year. Generating into it would have silently
+/// halved the reported completeness of an unrelated fixture.
+///
+/// Only the human DECISION is stored here. "missing", "submitted",
+/// "awaiting factor" and "changed since review" are derived live from
+/// ActivityEntry + Calculation on every read — storing them would let this
+/// table drift into claiming something the underlying data no longer says.
+///
+/// Nothing here takes part in carbon arithmetic, factor resolution, Scope 2
+/// methodology or report snapshots.
+model CarbonCollectionRequirement {
+  id                  String            @id @default(cuid())
+  organisationId      String
+  organisation        Organisation      @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  siteId              String
+  site                Site              @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  activityDataPointId String
+  activityDataPoint   ActivityDataPoint @relation(fields: [activityDataPointId], references: [id], onDelete: Restrict)
+
+  /// Provenance: the configuration this requirement was generated from.
+  /// organisationId/siteId/activityDataPointId are denormalised from it so
+  /// every read can be tenant-scoped in the query itself, the same reason
+  /// Calculation denormalises organisationId.
+  sourceConfigId String
+  sourceConfig   OrganisationSourceConfig @relation(fields: [sourceConfigId], references: [id], onDelete: Restrict)
+
+  /// Real dates, periodEnd inclusive — matches ActivityEntry.periodStart /
+  /// periodEnd so a submission is matched by interval overlap rather than
+  /// string equality. This is what lets three monthly entries satisfy one
+  /// quarterly requirement.
+  periodStart DateTime
+  periodEnd   DateTime
+  /// Canonical label, also the uniqueness key: "2026-03" | "2026-Q1" | "2026".
+  periodKey   String
+  /// The cadence in force when this row was generated.
+  periodKind  CarbonSourceFrequency
+
+  decision CarbonCollectionDecision @default(PENDING)
+
+  /// Fingerprint of every matched entry and its calculations at the moment
+  /// of review. Recomputed on read: a difference means the submission
+  /// changed since it was reviewed, and the decision alone is never trusted
+  /// as current truth.
+  reviewFingerprint      String?
+  reviewedByMembershipId String?
+  reviewedByMembership   OrganisationMembership? @relation("CollectionRequirementReviewedBy", fields: [reviewedByMembershipId], references: [id], onDelete: Restrict)
+  reviewedAt             DateTime?
+
+  /// Retained after a reopen rather than cleared: a reopened row still shows
+  /// what was excluded, by whom and why. Repeated exclude/reopen cycles keep
+  /// their full sequence in the hash-chained audit log.
+  excludedByMembershipId String?
+  excludedByMembership   OrganisationMembership? @relation("CollectionRequirementExcludedBy", fields: [excludedByMembershipId], references: [id], onDelete: Restrict)
+  excludedAt             DateTime?
+  excludedReason         String?
+  reopenedByMembershipId String?
+  reopenedByMembership   OrganisationMembership? @relation("CollectionRequirementReopenedBy", fields: [reopenedByMembershipId], references: [id], onDelete: Restrict)
+  reopenedAt             DateTime?
+
+  generatedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([organisationId, siteId, activityDataPointId, periodKey], name: "organisationSiteSourcePeriod", map: "CarbonCollectionRequirement_org_site_source_period_key")
+  @@index([organisationId, siteId, periodStart], map: "CarbonCollectionRequirement_org_site_period_idx")
+  @@index([sourceConfigId], map: "CarbonCollectionRequirement_source_config_idx")
+}
+
+/// Only the decision a person made. Every other collection status is derived.
+enum CarbonCollectionDecision {
+  PENDING
+  REVIEWED
+  EXCLUDED
 }
