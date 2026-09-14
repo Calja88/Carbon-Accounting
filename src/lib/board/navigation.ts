@@ -10,6 +10,7 @@ export interface BoardNavItem { id: string; label: string; href: LocalHref; matc
  */
 export const BOARD_NAV: BoardNavItem[] = [
   { id: "overview", label: "Dashboard", href: "/", matches: ["/", "/overview"], group: "workspace" },
+  { id: "data", label: "Data Collection", href: "/data", matches: ["/data"], group: "workspace" },
   { id: "entry", label: "Activity Data", href: "/entry", matches: ["/entry"], group: "workspace" },
   { id: "sources", label: "Emission Sources", href: "/sources", matches: ["/sources"], group: "workspace" },
   { id: "factors", label: "Factor Datasets", href: "/admin/factors", matches: ["/admin/factors"], group: "workspace" },

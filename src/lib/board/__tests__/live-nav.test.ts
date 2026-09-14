@@ -22,7 +22,7 @@ describe("resolveBoardNav", () => {
   it("includes the carbon-first items once carbon.view is granted", () => {
     const nav = resolveBoardNav(contextWith(["carbon.view", "carbon.factor.view", "lca.view", "ems.view"]));
     const ids = nav.map((item) => item.id);
-    expect(ids).toEqual(["overview", "entry", "sources", "factors", "evidence", "reports", "advanced"]);
+    expect(ids).toEqual(["overview", "data", "entry", "sources", "factors", "evidence", "reports", "advanced"]);
   });
 
   it("gates overview/entry/evidence/reports on carbon.view", () => {
@@ -31,6 +31,7 @@ describe("resolveBoardNav", () => {
     expect(ids).not.toContain("overview");
     expect(ids).not.toContain("entry");
     expect(ids).not.toContain("sources");
+    expect(ids).not.toContain("data");
     expect(ids).not.toContain("evidence");
     expect(ids).not.toContain("reports");
   });
@@ -49,7 +50,7 @@ describe("resolveBoardNav", () => {
 
   it("filters each item by its own permission, not a blanket grant", () => {
     const carbonOnly = resolveBoardNav(contextWith(["carbon.view"]));
-    expect(carbonOnly.map((item) => item.id).sort()).toEqual(["entry", "evidence", "overview", "reports", "sources"]);
+    expect(carbonOnly.map((item) => item.id).sort()).toEqual(["data", "entry", "evidence", "overview", "reports", "sources"]);
   });
 
   it("leaves every candidate href untouched — no not-yet-built route overrides remain", () => {
@@ -59,6 +60,7 @@ describe("resolveBoardNav", () => {
     expect(nav.find((i) => i.id === "overview")?.href).toBe("/");
     expect(nav.find((i) => i.id === "entry")?.href).toBe("/entry");
     expect(nav.find((i) => i.id === "sources")?.href).toBe("/sources");
+    expect(nav.find((i) => i.id === "data")?.href).toBe("/data");
     expect(nav.find((i) => i.id === "factors")?.href).toBe("/admin/factors");
     expect(nav.find((i) => i.id === "evidence")?.href).toBe("/documents");
     expect(nav.find((i) => i.id === "reports")?.href).toBe("/reports");
