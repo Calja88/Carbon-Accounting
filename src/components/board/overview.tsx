@@ -72,7 +72,7 @@ export function ExecutiveOverview({ model }: { model: OverviewModel }) {
         { id: "share", label: "Share", numeric: true, sortValue: r => r.kgCO2e, render: r => formatShare(r.kgCO2e, carbon.current.kgCO2e) },
       ]} />}
     </Surface></div>
-    <div className="bd-overview-bottom"><Surface title="Management focus" subtitle="A connected view of risk, control and improvement">
+    <div className="bd-overview-bottom bd-overview-bottom--full"><Surface title="Management focus" subtitle="A connected view of risk, control and improvement">
       {model.priorities.state !== "ready" ? <AsyncBoundary state="unavailable" message={model.priorities.message} />
       : model.priorities.data.length === 0 ? <SetupState title="Nothing is competing for management attention" detail="No overdue obligation evaluation, blocked action or open nonconformity is outstanding in your permitted scope. Start an EMS assessment or a management review pack to build the next cycle." actions={[{ label: "Aspects & controls", href: "/ems/aspects" }, { label: "Management reviews", href: "/ems/management-reviews" }]} />
       : <div className="bd-priorities">{model.priorities.data.map(item => <article key={item.source.href + item.title}><StatusBadge tone={item.tone}>{item.title}</StatusBadge><p>{item.detail}</p><BoardLink href={item.source.href} className="bd-text-link">{item.source.label} →</BoardLink></article>)}</div>}
