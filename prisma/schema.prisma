@@ -802,6 +802,25 @@ model User {
   createdExternalProviderControls ExternalProviderControl[]
   createdEmergencyPlans           EmergencyPlan[]
   recordedEmergencyExercises      EmergencyExercise[]
+
+  // Phase 3-vi: schema only; no resolver/publication integration.
+  of_release_created_by_user          OfficialFactorRelease[]       @relation("of_release_created_by_user")
+  of_artifact_created_by_user         OfficialSourceArtifact[]      @relation("of_artifact_created_by_user")
+  of_release_artifact_claimed_by_user OfficialReleaseArtifact[]     @relation("of_release_artifact_claimed_by_user")
+  of_verification_verified_by_user    OfficialSourceVerification[]  @relation("of_verification_verified_by_user")
+  of_verification_revoked_by_user     OfficialSourceVerification[]  @relation("of_verification_revoked_by_user")
+  of_parse_created_by_user            OfficialArtifactParse[]       @relation("of_parse_created_by_user")
+  of_mapping_mapped_by_user           OfficialFactorMapping[]       @relation("of_mapping_mapped_by_user")
+  of_coverage_created_by_user         OfficialCoverageContract[]    @relation("of_coverage_created_by_user")
+  of_manifest_created_by_user         OfficialPublicationManifest[] @relation("of_manifest_created_by_user")
+  of_grant_user                       PlatformFactorGrant[]         @relation("of_grant_user")
+  of_grant_granted_by_user            PlatformFactorGrant[]         @relation("of_grant_granted_by_user")
+  of_grant_revoked_by_user            PlatformFactorGrant[]         @relation("of_grant_revoked_by_user")
+  of_approval_approver_user           OfficialFactorApproval[]      @relation("of_approval_approver_user")
+  of_approval_revoked_by_user         OfficialFactorApproval[]      @relation("of_approval_revoked_by_user")
+  of_publication_published_by_user    OfficialFactorPublication[]   @relation("of_publication_published_by_user")
+  of_plan_created_by_user             OfficialActivationPlan[]      @relation("of_plan_created_by_user")
+  of_event_actor_user                 OfficialFactorEvent[]         @relation("of_event_actor_user")
 }
 
 // ---------------------------------------------------------------------------
@@ -903,6 +922,11 @@ model EmissionFactorSet {
 
   factors EmissionFactor[]
 
+  // Phase 3-vi: schema only; no resolver/publication integration.
+  of_publication_factor_set OfficialFactorPublication? @relation("of_publication_factor_set")
+  of_window_factor_set      OfficialActivationWindow[] @relation("of_window_factor_set")
+  officialManagement        OfficialSetManagement?
+
   @@index([visibility, ownerOrganisationId])
 }
 
@@ -939,7 +963,14 @@ model EmissionFactor {
   lcaResults                LcaCalculationResult[] @relation("LcaResultFactor")
   lcaEvidence               LcaEvidence[]          @relation("LcaEvidenceFactor")
 
+  // Phase 3-vi: schema only; no resolver/publication integration.
+  of_manifest_factor_predecessor_factor OfficialManifestFactor[] @relation("of_manifest_factor_predecessor_factor")
+  officialManifestFactorId              String?                  @unique(map: "of_factor_item_uq")
+  publishedLookupKey                    String?
+  officialManifestFactor                OfficialManifestFactor?  @relation("of_runtime_item", fields: [officialManifestFactorId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_factor_manifest_item_fk")
+
   @@unique([factorSetId, category, subtypeKey, basis])
+  @@unique([factorSetId, publishedLookupKey], map: "of_factor_lookup_uq")
 }
 
 // ---------------------------------------------------------------------------
@@ -9091,4 +9122,879 @@ enum CarbonCollectionDecision {
   PENDING
   REVIEWED
   EXCLUDED
+}
+
+// Phase 3-vi: isolated official source/review and publication contracts.
+
+enum OfficialApplicationDomain {
+  CORPORATE
+
+  @@map("of_application_domain")
+}
+
+enum OfficialRegistryMode {
+  LEGACY
+  MANAGED
+
+  @@map("of_registry_mode")
+}
+
+enum OfficialSetManagement {
+  LEGACY
+  GUARDED
+
+  @@map("of_set_management")
+}
+
+enum OfficialReleaseStatus {
+  REGISTERED
+  RECONCILIATION_REQUIRED
+  VERIFIED
+  WITHDRAWN
+
+  @@map("of_release_status")
+}
+
+enum OfficialArtifactFormat {
+  XLSX
+  CSV
+  PDF
+  HTML
+  OTHER
+
+  @@map("of_artifact_format")
+}
+
+enum OfficialArtifactKind {
+  FLAT
+  FULL
+  CONDENSED
+  METHODOLOGY
+  GUIDANCE
+  ERRATA
+  OTHER
+
+  @@map("of_artifact_kind")
+}
+
+enum OfficialArtifactRole {
+  CLAIMED
+  AUTHORITATIVE
+  COMPANION
+  SUPERSEDED
+  REJECTED
+
+  @@map("of_artifact_role")
+}
+
+enum OfficialStorageState {
+  READY
+  QUARANTINED
+
+  @@map("of_storage_state")
+}
+
+enum OfficialNumericKind {
+  FINITE
+  MISSING
+  INVALID
+  FORMULA
+  ERROR
+
+  @@map("of_numeric_kind")
+}
+
+enum OfficialParseStatus {
+  VALID
+  WARNING
+  REJECTED
+
+  @@map("of_parse_status")
+}
+
+enum OfficialGasMeasure {
+  WHOLE_GAS_CO2E
+  GAS_CONTRIBUTION_CO2E
+  GAS_MASS
+  ENERGY_CONVERSION
+  UNKNOWN
+
+  @@map("of_gas_measure")
+}
+
+enum OfficialCorporateBoundary {
+  DIRECT
+  WTT
+  TD_LOSSES
+  COMBINED
+  OTHER_REVIEWED
+  UNREVIEWED
+
+  @@map("of_corporate_boundary")
+}
+
+enum OfficialCvBasis {
+  GROSS
+  NET
+  NOT_APPLICABLE
+  UNSPECIFIED
+
+  @@map("of_cv_basis")
+}
+
+enum OfficialRfChoice {
+  WITH_RF
+  WITHOUT_RF
+  NOT_APPLICABLE
+  UNSPECIFIED
+
+  @@map("of_rf_choice")
+}
+
+enum OfficialMappingDecision {
+  MAPPED
+  UNMAPPED
+  REJECTED
+
+  @@map("of_mapping_decision")
+}
+
+enum OfficialValueTransform {
+  IDENTITY
+  EXACT_UNIT_SCALE
+
+  @@map("of_value_transform")
+}
+
+enum OfficialManifestPurpose {
+  PRODUCTION_COMPLETE
+  TEST_ONLY
+
+  @@map("of_manifest_purpose")
+}
+
+enum OfficialManifestArtifactUse {
+  FACTOR_INPUT
+  PROVENANCE
+  METHODOLOGY
+  ERRATA
+
+  @@map("of_manifest_artifact_use")
+}
+
+enum OfficialDisposition {
+  SELECTED
+  EXCLUDED
+  REJECTED
+  DUPLICATE
+
+  @@map("of_disposition_kind")
+}
+
+enum OfficialFactorOrigin {
+  NEW_OFFICIAL
+  CARRY_FORWARD
+
+  @@map("of_factor_origin")
+}
+
+enum OfficialApprovalPurpose {
+  MANIFEST_REVIEW
+  PUBLISH
+  ACTIVATE
+
+  @@map("of_approval_purpose")
+}
+
+enum OfficialFactorCapability {
+  VIEW
+  VERIFY_SOURCE
+  MAP
+  REVIEW
+  PUBLISH
+  ACTIVATE
+  MANAGE_GRANTS
+
+  @@map("of_factor_capability")
+}
+
+enum OfficialActorKind {
+  USER
+  SYSTEM
+
+  @@map("of_actor_kind")
+}
+
+enum OfficialFactorEventType {
+  RELEASE_REGISTERED
+  SOURCE_CLAIMED
+  SOURCE_RECONCILED
+  SOURCE_VERIFIED
+  SOURCE_WITHDRAWN
+  ARTIFACT_QUARANTINED
+  PARSE_SEALED
+  MAPPING_CREATED
+  MANIFEST_SEALED
+  APPROVAL_GRANTED
+  APPROVAL_REVOKED
+  PUBLICATION_SUCCEEDED
+  PUBLICATION_FAILED
+  PLAN_SEALED
+  ACTIVATION_SUCCEEDED
+  ACTIVATION_FAILED
+  GRANT_CREATED
+  GRANT_REVOKED
+
+  @@map("of_factor_event_type")
+}
+
+enum OfficialCoverageLevel {
+  MANDATORY
+  OPTIONAL
+
+  @@map("of_coverage_level")
+}
+
+model OfficialFactorRegistry {
+  id                   String                        @id(map: "of_registry_pk") @default(cuid())
+  namespace            String
+  publisherCode        String
+  datasetFamily        String
+  applicationDomain    OfficialApplicationDomain
+  geographyProfile     String
+  mode                 OfficialRegistryMode          @default(LEGACY)
+  generation           Int                           @default(0)
+  currentPlanId        String?
+  nextEventSequence    BigInt                        @default(1)
+  lastEventHash        String?                       @db.Char(64)
+  createdAt            DateTime                      @default(now()) @db.Timestamptz(3)
+  currentPlan          OfficialActivationPlan?       @relation("of_registry_current_plan", fields: [currentPlanId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_registry_current_plan_fk")
+  of_release_registry  OfficialFactorRelease[]       @relation("of_release_registry")
+  of_coverage_registry OfficialCoverageContract[]    @relation("of_coverage_registry")
+  of_manifest_registry OfficialPublicationManifest[] @relation("of_manifest_registry")
+  of_plan_registry     OfficialActivationPlan[]      @relation("of_plan_registry")
+  of_event_registry    OfficialFactorEvent[]         @relation("of_event_registry")
+
+  @@unique([namespace], map: "of_registry_namespace_uq")
+  @@index([currentPlanId], map: "of_registry_current_plan_ix")
+  @@map("of_registry")
+}
+
+model OfficialFactorRelease {
+  id                                String                        @id(map: "of_release_pk") @default(cuid())
+  registryId                        String
+  reportingYear                     Int
+  revisionKey                       String
+  officialVersion                   String?
+  publisherName                     String
+  publicationDate                   DateTime?                     @db.Date
+  publisherUpdateDate               DateTime?                     @db.Date
+  workbookUpdateDate                DateTime?                     @db.Date
+  sourceUrl                         String
+  methodologyUrl                    String?
+  declaredEffectiveFrom             DateTime?                     @db.Date
+  declaredEffectiveTo               DateTime?                     @db.Date
+  revisionEvidence                  String
+  status                            OfficialReleaseStatus         @default(REGISTERED)
+  createdByUserId                   String
+  createdAt                         DateTime                      @default(now()) @db.Timestamptz(3)
+  registry                          OfficialFactorRegistry        @relation("of_release_registry", fields: [registryId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_release_registry_fk")
+  createdByUser                     User                          @relation("of_release_created_by_user", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_release_created_by_user_fk")
+  of_release_artifact_release       OfficialReleaseArtifact[]     @relation("of_release_artifact_release")
+  of_verification_release           OfficialSourceVerification[]  @relation("of_verification_release")
+  of_identity_release               OfficialFactorIdentity[]      @relation("of_identity_release")
+  of_manifest_primary_release       OfficialPublicationManifest[] @relation("of_manifest_primary_release")
+  of_manifest_factor_source_release OfficialManifestFactor[]      @relation("of_manifest_factor_source_release")
+  of_event_release                  OfficialFactorEvent[]         @relation("of_event_release")
+
+  @@unique([registryId, reportingYear, revisionKey], map: "of_release_key_uq")
+  @@index([createdByUserId], map: "of_release_created_by_user_ix")
+  @@map("of_release")
+}
+
+model OfficialSourceArtifact {
+  id                           String                    @id(map: "of_artifact_pk") @default(cuid())
+  sha256                       String                    @db.Char(64)
+  byteSize                     BigInt
+  firstFileName                String
+  fileFormat                   OfficialArtifactFormat
+  storageProvider              String
+  storageKey                   String
+  storageVersion               String
+  mediaType                    String
+  firstRetrievedAt             DateTime                  @db.Timestamptz(3)
+  firstSourceUrl               String
+  storageState                 OfficialStorageState
+  createdByUserId              String
+  createdAt                    DateTime                  @default(now()) @db.Timestamptz(3)
+  createdByUser                User                      @relation("of_artifact_created_by_user", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_artifact_created_by_user_fk")
+  of_release_artifact_artifact OfficialReleaseArtifact[] @relation("of_release_artifact_artifact")
+  of_event_artifact            OfficialFactorEvent[]     @relation("of_event_artifact")
+
+  @@unique([sha256], map: "of_artifact_sha_uq")
+  @@index([createdByUserId], map: "of_artifact_created_by_user_ix")
+  @@map("of_artifact")
+}
+
+model OfficialReleaseArtifact {
+  id                                    String                     @id(map: "of_release_artifact_pk") @default(cuid())
+  releaseId                             String
+  artifactId                            String
+  artifactKind                          OfficialArtifactKind
+  variantKey                            String
+  fileName                              String
+  retrievedAt                           DateTime                   @db.Timestamptz(3)
+  sourceUrl                             String
+  role                                  OfficialArtifactRole       @default(CLAIMED)
+  roleRationale                         String?
+  claimedByUserId                       String
+  createdAt                             DateTime                   @default(now()) @db.Timestamptz(3)
+  release                               OfficialFactorRelease      @relation("of_release_artifact_release", fields: [releaseId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_release_artifact_release_fk")
+  artifact                              OfficialSourceArtifact     @relation("of_release_artifact_artifact", fields: [artifactId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_release_artifact_artifact_fk")
+  claimedByUser                         User                       @relation("of_release_artifact_claimed_by_user", fields: [claimedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_release_artifact_claimed_by_user_fk")
+  of_parse_release_artifact             OfficialArtifactParse[]    @relation("of_parse_release_artifact")
+  of_manifest_artifact_release_artifact OfficialManifestArtifact[] @relation("of_manifest_artifact_release_artifact")
+
+  @@unique([releaseId, artifactId, artifactKind, variantKey], map: "of_ra_claim_uq")
+  @@index([artifactId], map: "of_release_artifact_artifact_ix")
+  @@index([claimedByUserId], map: "of_release_artifact_claimed_by_user_ix")
+  @@map("of_release_artifact")
+}
+
+model OfficialSourceVerification {
+  id                                String                     @id(map: "of_verification_pk") @default(cuid())
+  releaseId                         String
+  inventoryHash                     String                     @db.Char(64)
+  verificationHash                  String                     @db.Char(64)
+  verificationPolicyVersion         String
+  verifiedByUserId                  String
+  verifiedAt                        DateTime                   @db.Timestamptz(3)
+  rationale                         String
+  evidence                          Json
+  revokedAt                         DateTime?                  @db.Timestamptz(3)
+  revokedByUserId                   String?
+  revocationReason                  String?
+  release                           OfficialFactorRelease      @relation("of_verification_release", fields: [releaseId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_verification_release_fk")
+  verifiedByUser                    User                       @relation("of_verification_verified_by_user", fields: [verifiedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_verification_verified_by_user_fk")
+  revokedByUser                     User?                      @relation("of_verification_revoked_by_user", fields: [revokedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_verification_revoked_by_user_fk")
+  of_manifest_artifact_verification OfficialManifestArtifact[] @relation("of_manifest_artifact_verification")
+
+  @@unique([verificationHash], map: "of_verification_hash_uq")
+  @@index([releaseId], map: "of_verification_release_ix")
+  @@index([verifiedByUserId], map: "of_verification_verified_by_user_ix")
+  @@index([revokedByUserId], map: "of_verification_revoked_by_user_ix")
+  @@map("of_verification")
+}
+
+model OfficialArtifactParse {
+  id                         String                     @id(map: "of_parse_pk") @default(cuid())
+  releaseArtifactId          String
+  parserVersion              String
+  sourceProfileVersion       String
+  identityVersion            String
+  validationVersion          String
+  parseKey                   String                     @db.Char(64)
+  parseHash                  String                     @db.Char(64)
+  scannedCount               Int
+  candidateCount             Int
+  skippedCount               Int
+  warningCount               Int
+  rejectedCount              Int
+  sheetSummary               Json
+  createdByUserId            String
+  createdAt                  DateTime                   @default(now()) @db.Timestamptz(3)
+  sealedAt                   DateTime?                  @db.Timestamptz(3)
+  releaseArtifact            OfficialReleaseArtifact    @relation("of_parse_release_artifact", fields: [releaseArtifactId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_parse_release_artifact_fk")
+  createdByUser              User                       @relation("of_parse_created_by_user", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_parse_created_by_user_fk")
+  of_source_factor_parse     OfficialSourceFactor[]     @relation("of_source_factor_parse")
+  of_manifest_artifact_parse OfficialManifestArtifact[] @relation("of_manifest_artifact_parse")
+
+  @@unique([parseKey], map: "of_parse_key_uq")
+  @@index([releaseArtifactId], map: "of_parse_release_artifact_ix")
+  @@index([createdByUserId], map: "of_parse_created_by_user_ix")
+  @@map("of_parse")
+}
+
+model OfficialFactorIdentity {
+  id                        String                  @id(map: "of_identity_pk") @default(cuid())
+  releaseId                 String
+  identityVersion           String
+  sourceIdentityHash        String                  @db.Char(64)
+  canonicalIdentity         String
+  createdAt                 DateTime                @default(now()) @db.Timestamptz(3)
+  release                   OfficialFactorRelease   @relation("of_identity_release", fields: [releaseId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_identity_release_fk")
+  of_source_factor_identity OfficialSourceFactor[]  @relation("of_source_factor_identity")
+  of_mapping_identity       OfficialFactorMapping[] @relation("of_mapping_identity")
+
+  @@unique([releaseId, identityVersion, sourceIdentityHash], map: "of_identity_key_uq")
+  @@map("of_identity")
+}
+
+model OfficialSourceFactor {
+  id                                    String                        @id(map: "of_source_factor_pk") @default(cuid())
+  parseId                               String
+  identityId                            String?
+  sheet                                 String
+  sourceRow                             Int
+  sourceColumnKey                       String
+  officialSourceId                      String?
+  rawScope                              String?
+  level1                                String?
+  level2                                String?
+  level3                                String?
+  level4                                String?
+  columnText                            String?
+  rawFactorText                         String?
+  rawNumericToken                       String?
+  numericKind                           OfficialNumericKind
+  exactCoefficient                      String?
+  exactExponent                         Int?
+  rawUnit                               String?
+  canonicalSourceUnit                   String?
+  rawGas                                String?
+  gasMeasure                            OfficialGasMeasure
+  gasSpecies                            String?
+  rawBoundary                           String?
+  boundaryClass                         OfficialCorporateBoundary
+  rawGeography                          String?
+  sourceGeography                       String?
+  geographyEvidence                     String?
+  cvBasis                               OfficialCvBasis
+  rfChoice                              OfficialRfChoice
+  loadDescription                       String?
+  occupancyDescription                  String?
+  vehicleClass                          String?
+  sourceQualifiers                      Json
+  rawCells                              Json
+  parseStatus                           OfficialParseStatus
+  validationCodes                       Json
+  observationHash                       String                        @db.Char(64)
+  semanticValueHash                     String                        @db.Char(64)
+  createdAt                             DateTime                      @default(now()) @db.Timestamptz(3)
+  parse                                 OfficialArtifactParse         @relation("of_source_factor_parse", fields: [parseId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_source_factor_parse_fk")
+  identity                              OfficialFactorIdentity?       @relation("of_source_factor_identity", fields: [identityId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_source_factor_identity_fk")
+  of_mapping_source_factor              OfficialFactorMapping[]       @relation("of_mapping_source_factor")
+  of_disposition_source_factor          OfficialManifestDisposition[] @relation("of_disposition_source_factor")
+  of_manifest_factor_root_source_factor OfficialManifestFactor[]      @relation("of_manifest_factor_root_source_factor")
+
+  @@unique([parseId, sheet, sourceRow, sourceColumnKey], map: "of_source_position_uq")
+  @@unique([id, identityId], map: "of_source_id_identity_uq")
+  @@index([identityId], map: "of_source_factor_identity_ix")
+  @@map("of_source_factor")
+}
+
+model OfficialFactorMapping {
+  id                            String                    @id(map: "of_mapping_pk") @default(cuid())
+  identityId                    String
+  sourceFactorId                String
+  targetSlot                    String
+  revision                      Int
+  supersedesMappingId           String?
+  decision                      OfficialMappingDecision
+  targetCategory                String?
+  targetSubtype                 String?
+  targetSubtypeIdentity         String?
+  targetUnit                    String?
+  factorBasis                   FactorBasis?
+  reportingScope                Scope?
+  scope3Category                String?
+  emissionsBoundary             OfficialCorporateBoundary
+  gasMeasure                    OfficialGasMeasure
+  applicabilityGeography        String?
+  geographyRationale            String?
+  cvBasis                       OfficialCvBasis
+  qualifierPolicy               String?
+  transform                     OfficialValueTransform
+  interpretedCoefficient        String?
+  interpretedExponent           Int?
+  mappingRuleVersion            String
+  rationale                     String
+  mappedByUserId                String
+  mappedAt                      DateTime                  @db.Timestamptz(3)
+  mappingHash                   String                    @db.Char(64)
+  identity                      OfficialFactorIdentity    @relation("of_mapping_identity", fields: [identityId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_mapping_identity_fk")
+  sourceFactor                  OfficialSourceFactor      @relation("of_mapping_source_factor", fields: [sourceFactorId, identityId], references: [id, identityId], onDelete: Restrict, onUpdate: Restrict, map: "of_mapping_source_identity_fk")
+  supersedesMapping             OfficialFactorMapping?    @relation("of_mapping_supersedes_mapping", fields: [supersedesMappingId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_mapping_supersedes_mapping_fk")
+  of_mapping_supersedes_mapping OfficialFactorMapping?    @relation("of_mapping_supersedes_mapping")
+  mappedByUser                  User                      @relation("of_mapping_mapped_by_user", fields: [mappedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_mapping_mapped_by_user_fk")
+  of_manifest_factor_mapping    OfficialManifestFactor[]  @relation("of_manifest_factor_mapping")
+  of_event_mapping              OfficialFactorEvent[]     @relation("of_event_mapping")
+
+  @@unique([identityId, targetSlot, revision], map: "of_mapping_revision_uq")
+  @@unique([supersedesMappingId], map: "of_mapping_successor_uq")
+  @@index([sourceFactorId], map: "of_mapping_source_factor_ix")
+  @@index([mappedByUserId], map: "of_mapping_mapped_by_user_ix")
+  @@map("of_mapping")
+}
+
+model OfficialCoverageContract {
+  id                                 String                        @id(map: "of_coverage_pk") @default(cuid())
+  registryId                         String
+  revision                           Int
+  predecessorId                      String?
+  profileName                        String
+  purpose                            OfficialManifestPurpose
+  productContractVersion             String
+  coverageHash                       String                        @db.Char(64)
+  rationale                          String
+  createdByUserId                    String
+  createdAt                          DateTime                      @default(now()) @db.Timestamptz(3)
+  sealedAt                           DateTime?                     @db.Timestamptz(3)
+  registry                           OfficialFactorRegistry        @relation("of_coverage_registry", fields: [registryId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_coverage_registry_fk")
+  predecessor                        OfficialCoverageContract?     @relation("of_coverage_predecessor", fields: [predecessorId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_coverage_predecessor_fk")
+  of_coverage_predecessor            OfficialCoverageContract[]    @relation("of_coverage_predecessor")
+  createdByUser                      User                          @relation("of_coverage_created_by_user", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_coverage_created_by_user_fk")
+  of_requirement_coverage_contract   OfficialCoverageRequirement[] @relation("of_requirement_coverage_contract")
+  of_manifest_coverage_contract      OfficialPublicationManifest[] @relation("of_manifest_coverage_contract")
+  of_window_legacy_coverage_contract OfficialActivationWindow[]    @relation("of_window_legacy_coverage_contract")
+
+  @@unique([registryId, revision], map: "of_coverage_revision_uq")
+  @@unique([coverageHash], map: "of_coverage_hash_uq")
+  @@index([predecessorId], map: "of_coverage_predecessor_ix")
+  @@index([createdByUserId], map: "of_coverage_created_by_user_ix")
+  @@map("of_coverage")
+}
+
+model OfficialCoverageRequirement {
+  id                                      String                        @id(map: "of_requirement_pk") @default(cuid())
+  coverageContractId                      String
+  lookupKey                               String
+  category                                String
+  subtype                                 String?
+  subtypeIdentity                         String
+  basis                                   FactorBasis
+  unit                                    String
+  scope                                   Scope
+  scope3Category                          String?
+  boundary                                OfficialCorporateBoundary
+  gasMeasure                              OfficialGasMeasure
+  geography                               String
+  cvBasis                                 OfficialCvBasis
+  companionOfId                           String?
+  rationale                               String
+  carryForwardAllowed                     Boolean                       @default(false)
+  level                                   OfficialCoverageLevel         @default(MANDATORY)
+  coverageContract                        OfficialCoverageContract      @relation("of_requirement_coverage_contract", fields: [coverageContractId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_requirement_coverage_contract_fk")
+  companionOf                             OfficialCoverageRequirement?  @relation("of_requirement_companion_of", fields: [companionOfId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_requirement_companion_of_fk")
+  of_requirement_companion_of             OfficialCoverageRequirement[] @relation("of_requirement_companion_of")
+  of_manifest_factor_coverage_requirement OfficialManifestFactor[]      @relation("of_manifest_factor_coverage_requirement")
+
+  @@unique([coverageContractId, lookupKey], map: "of_requirement_key_uq")
+  @@index([companionOfId], map: "of_requirement_companion_of_ix")
+  @@map("of_requirement")
+}
+
+model OfficialPublicationManifest {
+  id                            String                        @id(map: "of_manifest_pk") @default(cuid())
+  registryId                    String
+  primaryReleaseId              String
+  coverageContractId            String
+  baselinePlanId                String?
+  baselineGeneration            Int
+  purpose                       OfficialManifestPurpose
+  proposedName                  String
+  applicableFrom                DateTime                      @db.Timestamptz(3)
+  applicableUntil               DateTime?                     @db.Timestamptz(3)
+  manifestHash                  String                        @db.Char(64)
+  manifestFormatVersion         String
+  validationVersion             String
+  mappingRuleVersion            String
+  numericPolicyVersion          String
+  approvalPolicyVersion         String
+  sourceCounts                  Json
+  coverageMetrics               Json
+  warningSummary                Json
+  createdByUserId               String
+  createdAt                     DateTime                      @default(now()) @db.Timestamptz(3)
+  sealedAt                      DateTime?                     @db.Timestamptz(3)
+  registry                      OfficialFactorRegistry        @relation("of_manifest_registry", fields: [registryId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_registry_fk")
+  primaryRelease                OfficialFactorRelease         @relation("of_manifest_primary_release", fields: [primaryReleaseId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_primary_release_fk")
+  coverageContract              OfficialCoverageContract      @relation("of_manifest_coverage_contract", fields: [coverageContractId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_coverage_contract_fk")
+  baselinePlan                  OfficialActivationPlan?       @relation("of_manifest_baseline_plan", fields: [baselinePlanId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_baseline_plan_fk")
+  createdByUser                 User                          @relation("of_manifest_created_by_user", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_created_by_user_fk")
+  of_manifest_artifact_manifest OfficialManifestArtifact[]    @relation("of_manifest_artifact_manifest")
+  of_disposition_manifest       OfficialManifestDisposition[] @relation("of_disposition_manifest")
+  of_manifest_factor_manifest   OfficialManifestFactor[]      @relation("of_manifest_factor_manifest")
+  of_approval_manifest          OfficialFactorApproval[]      @relation("of_approval_manifest")
+  of_publication_manifest       OfficialFactorPublication?    @relation("of_publication_manifest")
+  of_window_coverage_manifest   OfficialActivationWindow[]    @relation("of_window_coverage_manifest")
+  of_event_manifest             OfficialFactorEvent[]         @relation("of_event_manifest")
+
+  @@unique([manifestHash], map: "of_manifest_hash_uq")
+  @@index([registryId], map: "of_manifest_registry_ix")
+  @@index([primaryReleaseId], map: "of_manifest_primary_release_ix")
+  @@index([coverageContractId], map: "of_manifest_coverage_contract_ix")
+  @@index([baselinePlanId], map: "of_manifest_baseline_plan_ix")
+  @@index([createdByUserId], map: "of_manifest_created_by_user_ix")
+  @@map("of_manifest")
+}
+
+model OfficialManifestArtifact {
+  id                 String                      @id(map: "of_manifest_artifact_pk") @default(cuid())
+  manifestId         String
+  releaseArtifactId  String
+  verificationId     String
+  parseId            String?
+  use                OfficialManifestArtifactUse
+  boundArtifactHash  String                      @db.Char(64)
+  boundInventoryHash String                      @db.Char(64)
+  boundParseHash     String?                     @db.Char(64)
+  manifest           OfficialPublicationManifest @relation("of_manifest_artifact_manifest", fields: [manifestId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_artifact_manifest_fk")
+  releaseArtifact    OfficialReleaseArtifact     @relation("of_manifest_artifact_release_artifact", fields: [releaseArtifactId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_artifact_release_artifact_fk")
+  verification       OfficialSourceVerification  @relation("of_manifest_artifact_verification", fields: [verificationId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_artifact_verification_fk")
+  parse              OfficialArtifactParse?      @relation("of_manifest_artifact_parse", fields: [parseId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_artifact_parse_fk")
+
+  @@unique([manifestId, releaseArtifactId, use], map: "of_ma_input_uq")
+  @@index([releaseArtifactId], map: "of_manifest_artifact_release_artifact_ix")
+  @@index([verificationId], map: "of_manifest_artifact_verification_ix")
+  @@index([parseId], map: "of_manifest_artifact_parse_ix")
+  @@map("of_manifest_artifact")
+}
+
+model OfficialManifestDisposition {
+  id                             String                      @id(map: "of_disposition_pk") @default(cuid())
+  manifestId                     String
+  sourceFactorId                 String
+  decision                       OfficialDisposition
+  reasonCode                     String
+  rationale                      String
+  acknowledgedWarningCodes       Json
+  manifest                       OfficialPublicationManifest @relation("of_disposition_manifest", fields: [manifestId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_disposition_manifest_fk")
+  sourceFactor                   OfficialSourceFactor        @relation("of_disposition_source_factor", fields: [sourceFactorId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_disposition_source_factor_fk")
+  of_manifest_factor_disposition OfficialManifestFactor[]    @relation("of_manifest_factor_disposition")
+
+  @@unique([manifestId, sourceFactorId], map: "of_disposition_source_uq")
+  @@index([sourceFactorId], map: "of_disposition_source_factor_ix")
+  @@map("of_disposition")
+}
+
+model OfficialManifestFactor {
+  id                    String                       @id(map: "of_manifest_factor_pk") @default(cuid())
+  manifestId            String
+  coverageRequirementId String
+  origin                OfficialFactorOrigin
+  mappingId             String?
+  dispositionId         String?
+  predecessorFactorId   String?
+  rootSourceFactorId    String?
+  sourceReleaseId       String?
+  originalSourceName    String
+  originalPublisher     String
+  originalVintageYear   Int
+  originalSourceUrl     String?
+  lookupKey             String
+  targetCategory        String
+  targetSubtype         String?
+  targetSubtypeIdentity String
+  factorBasis           FactorBasis
+  reportingScope        Scope
+  scope3Category        String?
+  targetUnit            String
+  geography             String
+  emissionsBoundary     OfficialCorporateBoundary
+  gasMeasure            OfficialGasMeasure
+  cvBasis               OfficialCvBasis
+  exactCoefficient      String
+  exactExponent         Int
+  candidateValue        Decimal                      @db.Decimal(18, 8)
+  carryForwardRationale String?
+  carryValidFrom        DateTime?                    @db.Timestamptz(3)
+  carryValidUntil       DateTime?                    @db.Timestamptz(3)
+  itemHash              String                       @db.Char(64)
+  manifest              OfficialPublicationManifest  @relation("of_manifest_factor_manifest", fields: [manifestId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_factor_manifest_fk")
+  coverageRequirement   OfficialCoverageRequirement  @relation("of_manifest_factor_coverage_requirement", fields: [coverageRequirementId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_factor_coverage_requirement_fk")
+  mapping               OfficialFactorMapping?       @relation("of_manifest_factor_mapping", fields: [mappingId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_factor_mapping_fk")
+  disposition           OfficialManifestDisposition? @relation("of_manifest_factor_disposition", fields: [dispositionId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_factor_disposition_fk")
+  predecessorFactor     EmissionFactor?              @relation("of_manifest_factor_predecessor_factor", fields: [predecessorFactorId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_factor_predecessor_factor_fk")
+  rootSourceFactor      OfficialSourceFactor?        @relation("of_manifest_factor_root_source_factor", fields: [rootSourceFactorId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_factor_root_source_factor_fk")
+  sourceRelease         OfficialFactorRelease?       @relation("of_manifest_factor_source_release", fields: [sourceReleaseId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_manifest_factor_source_release_fk")
+  runtimeFactor         EmissionFactor?              @relation("of_runtime_item")
+
+  @@unique([manifestId, lookupKey], map: "of_mf_lookup_uq")
+  @@unique([manifestId, coverageRequirementId], map: "of_mf_requirement_uq")
+  @@index([coverageRequirementId], map: "of_manifest_factor_coverage_requirement_ix")
+  @@index([mappingId], map: "of_manifest_factor_mapping_ix")
+  @@index([dispositionId], map: "of_manifest_factor_disposition_ix")
+  @@index([predecessorFactorId], map: "of_manifest_factor_predecessor_factor_ix")
+  @@index([rootSourceFactorId], map: "of_manifest_factor_root_source_factor_ix")
+  @@index([sourceReleaseId], map: "of_manifest_factor_source_release_ix")
+  @@map("of_manifest_factor")
+}
+
+model PlatformFactorGrant {
+  id              String                   @id(map: "of_grant_pk") @default(cuid())
+  userId          String
+  capability      OfficialFactorCapability
+  grantedByUserId String
+  grantedAt       DateTime                 @db.Timestamptz(3)
+  expiresAt       DateTime?                @db.Timestamptz(3)
+  revokedAt       DateTime?                @db.Timestamptz(3)
+  revokedByUserId String?
+  reason          String
+  user            User                     @relation("of_grant_user", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_grant_user_fk")
+  grantedByUser   User                     @relation("of_grant_granted_by_user", fields: [grantedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_grant_granted_by_user_fk")
+  revokedByUser   User?                    @relation("of_grant_revoked_by_user", fields: [revokedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_grant_revoked_by_user_fk")
+  of_event_grant  OfficialFactorEvent[]    @relation("of_event_grant")
+
+  @@index([userId], map: "of_grant_user_ix")
+  @@index([grantedByUserId], map: "of_grant_granted_by_user_ix")
+  @@index([revokedByUserId], map: "of_grant_revoked_by_user_ix")
+  @@map("of_grant")
+}
+
+model OfficialFactorApproval {
+  id                              String                       @id(map: "of_approval_pk") @default(cuid())
+  manifestId                      String?
+  activationPlanId                String?
+  purpose                         OfficialApprovalPurpose
+  subjectHash                     String                       @db.Char(64)
+  approvalPolicyVersion           String
+  contributorsHash                String                       @db.Char(64)
+  approverUserId                  String
+  approvedAt                      DateTime                     @db.Timestamptz(3)
+  expiresAt                       DateTime                     @db.Timestamptz(3)
+  rationale                       String
+  revokedAt                       DateTime?                    @db.Timestamptz(3)
+  revokedByUserId                 String?
+  revocationReason                String?
+  manifest                        OfficialPublicationManifest? @relation("of_approval_manifest", fields: [manifestId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_approval_manifest_fk")
+  activationPlan                  OfficialActivationPlan?      @relation("of_approval_activation_plan", fields: [activationPlanId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_approval_activation_plan_fk")
+  approverUser                    User                         @relation("of_approval_approver_user", fields: [approverUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_approval_approver_user_fk")
+  revokedByUser                   User?                        @relation("of_approval_revoked_by_user", fields: [revokedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_approval_revoked_by_user_fk")
+  of_publication_review_approval  OfficialFactorPublication[]  @relation("of_publication_review_approval")
+  of_publication_publish_approval OfficialFactorPublication[]  @relation("of_publication_publish_approval")
+  of_event_approval               OfficialFactorEvent[]        @relation("of_event_approval")
+
+  @@unique([manifestId, purpose, approverUserId, subjectHash, approvedAt], map: "of_approval_manifest_uq")
+  @@unique([activationPlanId, purpose, approverUserId, subjectHash, approvedAt], map: "of_approval_plan_uq")
+  @@index([approverUserId], map: "of_approval_approver_user_ix")
+  @@index([revokedByUserId], map: "of_approval_revoked_by_user_ix")
+  @@map("of_approval")
+}
+
+model OfficialFactorPublication {
+  id                         String                      @id(map: "of_publication_pk") @default(cuid())
+  manifestId                 String
+  factorSetId                String
+  reviewApprovalId           String
+  publishApprovalId          String
+  idempotencyKey             String
+  requestHash                String                      @db.Char(64)
+  publishedByUserId          String
+  publishedAt                DateTime                    @db.Timestamptz(3)
+  projectionHash             String                      @db.Char(64)
+  publicationContractVersion String
+  manifest                   OfficialPublicationManifest @relation("of_publication_manifest", fields: [manifestId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_publication_manifest_fk")
+  factorSet                  EmissionFactorSet           @relation("of_publication_factor_set", fields: [factorSetId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_publication_factor_set_fk")
+  reviewApproval             OfficialFactorApproval      @relation("of_publication_review_approval", fields: [reviewApprovalId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_publication_review_approval_fk")
+  publishApproval            OfficialFactorApproval      @relation("of_publication_publish_approval", fields: [publishApprovalId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_publication_publish_approval_fk")
+  publishedByUser            User                        @relation("of_publication_published_by_user", fields: [publishedByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_publication_published_by_user_fk")
+  of_event_publication       OfficialFactorEvent[]       @relation("of_event_publication")
+
+  @@unique([manifestId], map: "of_publication_manifest_uq")
+  @@unique([factorSetId], map: "of_publication_set_uq")
+  @@unique([idempotencyKey], map: "of_publication_retry_uq")
+  @@index([reviewApprovalId], map: "of_publication_review_approval_ix")
+  @@index([publishApprovalId], map: "of_publication_publish_approval_ix")
+  @@index([publishedByUserId], map: "of_publication_published_by_user_ix")
+  @@map("of_publication")
+}
+
+model OfficialActivationPlan {
+  id                             String                        @id(map: "of_plan_pk") @default(cuid())
+  registryId                     String
+  revision                       Int
+  expectedPreviousPlanId         String?
+  expectedGeneration             Int
+  planHash                       String                        @db.Char(64)
+  activationPolicyVersion        String
+  createdByUserId                String
+  createdAt                      DateTime                      @default(now()) @db.Timestamptz(3)
+  reason                         String
+  sealedAt                       DateTime?                     @db.Timestamptz(3)
+  of_registry_current_plan       OfficialFactorRegistry[]      @relation("of_registry_current_plan")
+  of_manifest_baseline_plan      OfficialPublicationManifest[] @relation("of_manifest_baseline_plan")
+  of_approval_activation_plan    OfficialFactorApproval[]      @relation("of_approval_activation_plan")
+  registry                       OfficialFactorRegistry        @relation("of_plan_registry", fields: [registryId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_plan_registry_fk")
+  expectedPreviousPlan           OfficialActivationPlan?       @relation("of_plan_expected_previous_plan", fields: [expectedPreviousPlanId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_plan_expected_previous_plan_fk")
+  of_plan_expected_previous_plan OfficialActivationPlan[]      @relation("of_plan_expected_previous_plan")
+  createdByUser                  User                          @relation("of_plan_created_by_user", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_plan_created_by_user_fk")
+  of_window_plan                 OfficialActivationWindow[]    @relation("of_window_plan")
+  of_event_activation_plan       OfficialFactorEvent[]         @relation("of_event_activation_plan")
+
+  @@unique([planHash], map: "of_plan_hash_uq")
+  @@index([registryId], map: "of_plan_registry_ix")
+  @@index([expectedPreviousPlanId], map: "of_plan_expected_previous_plan_ix")
+  @@index([createdByUserId], map: "of_plan_created_by_user_ix")
+  @@map("of_plan")
+}
+
+model OfficialActivationWindow {
+  id                       String                       @id(map: "of_window_pk") @default(cuid())
+  planId                   String
+  factorSetId              String
+  fromInclusive            DateTime                     @db.Timestamptz(3)
+  untilExclusive           DateTime?                    @db.Timestamptz(3)
+  coverageManifestId       String?
+  legacyCoverageContractId String?
+  legacyAssessmentHash     String?                      @db.Char(64)
+  legacyAssessment         Json?
+  rationale                String
+  plan                     OfficialActivationPlan       @relation("of_window_plan", fields: [planId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_window_plan_fk")
+  factorSet                EmissionFactorSet            @relation("of_window_factor_set", fields: [factorSetId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_window_factor_set_fk")
+  coverageManifest         OfficialPublicationManifest? @relation("of_window_coverage_manifest", fields: [coverageManifestId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_window_coverage_manifest_fk")
+  legacyCoverageContract   OfficialCoverageContract?    @relation("of_window_legacy_coverage_contract", fields: [legacyCoverageContractId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_window_legacy_coverage_contract_fk")
+
+  @@unique([planId, fromInclusive], map: "of_window_start_uq")
+  @@index([factorSetId], map: "of_window_factor_set_ix")
+  @@index([coverageManifestId], map: "of_window_coverage_manifest_ix")
+  @@index([legacyCoverageContractId], map: "of_window_legacy_coverage_contract_ix")
+  @@map("of_window")
+}
+
+model OfficialFactorEvent {
+  id                   String                       @id(map: "of_event_pk") @default(cuid())
+  registryId           String
+  sequence             BigInt
+  eventType            OfficialFactorEventType
+  actorUserId          String?
+  actorKind            OfficialActorKind
+  releaseId            String?
+  artifactId           String?
+  mappingId            String?
+  manifestId           String?
+  publicationId        String?
+  activationPlanId     String?
+  activationGeneration Int?
+  grantId              String?
+  approvalId           String?
+  correlationId        String
+  occurredAt           DateTime                     @db.Timestamptz(3)
+  summary              String
+  details              Json
+  previousEventHash    String?                      @db.Char(64)
+  contentHash          String                       @db.Char(64)
+  registry             OfficialFactorRegistry       @relation("of_event_registry", fields: [registryId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_event_registry_fk")
+  actorUser            User?                        @relation("of_event_actor_user", fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_event_actor_user_fk")
+  release              OfficialFactorRelease?       @relation("of_event_release", fields: [releaseId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_event_release_fk")
+  artifact             OfficialSourceArtifact?      @relation("of_event_artifact", fields: [artifactId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_event_artifact_fk")
+  mapping              OfficialFactorMapping?       @relation("of_event_mapping", fields: [mappingId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_event_mapping_fk")
+  manifest             OfficialPublicationManifest? @relation("of_event_manifest", fields: [manifestId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_event_manifest_fk")
+  publication          OfficialFactorPublication?   @relation("of_event_publication", fields: [publicationId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_event_publication_fk")
+  activationPlan       OfficialActivationPlan?      @relation("of_event_activation_plan", fields: [activationPlanId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_event_activation_plan_fk")
+  grant                PlatformFactorGrant?         @relation("of_event_grant", fields: [grantId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_event_grant_fk")
+  approval             OfficialFactorApproval?      @relation("of_event_approval", fields: [approvalId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "of_event_approval_fk")
+
+  @@unique([registryId, sequence], map: "of_event_sequence_uq")
+  @@unique([contentHash], map: "of_event_hash_uq")
+  @@index([actorUserId], map: "of_event_actor_user_ix")
+  @@index([releaseId], map: "of_event_release_ix")
+  @@index([artifactId], map: "of_event_artifact_ix")
+  @@index([mappingId], map: "of_event_mapping_ix")
+  @@index([manifestId], map: "of_event_manifest_ix")
+  @@index([publicationId], map: "of_event_publication_ix")
+  @@index([activationPlanId], map: "of_event_activation_plan_ix")
+  @@index([grantId], map: "of_event_grant_ix")
+  @@index([approvalId], map: "of_event_approval_ix")
+  @@map("of_event")
 }
