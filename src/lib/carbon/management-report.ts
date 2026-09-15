@@ -45,6 +45,16 @@ export interface PeriodStateSummary {
 
 export type Scope3CategoryState = "quantified" | "zero" | "no_data";
 
+/**
+ * One wording for a category's state, shared by the page and the export so a
+ * reader cannot be told "Genuine zero" on screen and something else in a file.
+ */
+export const SCOPE3_STATE_LABEL: Record<Scope3CategoryState, string> = {
+  quantified: "Quantified",
+  zero: "Genuine zero",
+  no_data: "No data this period",
+};
+
 export interface ManagementKpi {
   key: "total" | "scope1" | "scope2Location" | "scope2Market" | "scope3";
   label: string;

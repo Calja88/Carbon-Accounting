@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, Download } from "lucide-react";
 import { OrganisationAccessError, requireOrganisationContext } from "@/lib/organisation/session";
-import { PermissionDeniedError } from "@/lib/rbac/authorize";
+import { hasPermission, PermissionDeniedError } from "@/lib/rbac/authorize";
 import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import { logEvent } from "@/lib/observability/logger";
 import { loadManagementReport, type ManagementReportSearchParams } from "@/lib/carbon/live-management-report";
-import type { ManagementReport, PeriodStateKind } from "@/lib/carbon/management-report";
+import { SCOPE3_STATE_LABEL, type ManagementReport, type PeriodStateKind } from "@/lib/carbon/management-report";
 import { TONNES_CO2E, formatTonnesCO2e } from "@/lib/format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -92,6 +92,18 @@ export default async function ManagementReportPage({ searchParams }: { searchPar
   const reportedTrend = report.trend.filter((m) => m.reported);
   const siteRows = report.sites.filter((s) => s.total !== 0 || s.scope2Market !== 0);
   const selectableSites = report.sites.filter((s) => s.siteId !== "").map((s) => ({ id: s.siteId, name: s.siteName }));
+  // The resolved window, not the raw query string: an absent or malformed
+  // `from`/`to` falls back to a default range on screen, and the export has to
+  // be the period the reader is actually looking at.
+  const exportParams = new URLSearchParams({
+    from: report.trend[0]?.month ?? "",
+    to: report.trend[report.trend.length - 1]?.month ?? "",
+  });
+  if (params.siteId) exportParams.set("siteId", params.siteId);
+  const exportHref = `/reports/management/export.xlsx?${exportParams.toString()}`;
+  // Presentation only — the route enforces this itself, so a reader without
+  // the permission gains nothing by typing the URL.
+  const canExport = hasPermission(context, "carbon.report.export");
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -100,7 +112,23 @@ export default async function ManagementReportPage({ searchParams }: { searchPar
           <ArrowLeft className="h-3.5 w-3.5" />
           All reports
         </Link>
-        <PrintButton />
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Phase 5B. A plain link, so the export carries the reader's current
+              period and site filter in the URL and needs no client state —
+              and so the server, not the presence of this control, decides
+              whether the reader may have the file. */}
+          {canExport && (
+            <a
+              href={exportHref}
+              download
+              className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-[var(--bd-radius-sm)] bg-[var(--bd-teal)] px-3 py-1.5 text-xs font-semibold text-white shadow-[var(--bd-shadow)] transition-colors duration-150 hover:bg-[var(--bd-teal-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--bd-focus)] focus-visible:ring-offset-2"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />
+              Export Excel
+            </a>
+          )}
+          <PrintButton />
+        </div>
       </div>
 
       <PageHeader
@@ -394,7 +422,7 @@ export default async function ManagementReportPage({ searchParams }: { searchPar
                           <td className="py-2 text-right text-slate-700">{pct(row.sharePercent)}</td>
                           <td className="py-2 text-right">
                             <Badge tone={row.state === "quantified" ? "success" : row.state === "zero" ? "neutral" : "warning"}>
-                              {row.state === "quantified" ? "Quantified" : row.state === "zero" ? "Genuine zero" : "No data this period"}
+                              {SCOPE3_STATE_LABEL[row.state]}
                             </Badge>
                           </td>
                         </tr>
