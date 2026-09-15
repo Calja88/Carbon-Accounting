@@ -60,6 +60,10 @@ export function validateFactorImport(parsed: ParsedFactorFile, existing?: Existi
   const rejectedRows = candidates.filter((r) => r.status === "rejected");
   const duplicateRows = candidates.filter((r) => r.status === "duplicate");
   const messages = [...parsed.messages];
+  for (const code of ["UNSUPPORTED_GAS", "UNSUPPORTED_KIND", "UNKNOWN_UNIT", "MISSING_VALUE", "MAPPING_REQUIRED"] as const) {
+    const count = candidates.filter((row) => row.messages.some((m) => m.code === code)).length;
+    if (count) messages.push({ severity: "warning", code, message: `${count} candidate rows require review: ${code}. See row-level messages.` });
+  }
   if (!existing) messages.push({ severity: "warning", code: "EXISTING_DATASET_NOT_CHECKED", message: "No existing dataset selected; database duplicate checks were not performed." });
   const tally = (key: (row: FactorCandidate) => string) => {
     const counts = new Map<string, number>();
@@ -77,7 +81,7 @@ export function validateFactorImport(parsed: ParsedFactorFile, existing?: Existi
     proposedFactorSet: { ...parsed.metadata, name: [parsed.metadata.publisher, parsed.metadata.year, parsed.metadata.release].filter(Boolean).join(" "), sourceType: "OFFICIAL_DEFRA_DESNZ" },
     existingDatasetChecked: existing !== undefined, validationPassed, commitAllowed: false,
     commitBlockedReasons: [
-      "Phase 3-i is preview-only: durable source provenance, gas/kind representation, dataset idempotency and platform approval must be designed before persistence.",
+      "Factor import is preview-only: durable source provenance, gas/kind representation, dataset idempotency and platform approval must be designed before persistence.",
       ...(!validationPassed ? ["Resolve validation errors, mappings and warnings before approval."] : []),
     ],
   };

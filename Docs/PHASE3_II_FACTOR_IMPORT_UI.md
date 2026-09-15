@@ -1,5 +1,11 @@
 # Phase 3-ii: UK factor import preview UI
 
+**Successor:** Phase 3-iii has calibrated the supplied 2026 revised flat-format
+workbook locally. The action now preserves raw value/gas/kind and detected table
+headers in its preview DTO; import stays disabled. See
+[official workbook calibration](PHASE3_III_OFFICIAL_WORKBOOK_CALIBRATION.md).
+The original phase description below records the pre-calibration state.
+
 ## Scope
 
 This phase adds the **preview-only** UI over the Phase 3-i engine described in

@@ -13,6 +13,9 @@ const unitAliases: Record<string, string> = {
   l: "litre", litre: "litre", litres: "litre", liter: "litre", liters: "litre",
   night: "night", nights: "night", "passenger km": "passenger.km", "passenger.km": "passenger.km",
   "tonne km": "tonne.km", "tonne.km": "tonne.km",
+  "kwh (net cv)": "kWh (Net CV)", "kwh (gross cv)": "kWh (Gross CV)",
+  gj: "GJ", "million litres": "million litres",
+  "room per night": "room.night", "per fte working hour": "FTE.hour",
 };
 
 /** Text aliases only. Deliberately no scale conversions or CV assumptions. */
@@ -66,8 +69,8 @@ export function normaliseFactorRow(source: SourceRow, metadata: DatasetMetadata)
     error("AMBIGUOUS_BASIS", "An explicit compatible factor basis is required; Scope 2 methodology is never inferred.");
   }
   const gasText = trim("gas").toLowerCase();
-  const gas = gasText === "co2e" ? "CO2e" : trim("gas") || null;
-  if (gas !== "CO2e") error("UNSUPPORTED_GAS", "The existing emission factor model only stores CO2e; gas-specific values cannot be imported.");
+  const gas = /^(?:kg\s*)?co2e$/.test(gasText) ? "CO2e" : trim("gas") || null;
+  if (gas !== "CO2e") error("UNSUPPORTED_GAS", "Only whole-gas CO2e is supported. Gas contributions (including kg CO2e of CO2/CH4/N2O) and energy conversions cannot be imported or summed.");
   const kindText = trim("kind").toLowerCase().replace(/[\s-]+/g, "_");
   const kind = kindText === "well_to_tank" ? "wtt" : kindText || null;
   if (kind !== "direct" && kind !== "wtt") error("UNSUPPORTED_KIND", "An explicit direct or WTT kind is required. Total/lifecycle factors need a schema and mapping decision.");
@@ -91,6 +94,9 @@ export function normaliseFactorRow(source: SourceRow, metadata: DatasetMetadata)
   candidate.identity = factorHash([
     metadata.publisher, metadata.year, metadata.release, source.sheet, categoryPath, activity,
     category, candidate.subtypeKey, scope, basis, region, canonicalUnit ?? rawUnit, gas, kind,
+    // Preserve hierarchy positions and Column Text (fuel, load, RF, etc.).
+    // Source ID is provenance, not an exemption from duplicate/conflict checks.
+    ...("level1" in fields ? [[fields.level1, fields.level2, fields.level3, fields.level4, fields.columnText].map((v) => v?.trim() ?? "")] : []),
   ]);
   candidate.sourceHash = factorHash([candidate.identity, source.rowNumber, source.cells, fields, factorValue]);
   return candidate;

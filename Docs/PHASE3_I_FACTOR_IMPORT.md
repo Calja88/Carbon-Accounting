@@ -1,5 +1,11 @@
 # Phase 3-i: UK factor import backend
 
+**Successor:** Phase 3-iii calibrates the supplied 2026 revised **flat-format**
+workbook and extends this adapter's preview contract. See
+[official workbook calibration](PHASE3_III_OFFICIAL_WORKBOOK_CALIBRATION.md)
+for actual counts, supported units/layout and remaining persistence blockers.
+The original phase description below records the pre-calibration state.
+
 ## Design gate and scope
 
 This phase provides a **read-only, preview-only** import engine. It adds no UI,

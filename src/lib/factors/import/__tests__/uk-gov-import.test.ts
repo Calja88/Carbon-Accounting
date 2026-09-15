@@ -133,7 +133,7 @@ describe("normalisation and validation", () => {
   });
 
   it.each([
-    [{ unit: "" }, "MISSING_UNIT"], [{ unit: "kWh (Gross CV)" }, "UNKNOWN_UNIT"],
+    [{ unit: "" }, "MISSING_UNIT"], [{ unit: "kWh (unspecified CV)" }, "UNKNOWN_UNIT"],
     [{ unit: "MWh" }, "UNKNOWN_UNIT"], [{ activity: "" }, "MISSING_ACTIVITY_CATEGORY"],
     [{ gas: "CH4" }, "UNSUPPORTED_GAS"], [{ gas: "CO2" }, "UNSUPPORTED_GAS"],
     [{ factor_kind: "total" }, "UNSUPPORTED_KIND"], [{ factor_kind: "" }, "UNSUPPORTED_KIND"],

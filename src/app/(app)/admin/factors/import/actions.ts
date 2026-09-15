@@ -4,7 +4,7 @@ import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organ
 import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { logEvent } from "@/lib/observability/logger";
 import { previewUkGovFactorImport } from "@/lib/factors/import/factor-import-service";
-import type { DatasetMetadata, FactorCandidate, ImportMessage } from "@/lib/factors/import/types";
+import type { DatasetMetadata, FactorCandidate, ImportMessage, ParsedFactorFile } from "@/lib/factors/import/types";
 
 /** Rows shown per group. A preview is a review aid, not a spreadsheet viewer;
  * the counts above the tables remain the full figures. */
@@ -23,6 +23,9 @@ export interface PreviewRow {
   factorUnit: string | null;
   gas: string | null;
   kind: string | null;
+  rawFactorValue?: string;
+  rawGas?: string;
+  rawKind?: string;
   identity: string;
   messages: ImportMessage[];
 }
@@ -38,7 +41,7 @@ export interface FactorImportPreviewState {
     sourceFileName: string;
     metadata: DatasetMetadata;
     proposedName: string;
-    sheets: { name: string; supported: boolean; rowsScanned: number }[];
+    sheets: ParsedFactorFile["sheets"];
     totalRowsScanned: number;
     counts: { accepted: number; warning: number; rejected: number; duplicate: number };
     messages: ImportMessage[];
@@ -71,6 +74,9 @@ function toPreviewRow(row: FactorCandidate): PreviewRow {
     factorUnit: row.factorUnit,
     gas: row.gas,
     kind: row.kind,
+    rawFactorValue: row.source.fields.value ?? "",
+    rawGas: row.source.fields.gas ?? "",
+    rawKind: row.source.fields.level1 ?? row.source.fields.kind ?? "",
     identity: row.identity.slice(0, 12),
     messages: row.messages,
   };

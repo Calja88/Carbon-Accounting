@@ -3,8 +3,7 @@ import ExcelJS from "exceljs";
 import { normalizeHeaderKey, parseCsv } from "@/lib/csv";
 import type { DatasetMetadata, ImportMessage, ParsedFactorFile, SourceRow } from "./types";
 
-// This is an explicit tabular adapter, tested with synthetic fixtures. It is
-// not a claim to support the unpublished layout of any official annual file.
+// Explicit tabular contract plus the locally calibrated 2026 official flat file.
 const aliases: Record<string, string> = {
   category_path: "categoryPath", source_category: "categoryPath", category: "categoryPath",
   activity: "activity", fuel: "activity", material: "activity", travel_mode: "activity",
@@ -15,6 +14,11 @@ const aliases: Record<string, string> = {
   dataset_year: "year", year: "year", release: "release", version: "release",
   factor_category: "category", subtype_key: "subtypeKey", scope: "scope",
   basis: "basis", region: "region", geography: "region", notes: "notes",
+};
+const flatAliases: Record<string, string> = {
+  id: "sourceId", scope: "scope", level_1: "level1", level_2: "level2",
+  level_3: "level3", level_4: "level4", column_text: "columnText", uom: "unit",
+  "ghg/unit": "gas",
 };
 const message = (code: string, text: string, severity: ImportMessage["severity"] = "error"): ImportMessage =>
   ({ severity, code, message: text });
@@ -70,17 +74,22 @@ export async function parseUkGovFactors(
   Object.entries(supplied).forEach(([key, value]) => { if (value != null) observe(key, String(value)); });
 
   function scan(name: string, records: { number: number; cells: string[]; unsafe?: boolean }[]) {
-    const sheet = { name, supported: false, rowsScanned: records.length };
+    const sheet: ParsedFactorFile["sheets"][number] = { name, supported: false, rowsScanned: records.length };
     result.sheets.push(sheet);
     result.totalRowsScanned += records.length;
     let headers: (string | undefined)[] | null = null;
     let impliedCo2e = false;
+    let officialFlat = false;
     for (const record of records) {
       const { cells } = record;
       if (!cells.some((cell) => cell.trim())) continue;
       const keys = cells.map(normalizeHeaderKey);
-      const detected = keys.map((key) => Object.hasOwn(aliases, key) ? aliases[key] : undefined);
-      if (detected.includes("value") && (detected.includes("activity") || detected.includes("categoryPath") || detected.includes("category"))) {
+      const flatHeader = keys.some((key) => /^ghg_conversion_factor_\d{4}$/.test(key)) &&
+        Object.keys(flatAliases).every((key) => keys.includes(key));
+      const detected = keys.map((key) => flatHeader
+        ? /^ghg_conversion_factor_\d{4}$/.test(key) ? "value" : Object.hasOwn(flatAliases, key) ? flatAliases[key] : undefined
+        : Object.hasOwn(aliases, key) ? aliases[key] : undefined);
+      if (flatHeader || (detected.includes("value") && (detected.includes("activity") || detected.includes("categoryPath") || detected.includes("category")))) {
         const known = detected.filter(Boolean);
         const ambiguous = new Set(known).size !== known.length;
         if (ambiguous || record.unsafe) {
@@ -89,6 +98,11 @@ export async function parseUkGovFactors(
           continue;
         }
         headers = detected;
+        officialFlat = flatHeader;
+        if (officialFlat) {
+          observe("year", keys.find((key) => /^ghg_conversion_factor_\d{4}$/.test(key))!.slice(-4));
+          (sheet.tables ??= []).push({ rowNumber: record.number, headers: cells, layout: "official-flat" });
+        }
         impliedCo2e = keys.includes("co2e_factor") || keys.includes("kgco2e");
         sheet.supported = true;
         continue;
@@ -104,12 +118,25 @@ export async function parseUkGovFactors(
       }
       const fields: Record<string, string> = {};
       headers.forEach((key, index) => { if (key) fields[key] = cells[index] ?? ""; });
+      if (officialFlat) {
+        const populated = cells.filter((cell) => cell.trim());
+        if (populated.length === 1 && populated[0].trim() === "END" && !record.unsafe) continue;
+        fields.categoryPath = [fields.level1, fields.level2, fields.level3, fields.level4].filter((v) => v?.trim()).join(" > ");
+        fields.activity = [fields.level2, fields.level3, fields.level4, fields.columnText].filter((v) => v?.trim()).join(" > ");
+        fields.factorUnit = fields.gas;
+        // Only boundaries explicit in this calibrated subset are classified.
+        // Corporate category/subtype/region and Scope 2 basis still require review.
+        fields.kind = /^WTT\s*-/i.test(fields.level1.trim()) ? "wtt"
+          : fields.level1.trim() === "Fuels" && fields.scope.trim() === "Scope 1" ? "direct" : "";
+      }
       if (impliedCo2e) {
         fields.gas ||= "CO2e";
         fields.factorUnit ||= "kgCO2e";
       }
       Object.entries(fields).forEach(([key, value]) => observe(key, value));
       const row: SourceRow = { sheet: name, rowNumber: record.number, cells, fields, messages: [] };
+      if (officialFlat && !fields.kind) row.messages.push(message("UNREVIEWED_FACTOR_KIND", "This source table's emissions boundary is unreviewed; direct, total or lifecycle must not be guessed."));
+      if (officialFlat && /^kwh\b/i.test(fields.gas.trim())) row.messages.push(message("NOT_EMISSION_FACTOR", "This is an energy conversion, not a kgCO2e emissions factor."));
       if (record.unsafe) row.messages.push(message("UNSUPPORTED_CELL", "Formula, error or merged data cell requires an explicit value."));
       if (cells.some((cell, index) => index < headers!.length && !headers![index] && cell.trim())) {
         row.messages.push(message("UNMAPPED_COLUMN", "Populated source columns are unrecognised; review their meaning before mapping this row.", "warning"));
@@ -123,7 +150,7 @@ export async function parseUkGovFactors(
       }
       result.rows.push(row);
     }
-    if (!sheet.supported) result.messages.push(message("UNSUPPORTED_SHEET", `No supported factor table found in ${name}.`, "warning"));
+    if (!sheet.supported) result.messages.push({ ...message("UNSUPPORTED_SHEET", `No supported factor table found in ${name}; metadata or other layouts are not factor tables.`, "warning"), sheet: name });
   }
 
   try {
@@ -139,6 +166,28 @@ export async function parseUkGovFactors(
       await workbook.xlsx.load(bytes as unknown as Parameters<typeof workbook.xlsx.load>[0]);
       if (workbook.worksheets.reduce((sum, sheet) => sum + sheet.rowCount, 0) > 50000) throw new Error("Row limit");
       for (const sheet of workbook.worksheets) {
+        // The front page uses merged cells and several key/value pairs per row.
+        // Read masters only; cached formula/error metadata is never trusted.
+        if (sheet.name === "Front page") {
+          sheet.eachRow((row) => {
+            const values: string[] = [];
+            let unsafe = false;
+            row.eachCell((cell) => {
+              if (cell.isMerged && cell.address !== cell.master.address) return;
+              unsafe ||= cell.type === ExcelJS.ValueType.Formula || cell.type === ExcelJS.ValueType.Error;
+              if (cell.value != null && cell.text.trim()) values.push(cell.text.trim());
+            });
+            if (unsafe) {
+              result.messages.push({ ...message("UNSUPPORTED_METADATA", "Formula or error in front-page metadata; provide explicit source values."), sheet: sheet.name, rowNumber: row.number });
+              return;
+            }
+            values.forEach((value, index) => {
+              if (value === "UK Government GHG Conversion Factors for Company Reporting") observe("publisher", "UK Government");
+              if (/^year\s*:?$/i.test(value)) observe("year", values[index + 1] ?? "");
+              if (/^version\s*:?$/i.test(value)) observe("release", values[index + 1] ?? "");
+            });
+          });
+        }
         const records: { number: number; cells: string[]; unsafe: boolean }[] = [];
         for (let number = 1; number <= sheet.rowCount; number++) {
           const row = sheet.getRow(number);
@@ -146,7 +195,8 @@ export async function parseUkGovFactors(
           let unsafe = false;
           for (let col = 1; col <= row.cellCount; col++) {
             const cell = row.getCell(col);
-            cells.push(cell.text);
+            // ExcelJS throws reading .text on a merge whose master is empty.
+            cells.push(cell.value == null ? "" : cell.text);
             unsafe ||= cell.isMerged || cell.type === ExcelJS.ValueType.Formula || cell.type === ExcelJS.ValueType.Error;
           }
           records.push({ number, cells, unsafe });

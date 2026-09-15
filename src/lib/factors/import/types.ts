@@ -4,6 +4,8 @@ export interface ImportMessage {
   severity: "error" | "warning";
   code: string;
   message: string;
+  sheet?: string;
+  rowNumber?: number;
 }
 
 export interface DatasetMetadata {
@@ -25,7 +27,9 @@ export interface ParsedFactorFile {
   sourceFileName: string;
   fileHash: string;
   metadata: DatasetMetadata;
-  sheets: { name: string; supported: boolean; rowsScanned: number }[];
+  sheets: { name: string; supported: boolean; rowsScanned: number;
+    tables?: { rowNumber: number; headers: string[]; layout: "official-flat" }[];
+  }[];
   totalRowsScanned: number;
   rows: SourceRow[];
   messages: ImportMessage[];
