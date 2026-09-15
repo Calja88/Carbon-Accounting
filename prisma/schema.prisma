@@ -153,6 +153,7 @@ model Organisation {
   // Carbon-domain roots (T16).
   siteEnergyContracts SiteEnergyContract[]
   activityEntries     ActivityEntry[]
+  reportingPeriods    ReportingPeriod[]
   commutingSurveys    CommutingSurvey[]
   calculations        Calculation[]
   reportSnapshots     ReportSnapshot[]
@@ -673,6 +674,7 @@ model Site {
   createdAt      DateTime     @default(now())
 
   activityEntries  ActivityEntry[]
+  reportingPeriods ReportingPeriod[]
   energyContracts  SiteEnergyContract[]
   commutingSurveys CommutingSurvey[]
   carbonSourcePeriodObligations CarbonSourcePeriodObligation[]
@@ -997,6 +999,28 @@ model SiteEnergyContract {
   enteredAt       DateTime     @default(now())
 
   @@index([organisationId])
+}
+
+enum ReportingPeriodState {
+  OPEN
+  CLOSED
+}
+
+/// Site-scoped UTC calendar month, assigned by ActivityEntry.periodStart.
+/// Missing rows mean OPEN; only an explicit authorised transition closes a month.
+model ReportingPeriod {
+  id             String               @id @default(cuid())
+  organisationId String
+  organisation   Organisation         @relation(fields: [organisationId], references: [id])
+  siteId         String
+  site           Site                 @relation(fields: [siteId], references: [id])
+  monthStart     DateTime             @db.Date
+  state          ReportingPeriodState @default(OPEN)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  // Transition actors, reasons and before/after state live in the hash-chained AuditEvent.
+  @@unique([organisationId, siteId, monthStart])
 }
 
 model ActivityEntry {

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { assertPeriodAllowsMutation, isReportingPeriodClosedError } from "@/lib/carbon/reporting-period-guard";
 import { lockActivityEntry } from "@/lib/repositories/row-locks";
 import { assertCompletePrimaryCalculations } from "@/lib/calculation-integrity";
 import {
@@ -259,6 +260,7 @@ export async function createActivityEntryWithCalculations(ctx: TenantRepositoryC
   // record can never exist without the event that records its arrival. The
   // calculation run keeps its own separate transaction, exactly as before.
   const entry = await prisma.$transaction(async (tx) => {
+    await assertPeriodAllowsMutation(tx, ctx, input.siteId, input.periodStart);
     const created = await tx.activityEntry.create({
       data: {
         organisationId: ctx.organisationId,
@@ -327,6 +329,7 @@ export async function runCalculationsForEntry(ctx: TenantRepositoryContext, entr
   });
   assertCompletePrimaryCalculations(existing, dataPoint.scope, dataPoint.factorCategory);
   if (existing.length) return existing;
+  await assertPeriodAllowsMutation(tx, ctx, entry.siteId, entry.periodStart);
   const inputValue = Number(entry.canonicalValue);
   const inputUnit = entry.canonicalUnit;
 
@@ -537,9 +540,7 @@ export async function runCalculationsForEntry(ctx: TenantRepositoryContext, entr
  * would silently defuse them. Rename to `backfillAwaitingFactorEntries`
  * once Phase 3-vi lands and those files can be updated in the same change.
  *
- * Phase 4-i: not period-aware. A closed-period barrier belongs to Phase
- * 4-ii; until then this remains free to give a historical entry its first
- * figure, and the batch event below is what makes that visible.
+ * Closed entries are skipped and disclosed in the existing batch audit.
  */
 export async function recalculatePendingEntries(organisationId: string) {
   const pending = await prisma.activityEntry.findMany({
@@ -551,11 +552,17 @@ export async function recalculatePendingEntries(organisationId: string) {
   const ctx = systemTenantRepositoryContext(organisationId, "factor-import-backfill");
   let recalculated = 0;
   let checked = 0;
+  let skippedClosedPeriod = 0;
   for (const entry of pending) {
     if (!entry.organisationId) continue;
     checked++;
-    const calculations = await runCalculationsForEntry(ctx, entry.id);
-    if (calculations.length > 0) recalculated++;
+    try {
+      const calculations = await runCalculationsForEntry(ctx, entry.id);
+      if (calculations.length > 0) recalculated++;
+    } catch (error) {
+      if (!isReportingPeriodClosedError(error)) throw error;
+      skippedClosedPeriod++;
+    }
   }
 
   if (checked > 0) {
@@ -564,7 +571,7 @@ export async function recalculatePendingEntries(organisationId: string) {
         eventType: "calculation.backfilled",
         resourceType: "calculation",
         resourceId: null,
-        summary: `Factor import backfill: ${recalculated} of ${checked} awaiting-factor entr${checked === 1 ? "y" : "ies"} produced a figure`,
+        summary: `Factor import backfill: ${recalculated} of ${checked} awaiting-factor entr${checked === 1 ? "y" : "ies"} produced a figure; ${skippedClosedPeriod} skipped because the reporting period is closed`,
         ...auditActorFor(ctx),
         correlationId: ctx.correlationId,
         // Counts only. The per-entry calculation.created and
@@ -576,12 +583,13 @@ export async function recalculatePendingEntries(organisationId: string) {
           checked,
           backfilled: recalculated,
           stillAwaitingFactor: checked - recalculated,
+          skippedClosedPeriod,
         },
       });
     });
   }
 
-  return { checked, recalculated };
+  return { checked, recalculated, skippedClosedPeriod };
 }
 
 /**
@@ -668,6 +676,7 @@ export async function deriveCategory3Calculations(ctx: TenantRepositoryContext, 
     // exactly — partial progress is retained, and the unique
     // derivedFromCalculationId constraint still makes a re-run idempotent.
     await prisma.$transaction(async (tx) => {
+      await assertPeriodAllowsMutation(tx, ctx, source.activityEntry.siteId, source.activityEntry.periodStart);
       const derived = await tx.calculation.create({
         data: {
           organisationId: ctx.organisationId,
@@ -749,16 +758,19 @@ export async function createCommutingSurvey(ctx: TenantRepositoryContext, input:
 
   const dataPoint = await prisma.activityDataPoint.findUniqueOrThrow({ where: { code: "S3-07" } });
 
-  const survey = await prisma.commutingSurvey.create({
-    data: {
-      organisationId: ctx.organisationId,
-      siteId: input.siteId,
-      periodStart: input.periodStart,
-      periodEnd: input.periodEnd,
-      headcount: input.headcount,
-      commutingDaysInPeriod: input.commutingDaysInPeriod,
-      enteredByUserId: input.enteredByUserId,
-    },
+  const survey = await prisma.$transaction(async (tx) => {
+    await assertPeriodAllowsMutation(tx, ctx, input.siteId, input.periodStart);
+    return tx.commutingSurvey.create({
+      data: {
+        organisationId: ctx.organisationId,
+        siteId: input.siteId,
+        periodStart: input.periodStart,
+        periodEnd: input.periodEnd,
+        headcount: input.headcount,
+        commutingDaysInPeriod: input.commutingDaysInPeriod,
+        enteredByUserId: input.enteredByUserId,
+      },
+    });
   });
 
   const entries = [];
@@ -824,18 +836,21 @@ export async function upsertSiteEnergyContract(ctx: TenantRepositoryContext, inp
   const site = await prisma.site.findFirst({ where: tenantWhere(ctx, { id: input.siteId }) });
   assertOwned(ctx, site);
 
-  return prisma.siteEnergyContract.create({
-    data: {
-      organisationId: ctx.organisationId,
-      siteId: input.siteId,
-      effectiveFrom: input.effectiveFrom,
-      effectiveTo: input.effectiveTo ?? null,
-      supplierName: input.supplierName,
-      tariffType: input.tariffType,
-      regoBacked: input.regoBacked,
-      regoVolumeKwh: input.regoVolumeKwh ?? null,
-      source: input.source,
-      enteredByUserId: input.enteredByUserId,
-    },
+  return prisma.$transaction(async (tx) => {
+    await assertPeriodAllowsMutation(tx, ctx, input.siteId, input.effectiveFrom, input.effectiveTo ?? new Date("9999-12-31T00:00:00Z"));
+    return tx.siteEnergyContract.create({
+      data: {
+        organisationId: ctx.organisationId,
+        siteId: input.siteId,
+        effectiveFrom: input.effectiveFrom,
+        effectiveTo: input.effectiveTo ?? null,
+        supplierName: input.supplierName,
+        tariffType: input.tariffType,
+        regoBacked: input.regoBacked,
+        regoVolumeKwh: input.regoVolumeKwh ?? null,
+        source: input.source,
+        enteredByUserId: input.enteredByUserId,
+      },
+    });
   });
 }

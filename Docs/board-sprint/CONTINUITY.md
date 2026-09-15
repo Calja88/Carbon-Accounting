@@ -2,6 +2,10 @@
 
 Keep this to ~1-2 pages. Update at the end of every package.
 
+## Carbon Phase 4-ii — reporting period barrier complete
+
+Backend foundation: site-scoped UTC monthly `ReportingPeriod` (`OPEN`/`CLOSED`, absent means open), one SQL mutation guard shared by services and database triggers, audited/permission-gated state primitive, closed-period backfill skips, and unchanged calculation/report reads. Additive migration `20260915170000_carbon_reporting_period_barrier`; applied only to disposable local PostgreSQL. No close/reopen UI or correction/restatement workflow. **Migration must precede runtime rollout.** Exact protected paths, checks, limitations and Phase 4-iii/4-iv boundaries: [CARBON_PHASE4_II_REPORTING_PERIOD_BARRIER.md](../CARBON_PHASE4_II_REPORTING_PERIOD_BARRIER.md).
+
 ## Carbon Product Reset — Phases 0 to 3-ii complete (supersedes the sections below)
 
 `board/product-2026-09-22`, PR #64 still draft/unmerged. Branch tip `b87c359`; last code commit `208ed86`.

@@ -301,6 +301,8 @@ export const AUDIT_EVENT_TYPES = [
   "calculation.backfilled",
   "report_data.prepared",
   "report_snapshot.issued",
+  "reporting_period.closed",
+  "reporting_period.opened",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -308,6 +310,7 @@ export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
 export type AuditActorType = "USER" | "SYSTEM";
 
 export type AuditResourceType =
+  | "reporting_period"
   | "organisation"
   | "membership"
   | "role"

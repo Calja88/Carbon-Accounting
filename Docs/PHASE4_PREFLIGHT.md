@@ -1,10 +1,10 @@
 # Phase 4 preflight — accounting controls (recalculation, supersession, approval, period close)
 
-**Status:** analysis and design only. No code, schema, migration, database or deployment change was made by this preflight.
+**Status:** this preflight is analysis/design. Carbon 4-i and **4-ii are now implemented**; see [the 4-ii handoff](CARBON_PHASE4_II_REPORTING_PERIOD_BARRIER.md) for the authoritative current model, guard and remaining phase boundaries. Descriptions below of absent periods/locks record the pre-implementation baseline.
 **Branch inspected:** `board/product-2026-09-22` at `9cf9538`.
 **Date:** 2026-09-15.
 
-> **Implementation progress.** Sub-phase **4-i (audit the numeric path) is implemented** — see `Docs/CARBON_PHASE4_I_NUMERIC_AUDIT.md`. Risk **R2 is closed**. Risk **R1 is now observable but not yet prevented** (the factor-import backfill emits a batch audit event, but remains period-unaware until 4-ii). Everything from 4-ii onward is still design only. The track is named **Carbon Phase 4** with a `CARBON_PHASE4_*` document prefix, resolving blocker B1 below.
+> **Implementation progress.** **4-i** provides numeric-path auditing (`Docs/CARBON_PHASE4_I_NUMERIC_AUDIT.md`); **4-ii** provides the period mutation barrier (`Docs/CARBON_PHASE4_II_REPORTING_PERIOD_BARRIER.md`). R2 is closed; R1 is now prevented by closed-period backfill skips with audited counts. Everything from 4-iii onward remains outside this implementation. The track uses **Carbon Phase 4** / `CARBON_PHASE4_*`, resolving B1 below; the Phase 3-vi schema contracts have landed, releasing 4-ii's schema dependency.
 **Scope excluded:** `prisma/schema.prisma` (in-flight), `prisma/migrations/*`, `src/lib/factors/import/*`, `src/lib/factors/publication/*`, factor publication/schema contracts, `EmissionFactor` / `EmissionFactorSet`, Phase 3-v / 3-vi implementation files. These were read for context only and not modified.
 
 > **Naming collision — decide before writing any Phase 4 code.** `Docs/PHASE4_LEGAL_COMPLIANCE_SPEC.md` already exists and belongs to the ISO 14001 EMS track (Phases 0–8). The carbon ledger track numbers its work Phase 3-i … 3-vii. "Phase 4" as used in this document is the *carbon ledger accounting-controls* package and is a different thing from EMS Phase 4. Recommended rename: **Phase 3-viii / Carbon Ledger Accounting Controls**, or an explicit `CARBON_PHASE4_` document prefix. See §18 B1.

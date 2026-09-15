@@ -19,6 +19,7 @@
 import { createHash } from "crypto";
 import { DataOrigin, DocumentStatus, Prisma, SourceDocumentKind } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { assertPeriodAllowsMutation } from "@/lib/carbon/reporting-period-guard";
 import { createActivityEntryWithCalculations } from "@/lib/entries-service";
 import { resolvePeriod } from "@/lib/period";
 import type { OrganisationContext } from "@/lib/organisation/context";
@@ -257,6 +258,7 @@ export async function acceptExtractionAsEntry(context: OrganisationContext, inpu
   // path an ActivityEntry has — it changes provenance, never a quantity —
   // and it commits with its own audit event.
   await prisma.$transaction(async (tx) => {
+    await assertPeriodAllowsMutation(tx, ctx, created.entry.siteId, created.entry.periodStart);
     await tx.activityEntry.update({
       where: { id: created.entry.id, organisationId: ctx.organisationId },
       data: {

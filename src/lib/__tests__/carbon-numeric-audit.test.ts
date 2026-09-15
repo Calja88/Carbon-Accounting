@@ -232,7 +232,7 @@ describe("Phase 4-i: the factor-import backfill is auditable and marked system-t
 
   it("emits a batch calculation.backfilled event with counts, not a per-entry id list", async () => {
     const result = await recalculatePendingEntries(ORG_A);
-    expect(result).toEqual({ checked: 1, recalculated: 1 });
+    expect(result).toEqual({ checked: 1, recalculated: 1, skippedClosedPeriod: 0 });
 
     const [batch] = eventsOfType("calculation.backfilled");
     expect(batch).toBeDefined();
@@ -241,6 +241,7 @@ describe("Phase 4-i: the factor-import backfill is auditable and marked system-t
       checked: 1,
       backfilled: 1,
       stillAwaitingFactor: 0,
+      skippedClosedPeriod: 0,
     });
   });
 
@@ -274,7 +275,7 @@ describe("Phase 4-i: the factor-import backfill is auditable and marked system-t
     tables.audit.length = 0;
 
     const result = await recalculatePendingEntries(ORG_A);
-    expect(result).toEqual({ checked: 0, recalculated: 0 });
+    expect(result).toEqual({ checked: 0, recalculated: 0, skippedClosedPeriod: 0 });
     expect(tables.audit).toHaveLength(0);
   });
 });
