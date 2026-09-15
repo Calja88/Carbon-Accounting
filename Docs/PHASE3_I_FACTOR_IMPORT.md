@@ -150,6 +150,10 @@ until the gas/kind schema, provenance/idempotency and platform publication
 authority decisions are implemented. Do not pass these previews to the legacy
 manual importer as a workaround.
 
+**Delivered** in commit `208ed86` — see `PHASE3_II_FACTOR_IMPORT_UI.md`. It
+consumes this service unchanged, adds no schema change and keeps commit disabled.
+The blockers listed above are all still open; they now carry forward to 3-iii.
+
 ## Verification
 
 Focused Vitest checks cover synthetic CSV/XLSX parsing, physical provenance,

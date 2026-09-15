@@ -2,7 +2,26 @@
 
 Keep this to ~1-2 pages. Update at the end of every package.
 
-## Product realignment — 2026-09-11 (supersedes the finish-mode handoff below)
+## Carbon Product Reset — Phases 0 to 3-ii complete (supersedes the sections below)
+
+`board/product-2026-09-22`, PR #64 still draft/unmerged. Branch tip `b87c359`; last code commit `208ed86`.
+
+| Phase | Commit | What landed |
+| --- | --- | --- |
+| 0 | `51667a2` | Tenant scoping on the entry routes, `visibleFactorSetFilter` on factor resolution, organisation-scoped recalculation, carbon-first nav |
+| 1A | `7bbe725` | One home for design tokens; `components/ui/primitives`; one tonne formatter |
+| 1B | `019dfc2`, `cedff66` | Consolidated carbon dashboard and scope controls |
+| 2A | `6f11dac`, `b562367` | `OrganisationSourceConfig` + `/sources` (additive migration) |
+| 2B-i | `77a8eec` | `CarbonCollectionRequirement` service (additive migration `20260914160000_add_carbon_collection_requirement`) |
+| 2B-ii | `2e9889a` | `/data` collection page |
+| 3-i | `8850211` | UK factor import engine — parse/normalise/validate/preview, no schema, no writes. `Docs/PHASE3_I_FACTOR_IMPORT.md` |
+| 3-ii | `208ed86` | Factor import preview UI at `/admin/factors/import`, no schema, no writes. `Docs/PHASE3_II_FACTOR_IMPORT_UI.md` |
+
+**Production must not be promoted from this branch.** Production still lacks the 2B-i migration `20260914160000_add_carbon_collection_requirement`; the live Production deployment remains `dpl_3at6qgACKb9nkK7pZ46HGpt8ZhqT` (from `bd47fa0`). The preserved BOARD-1 parent baseline `br-young-haze-arjtwhkj` has not been touched by any reset phase.
+
+**Open:** Phase 3 persistence is blocked pending the official `2026-full-set.xlsx` with release metadata, a gas/kind schema decision, durable provenance/idempotency, and the platform publication authority for official factor sets — see `PHASE3_II_FACTOR_IMPORT_UI.md` §Phase 3-iii handoff. Signed-in visual verification of the 3-ii preview page is still outstanding.
+
+## Product realignment — 2026-09-11
 
 **Carbon Ledger is the product; BOARD-1 is an optional synthetic sample workspace.** Commit `86c3d44` on `board/product-2026-09-22` (PR #64, still draft/unmerged).
 
