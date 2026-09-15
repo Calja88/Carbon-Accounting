@@ -163,12 +163,24 @@ renders as "Nothing outstanding for this period in your scope."
 
 ## Drill-down
 
-Every link is built by one exported helper, `activityDrilldownHref`, so the
-Activity Data Register has exactly one place to repoint. Today it resolves to
-`/data` (the period-aware collection plan over the same site/source/period cells
-these figures come from), carrying `from`, `to`, `siteId` and — where the reader
-clicked one — `scope` or `status`. Trend months link to the dashboard for that
-single month.
+Every link is built by one exported helper, `activityDrilldownHref`, so there is
+exactly one place that decides where a figure leads. It carries `from`, `to`,
+`siteId` and — where the reader clicked one — `scope` or `status`, and picks the
+destination by what the reader actually clicked:
+
+| Clicked | Goes to | Why |
+| --- | --- | --- |
+| A site, a Scope 3 category, a ranked source | `/activity` (Activity Data Register) | These name records that exist; the register lists them. `scope` values map 1:1. |
+| Outstanding **awaiting factor** | `/activity?status=AWAITING_FACTOR` | A real `ActivityEntry` state. |
+| Outstanding **held back for review** | `/activity?status=FLAGGED` | A real `ActivityEntry` state. |
+| Outstanding **not yet received** | `/data?status=missing` | A collection-plan fact about a *requirement* — there is no entry to open. |
+| Outstanding **changed since review** | `/data?status=changed_since_review` | Same: a requirement whose review no longer covers its submission. |
+| A trend month | `/` for that single month | The dashboard's own period scope. |
+
+The register filters on `EntryStatus` and the collection plan on
+`CollectionStatus`, so the helper translates rather than passing a status
+straight through; a state with no equivalent stays where it belongs instead of
+being sent somewhere that would silently ignore it.
 
 ## Methodology and provenance
 
@@ -260,6 +272,7 @@ throwaway script was deleted. Jan–Aug 2026:
 5. No export from this page (Phase 5B). The browser print view is styled via the
    existing `no-print` / `break-inside-avoid` classes; permanent figures still come
    from a frozen `ReportSnapshot` on `/reports`.
-6. Drill-down stops at `/data` (site, source, period, submission and status).
-   Repointing it at the Activity Data Register is a one-function change
-   (`activityDrilldownHref`).
+6. Drill-down reaches the Activity Data Register's filtered list, not an
+   individual record: the report cannot know which of several entries behind a
+   ranked source the reader wants. From the register's own rows, `/activity/[id]`
+   carries on to the calculation, factor and evidence.

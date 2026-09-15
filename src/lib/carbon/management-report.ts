@@ -220,21 +220,39 @@ function share(part: number | null, total: number | null): number | null {
 }
 
 /**
- * Every drill-down out of this report goes through here, so the day the
- * Activity Data Register lands there is exactly one place to repoint. Today
- * it resolves to the Data Collection plan (`/data`), the period-aware view
- * of the same site, source and period cells these figures are built from;
- * it already accepts `from`/`to`/`siteId`/`scope`/`status`, so the filter
- * the reader clicked survives the jump.
+ * The Activity Data Register's own filter vocabulary is `EntryStatus`, so
+ * only the states a real `ActivityEntry` actually carries can be handed to
+ * it. `missing` and `changed_since_review` are collection-plan facts about a
+ * *requirement* — one nobody submitted against, and one whose submission
+ * moved after it was reviewed — and have no entry to point at.
+ */
+const ENTRY_STATUS_FOR: Partial<Record<OutstandingKind, "AWAITING_FACTOR" | "FLAGGED">> = {
+  awaiting_factor: "AWAITING_FACTOR",
+  flagged: "FLAGGED",
+};
+
+/**
+ * Every drill-down out of this report goes through here, so there is exactly
+ * one place that decides where a figure leads.
+ *
+ * A site, a scope, or a state a real entry carries goes to the Activity Data
+ * Register (`/activity`), which lists the underlying records themselves. A
+ * collection-plan-only state stays on the Data Collection plan (`/data`),
+ * because that is where the requirement it describes actually lives. Both
+ * routes take `from`/`to`/`siteId`/`scope`/`status`, so the period and the
+ * filter the reader clicked survive the jump either way.
  */
 export function activityDrilldownHref(
   scope: { from: string; to: string; siteId?: string },
-  filter: { scope?: "SCOPE_1" | "SCOPE_2" | "SCOPE_3"; status?: CollectionStatus } = {},
+  filter: { scope?: "SCOPE_1" | "SCOPE_2" | "SCOPE_3"; status?: OutstandingKind } = {},
 ): LocalHref {
-  const base = carbonHref("/data", scope);
+  const entryStatus = filter.status ? ENTRY_STATUS_FOR[filter.status] : undefined;
+  const planOnly = filter.status !== undefined && entryStatus === undefined;
+  const base = carbonHref(planOnly ? "/data" : "/activity", scope);
+  const status = entryStatus ?? (planOnly ? filter.status : undefined);
   const extra = [
     filter.scope ? `scope=${filter.scope}` : null,
-    filter.status ? `status=${filter.status}` : null,
+    status ? `status=${status}` : null,
   ].filter((part): part is string => part !== null);
   return extra.length ? localHref(`${base}&${extra.join("&")}`) : base;
 }
@@ -509,17 +527,16 @@ export function buildManagementReport(input: ManagementReportInput): ManagementR
 
   const outstanding: OutstandingRow[] = (
     [
-      ["missing", counts.get("missing") ?? 0, "missing"],
-      ["awaiting_factor", counts.get("awaiting_factor") ?? 0, "awaiting_factor"],
-      ["changed_since_review", counts.get("changed_since_review") ?? 0, "changed_since_review"],
-      // A flagged entry is an ActivityEntry-level QA state, not a
-      // collection-plan cell state, so it has no status filter to hand on —
-      // its link lands on the same window unfiltered.
-      ["flagged", input.flaggedCount, undefined],
-    ] as [OutstandingKind, number, CollectionStatus | undefined][]
+      ["missing", counts.get("missing") ?? 0],
+      ["awaiting_factor", counts.get("awaiting_factor") ?? 0],
+      ["changed_since_review", counts.get("changed_since_review") ?? 0],
+      // `flagged` is an ActivityEntry QA state rather than a collection-plan
+      // cell state, which is exactly why it resolves to the register.
+      ["flagged", input.flaggedCount],
+    ] as [OutstandingKind, number][]
   )
     .filter(([, count]) => count > 0)
-    .map(([kind, count, status]) => ({ kind, count, ...OUTSTANDING_LABEL[kind], href: activityDrilldownHref(scope, { status }) }))
+    .map(([kind, count]) => ({ kind, count, ...OUTSTANDING_LABEL[kind], href: activityDrilldownHref(scope, { status: kind }) }))
     .sort((a, b) => b.count - a.count);
 
   const placeholderFactorsUsed = input.factorSources.some((f) => f.placeholder);

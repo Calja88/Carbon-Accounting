@@ -350,22 +350,42 @@ describe("drill-down links", () => {
       expect(href).toContain("from=");
       expect(href).toContain("to=");
     }
-    expect(report.sites[0].href).toContain("/data?");
+    // A site, a scope or a source leads to the underlying records themselves.
+    expect(report.sites[0].href).toContain("/activity?");
     expect(report.sites[0].href).toContain("siteId=alpha");
+    expect(report.topSources[0].href).toContain("/activity?");
     expect(report.topSources[0].href).toContain("scope=SCOPE_3");
+    expect(report.scope3Categories[0].href).toContain("/activity?");
     expect(report.trend[0].href).toContain("from=2026-01&to=2026-01");
   });
 
-  it("carries the clicked outstanding state through as a real collection-plan filter", () => {
-    const report = buildManagementReport(input({ collectionStatuses: ["missing"], flaggedCount: 1 }));
-    expect(report.outstanding.find((o) => o.kind === "missing")?.href).toContain("status=missing");
-    // A flagged entry has no collection-plan status to filter on.
-    expect(report.outstanding.find((o) => o.kind === "flagged")?.href).not.toContain("status=");
+  it("sends an entry-level state to the register, in the register's own vocabulary", () => {
+    const report = buildManagementReport(input({ collectionStatuses: ["awaiting_factor"], flaggedCount: 1 }));
+    // EntryStatus, not CollectionStatus — the register filters on the former.
+    expect(report.outstanding.find((o) => o.kind === "awaiting_factor")?.href).toBe(
+      "/activity?from=2026-01&to=2026-02&status=AWAITING_FACTOR",
+    );
+    expect(report.outstanding.find((o) => o.kind === "flagged")?.href).toBe("/activity?from=2026-01&to=2026-02&status=FLAGGED");
   });
 
-  it("builds drill-down links through the one helper the register can repoint", () => {
+  it("keeps a collection-plan-only state on the collection plan", () => {
+    const report = buildManagementReport(input({ collectionStatuses: ["missing", "changed_since_review"], flaggedCount: 0 }));
+    // Neither describes a record that exists, so neither has an entry to open.
+    expect(report.outstanding.find((o) => o.kind === "missing")?.href).toBe("/data?from=2026-01&to=2026-02&status=missing");
+    expect(report.outstanding.find((o) => o.kind === "changed_since_review")?.href).toBe(
+      "/data?from=2026-01&to=2026-02&status=changed_since_review",
+    );
+  });
+
+  it("builds every drill-down through the one helper that decides the destination", () => {
+    expect(activityDrilldownHref({ from: "2026-01", to: "2026-02", siteId: "alpha" }, { scope: "SCOPE_1", status: "flagged" })).toBe(
+      "/activity?from=2026-01&to=2026-02&siteId=alpha&scope=SCOPE_1&status=FLAGGED",
+    );
     expect(activityDrilldownHref({ from: "2026-01", to: "2026-02", siteId: "alpha" }, { scope: "SCOPE_1", status: "missing" })).toBe(
       "/data?from=2026-01&to=2026-02&siteId=alpha&scope=SCOPE_1&status=missing",
+    );
+    expect(activityDrilldownHref({ from: "2026-01", to: "2026-02", siteId: "alpha" })).toBe(
+      "/activity?from=2026-01&to=2026-02&siteId=alpha",
     );
   });
 });

@@ -644,8 +644,8 @@ export default async function ManagementReportPage({ searchParams }: { searchPar
           <p className="text-xs text-slate-500">
             Each figure is a stored calculation of activity data × the emission factor in force for its period, not a recalculation done
             for this page.{" "}
-            <Link href="/data" className="font-medium text-blue-700 hover:text-blue-800">
-              Open the collection plan
+            <Link href="/activity" className="font-medium text-blue-700 hover:text-blue-800">
+              Open the activity register
             </Link>{" "}
             to follow any figure back to its site, source, submission, factor and evidence.
           </p>
