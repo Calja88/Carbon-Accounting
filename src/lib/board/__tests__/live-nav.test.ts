@@ -22,7 +22,7 @@ describe("resolveBoardNav", () => {
   it("includes the carbon-first items once carbon.view is granted", () => {
     const nav = resolveBoardNav(contextWith(["carbon.view", "carbon.factor.view", "lca.view", "ems.view"]));
     const ids = nav.map((item) => item.id);
-    expect(ids).toEqual(["overview", "data", "entry", "sources", "factors", "evidence", "reports", "advanced"]);
+    expect(ids).toEqual(["overview", "data", "activity", "entry", "sources", "factors", "evidence", "reports", "advanced"]);
   });
 
   it("gates overview/entry/evidence/reports on carbon.view", () => {
@@ -50,7 +50,7 @@ describe("resolveBoardNav", () => {
 
   it("filters each item by its own permission, not a blanket grant", () => {
     const carbonOnly = resolveBoardNav(contextWith(["carbon.view"]));
-    expect(carbonOnly.map((item) => item.id).sort()).toEqual(["data", "entry", "evidence", "overview", "reports", "sources"]);
+    expect(carbonOnly.map((item) => item.id).sort()).toEqual(["activity", "data", "entry", "evidence", "overview", "reports", "sources"]);
   });
 
   it("leaves every candidate href untouched — no not-yet-built route overrides remain", () => {

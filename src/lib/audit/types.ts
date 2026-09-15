@@ -296,6 +296,11 @@ export const AUDIT_EVENT_TYPES = [
   "activity_entry.created",
   "activity_entry.updated",
   "activity_entry.status_changed",
+  // Phase 4-iii-b Activity Data Register: the only hard delete an activity
+  // record has. Permitted solely for entries carrying no calculation and no
+  // citation, so nothing downstream loses a reference; the event keeps the
+  // "before" state after the row itself is gone.
+  "activity_entry.deleted",
   "calculation.created",
   "calculation.awaiting_factor",
   "calculation.backfilled",
