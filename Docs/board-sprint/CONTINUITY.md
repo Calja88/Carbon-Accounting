@@ -2,6 +2,10 @@
 
 Keep this to ~1-2 pages. Update at the end of every package.
 
+## LCA demo sprint — product footprint workflow demonstrable end to end
+
+The product LCA module was already built; what was missing was data to exercise it. `pnpm run db:seed:lca-demo` (standalone, idempotent, manual-only, never in `db:seed`) now seeds one contactless smart card with 15 inventory lines over 5 lifecycle stages, 6 assumptions, 3 exclusions, real evidence bytes, a calculated baseline (**52.001 kgCO2e per 1,000 cards**) and a lower-carbon scenario (**35.840, −31.1%**), all produced by the unmodified engine. Every factor is an organisation-scoped placeholder, so the platform's own controls hold the assessment out of verification — the figures are synthetic and are not a Paragon product footprint. Four correctness defects were fixed on the way (scenario drivers matched on clone-unstable ids; supplier/material shares summing past 100%; freight lines reading "no factor assigned"; factor-linked evidence unlabelled), all inside `src/lib/lca` and the assessment routes — no carbon accounting service touched. Full record, test results and limitations: [LCA_DEMO_SPRINT.md](../LCA_DEMO_SPRINT.md).
+
 ## Carbon Phase 4-ii — reporting period barrier complete
 
 Backend foundation: site-scoped UTC monthly `ReportingPeriod` (`OPEN`/`CLOSED`, absent means open), one SQL mutation guard shared by services and database triggers, audited/permission-gated state primitive, closed-period backfill skips, and unchanged calculation/report reads. Additive migration `20260915170000_carbon_reporting_period_barrier`; applied only to disposable local PostgreSQL. No close/reopen UI or correction/restatement workflow. **Migration must precede runtime rollout.** Exact protected paths, checks, limitations and Phase 4-iii/4-iv boundaries: [CARBON_PHASE4_II_REPORTING_PERIOD_BARRIER.md](../CARBON_PHASE4_II_REPORTING_PERIOD_BARRIER.md).

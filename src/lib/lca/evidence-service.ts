@@ -273,6 +273,9 @@ export async function listEvidence(assessmentId: string) {
       uploadedBy: true,
       inventoryItem: { select: { id: true, name: true } },
       process: { select: { id: true, name: true } },
+      // A factor is one of the targets createEvidence accepts, so the listing
+      // has to be able to name it rather than fall back to "the assessment".
+      emissionFactor: { select: { id: true, category: true, subtypeKey: true, factorSet: { select: { name: true } } } },
       supplierPcf: { select: { id: true, productName: true } },
       assumption: { select: { id: true, assumption: true } },
       exclusion: { select: { id: true, excludedItem: true } },

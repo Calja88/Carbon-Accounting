@@ -22,6 +22,7 @@ export const dynamic = "force-dynamic";
 function targetLabel(evidence: Awaited<ReturnType<typeof listEvidence>>[number]): string {
   if (evidence.inventoryItem) return `Inventory line: ${evidence.inventoryItem.name}`;
   if (evidence.process) return `Process: ${evidence.process.name}`;
+  if (evidence.emissionFactor) return `Emission factor: ${evidence.emissionFactor.factorSet.name}`;
   if (evidence.supplierPcf) return `Supplier PCF: ${evidence.supplierPcf.productName}`;
   if (evidence.assumption) return `Assumption: ${evidence.assumption.assumption}`;
   if (evidence.exclusion) return `Exclusion: ${evidence.exclusion.excludedItem}`;
@@ -113,6 +114,8 @@ export default async function EvidencePage({ params }: { params: Promise<{ id: s
                 <Td>
                   {item.kind === "UPLOADED_FILE" ? (
                     <Badge tone="info">{item.fileName ?? "File"}</Badge>
+                  ) : item.kind === "SYSTEM_RECORD" ? (
+                    <Badge tone="neutral">System record</Badge>
                   ) : (
                     <Badge tone="neutral">Link</Badge>
                   )}
