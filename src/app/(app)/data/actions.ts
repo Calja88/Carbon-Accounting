@@ -7,6 +7,8 @@ import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organ
 import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import { resolveMonthRange } from "@/lib/report-period";
+import { LegalHoldError } from "@/lib/retention/legal-hold-service";
+import { setReportingPeriodState } from "@/lib/carbon/reporting-period-service";
 import {
   CollectionPlanError,
   excludeCollectionRequirement,
@@ -43,7 +45,7 @@ const decisionSchema = z.object({
   reason: z.string().optional(),
 });
 
-export type DataActionErrorCode = "denied" | "scope" | "invalid" | "rejected";
+export type DataActionErrorCode = "denied" | "scope" | "invalid" | "rejected" | "hold" | "period_invalid";
 
 type ScopeValues = z.infer<typeof generateSchema>;
 
@@ -113,4 +115,50 @@ export async function decideRequirementAction(formData: FormData): Promise<void>
 
   if (!error) revalidatePath("/data");
   redirect(backTo(scope, error ? { error } : {}));
+}
+
+/**
+ * Phase 4-iii: the only application path that closes or reopens a month. It
+ * hands the freshly resolved server-side context straight to the Phase 4-ii
+ * transition service, which owns the permission check, the legal-hold check,
+ * the site lock and the audit record. Nothing about the browser's view of
+ * the current state is trusted or re-implemented here.
+ */
+const periodSchema = z.object({
+  ...scopeFields,
+  periodMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  state: z.enum(["OPEN", "CLOSED"]),
+  reason: z.string().trim().min(1).max(400),
+});
+
+export async function setReportingPeriodStateAction(formData: FormData): Promise<void> {
+  const parsed = periodSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) redirect("/data?error=period_invalid");
+  const { periodMonth, state, reason, ...scope } = parsed.data;
+  if (!scope.siteId) redirect("/data?error=period_invalid");
+
+  const [year, month] = periodMonth.split("-").map(Number);
+  let error: DataActionErrorCode | undefined;
+  try {
+    const context = await requireOrganisationContext();
+    await setReportingPeriodState(context, {
+      siteId: scope.siteId,
+      accountingDate: new Date(Date.UTC(year, month - 1, 1)),
+      state,
+      reason,
+    });
+  } catch (err) {
+    if (err instanceof OrganisationAccessError) redirect("/login");
+    if (err instanceof PermissionDeniedError) error = err.reason === "MISSING_PERMISSION" ? "denied" : "scope";
+    else if (err instanceof TenantOwnershipError) error = "scope";
+    else if (err instanceof LegalHoldError) error = "hold";
+    else throw err;
+  }
+
+  if (!error) {
+    revalidatePath("/data");
+    // The barrier decides what the entry screens will accept next.
+    revalidatePath(`/entry/${scope.siteId}`);
+  }
+  redirect(backTo(scope, error ? { error, periodMonth } : { periodMonth, periodDone: state }));
 }

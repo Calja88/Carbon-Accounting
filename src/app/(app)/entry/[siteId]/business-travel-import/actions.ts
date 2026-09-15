@@ -19,6 +19,7 @@ import { INITIAL_PREVIEW_STATE, type PreviewState } from "./types";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { assertSiteAccess, requirePermission } from "@/lib/rbac/authorize";
 import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { isReportingPeriodClosedError, REPORTING_PERIOD_CLOSED_MESSAGE } from "@/lib/carbon/reporting-period-guard";
 
 const TRAVEL_SUBTYPES = ["rail", "flight_domestic", "flight_short_haul", "flight_long_haul", "hotel"] as const;
 
@@ -174,21 +175,35 @@ export async function commitExpenseInAction(
     if (Number.isNaN(periodStart.getTime())) return fail(prevState, "A previewed row had an unreadable period.");
     const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0));
 
-    const { entry, calculations } = await createActivityEntryWithCalculations(toTenantRepositoryContext(context), {
-      activityDataPointId: dataPoint.id,
-      siteId,
-      periodStart,
-      periodEnd,
-      rawValue: row.value,
-      rawUnit: TRAVEL_SUBTYPE_UNITS[row.subtype],
-      factorOptionId: option.id,
-      enteredByUserId: context.userId,
-      notes: `Imported from ExpenseIn — ${row.rowCount} expense line${row.rowCount === 1 ? "" : "s"} aggregated for ${monthLabel(periodStart)}.`,
-    });
+    let saved: Awaited<ReturnType<typeof createActivityEntryWithCalculations>>;
+    try {
+      saved = await createActivityEntryWithCalculations(toTenantRepositoryContext(context), {
+        activityDataPointId: dataPoint.id,
+        siteId,
+        periodStart,
+        periodEnd,
+        rawValue: row.value,
+        rawUnit: TRAVEL_SUBTYPE_UNITS[row.subtype],
+        factorOptionId: option.id,
+        enteredByUserId: context.userId,
+        notes: `Imported from ExpenseIn — ${row.rowCount} expense line${row.rowCount === 1 ? "" : "s"} aggregated for ${monthLabel(periodStart)}.`,
+      });
+    } catch (err) {
+      if (!isReportingPeriodClosedError(err)) throw err;
+      // Rows commit one at a time, so say plainly where the import stopped
+      // rather than implying none of it landed.
+      revalidatePath(`/entry/${siteId}`);
+      revalidatePath("/");
+      return fail(
+        prevState,
+        `${REPORTING_PERIOD_CLOSED_MESSAGE} ${monthLabel(periodStart)} is closed, so that month was not imported.` +
+          (importedCount > 0 ? ` ${importedCount} earlier month${importedCount === 1 ? " was" : "s were"} imported.` : ""),
+      );
+    }
 
     importedCount++;
-    if (entry.status === "FLAGGED") flaggedCount++;
-    else if (calculations.length === 0) awaitingFactorCount++;
+    if (saved.entry.status === "FLAGGED") flaggedCount++;
+    else if (saved.calculations.length === 0) awaitingFactorCount++;
   }
 
   revalidatePath(`/entry/${siteId}`);

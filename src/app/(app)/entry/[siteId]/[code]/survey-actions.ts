@@ -8,6 +8,7 @@ import { resolvePeriod } from "@/lib/period";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { assertSiteAccess, requirePermission } from "@/lib/rbac/authorize";
 import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { isReportingPeriodClosedError, REPORTING_PERIOD_CLOSED_MESSAGE } from "@/lib/carbon/reporting-period-guard";
 
 const schema = z.object({
   siteId: z.string().min(1),
@@ -76,6 +77,7 @@ export async function submitSurveyAction(_prevState: SurveyFormState, formData: 
 
     return { error: null, success: true };
   } catch (err) {
+    if (isReportingPeriodClosedError(err)) return { error: REPORTING_PERIOD_CLOSED_MESSAGE, success: false };
     return { error: err instanceof Error ? err.message : "Something went wrong.", success: false };
   }
 }

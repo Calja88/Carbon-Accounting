@@ -43,7 +43,17 @@ vi.mock("@/lib/organisation/session", () => ({
 vi.mock("@/app/(app)/data/actions", () => ({
   generateCollectionPlanAction: () => undefined,
   decideRequirementAction: () => undefined,
+  setReportingPeriodStateAction: () => undefined,
 }));
+
+// Phase 4-iii: the close/reopen panel reads through the Phase 4-ii service.
+const getReportingPeriodView = vi.fn();
+vi.mock("@/lib/carbon/reporting-period-view", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/carbon/reporting-period-view")>(
+    "@/lib/carbon/reporting-period-view",
+  );
+  return { ...actual, getReportingPeriodView: (...a: unknown[]) => getReportingPeriodView(...a) };
+});
 
 const listConfigurableSites = vi.fn();
 const listSourceCatalogue = vi.fn();
@@ -123,6 +133,16 @@ beforeEach(() => {
   listConfigurableSites.mockResolvedValue([site]);
   listSourceCatalogue.mockResolvedValue([source]);
   getCollectionMatrix.mockResolvedValue([cell()]);
+  getReportingPeriodView.mockReset().mockResolvedValue({
+    siteId: SITE_A,
+    monthStart: new Date(Date.UTC(2026, 8, 1)),
+    monthLabel: "September 2026",
+    monthInput: "2026-09",
+    state: "OPEN",
+    canTransition: true,
+    current: null,
+    history: [],
+  });
   logEvent.mockClear();
 });
 
@@ -184,7 +204,54 @@ describe("/data", () => {
 
   it("renders a period that has not closed yet as still open rather than late", async () => {
     getCollectionMatrix.mockResolvedValue([cell({ periodOpen: true })]);
-    expect(await render()).toContain("period still open");
+    // "Month still running" is deliberately not the accounting wording — a
+    // calendar month that has not ended is not a closed reporting period.
+    expect(await render()).toContain("month still running");
+  });
+
+  it("asks for a single site before offering to close or reopen a month", async () => {
+    const html = await render();
+    expect(html).toContain("Reporting period");
+    expect(html).toContain("closed or reopened one site at a time");
+    expect(getReportingPeriodView).not.toHaveBeenCalled();
+  });
+
+  it("shows the reporting period for the selected site, defaulting to the last month in the window", async () => {
+    const html = await render({ siteId: SITE_A, from: "2026-01", to: "2026-09" });
+    expect(getReportingPeriodView).toHaveBeenCalledWith(expect.anything(), SITE_A, new Date(Date.UTC(2026, 8, 1)));
+    expect(html).toContain("September 2026");
+    expect(html).toContain("Close period");
+  });
+
+  it("reviews the month the visitor picked instead of the end of the window", async () => {
+    await render({ siteId: SITE_A, from: "2026-01", to: "2026-09", periodMonth: "2026-03" });
+    expect(getReportingPeriodView).toHaveBeenCalledWith(expect.anything(), SITE_A, new Date(Date.UTC(2026, 2, 1)));
+  });
+
+  it("shows a closed month as closed, with who closed it, and offers to reopen it", async () => {
+    getReportingPeriodView.mockResolvedValue({
+      siteId: SITE_A,
+      monthStart: new Date(Date.UTC(2026, 8, 1)),
+      monthLabel: "September 2026",
+      monthInput: "2026-09",
+      state: "CLOSED",
+      canTransition: true,
+      current: { state: "CLOSED", at: new Date("2026-09-15T14:22:00.000Z"), actorName: "Dana Okafor", reason: "Month-end close" },
+      history: [{ state: "CLOSED", at: new Date("2026-09-15T14:22:00.000Z"), actorName: "Dana Okafor", reason: "Month-end close" }],
+    });
+    const html = await render({ siteId: SITE_A });
+    expect(html).toContain(">Closed<");
+    expect(html).toContain("Dana Okafor");
+    expect(html).toContain("Reopen period");
+    // A closed month is read-only, not an error state.
+    expect(html).not.toContain("Section unavailable");
+    expect(html).toContain("Natural gas — facilities");
+  });
+
+  it("reports a refused close honestly rather than as a generic failure", async () => {
+    const html = await render({ siteId: SITE_A, error: "hold" });
+    expect(html).toContain("under an active legal hold");
+    expect(html).not.toContain("Something went wrong");
   });
 
   it("renders a period a row's cadence does not cover as not required, never as a zero or a gap", async () => {

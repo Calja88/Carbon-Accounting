@@ -1,11 +1,15 @@
 import type { Prisma } from "@prisma/client";
 import type { TenantRepositoryContext } from "@/lib/repositories/context";
 
+/** The one sentence every screen shows when a write is refused by a closed period. */
+export const REPORTING_PERIOD_CLOSED_MESSAGE =
+  "This reporting period is closed. Reopen the period before changing accounting data.";
+
 export class ReportingPeriodClosedError extends Error {
   readonly code = "REPORTING_PERIOD_CLOSED";
 
   constructor() {
-    super("This reporting period is closed. Reopen the period before changing accounting data.");
+    super(REPORTING_PERIOD_CLOSED_MESSAGE);
     this.name = "ReportingPeriodClosedError";
   }
 }

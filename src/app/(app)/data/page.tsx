@@ -23,7 +23,14 @@ import {
   type CollectionMatrixRow,
   type CollectionStatus,
 } from "@/lib/carbon/collection-plan-service";
-import { decideRequirementAction, generateCollectionPlanAction, type DataActionErrorCode } from "./actions";
+import { getReportingPeriodView, monthStartFromInput } from "@/lib/carbon/reporting-period-view";
+import { ReportingPeriodPanel } from "./reporting-period-panel";
+import {
+  decideRequirementAction,
+  generateCollectionPlanAction,
+  setReportingPeriodStateAction,
+  type DataActionErrorCode,
+} from "./actions";
 
 const STATUS_LABEL: Record<CollectionStatus, string> = {
   not_required: "Not required",
@@ -66,6 +73,8 @@ const ERROR_MESSAGE: Record<DataActionErrorCode, string> = {
   scope: "That site is not one you can work on. Nothing was changed.",
   invalid: "That request was incomplete, so nothing was changed. An exclusion needs a reason.",
   rejected: "That change was not accepted — the requirement may have no settled submission yet, or its state changed. Reload and check.",
+  hold: "This reporting period is under an active legal hold, so it cannot be reopened. Nothing was changed.",
+  period_invalid: "That reporting period change was incomplete, so nothing was changed. Closing or reopening a month needs a site, a month and a reason.",
 };
 
 interface SearchParams {
@@ -77,6 +86,8 @@ interface SearchParams {
   cell?: string;
   error?: string;
   generated?: string;
+  periodMonth?: string;
+  periodDone?: string;
 }
 
 export default async function DataCollectionPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -160,6 +171,16 @@ export default async function DataCollectionPage({ searchParams }: { searchParam
   const scopeState = { from: range.startMonth, to: range.endMonth, siteId: params.siteId, scope: params.scope, status: params.status };
   const generated = parseGenerated(params.generated);
 
+  // Phase 4-iii: close/reopen is per site and per month, so the panel only
+  // appears once the filters name one of each. The month defaults to the end
+  // of the selected window — the month a lead closes at month end — and the
+  // panel's own picker overrides it without disturbing the matrix filters.
+  const periodSite = params.siteId ? siteById.get(params.siteId) ?? null : null;
+  const periodMonth = monthStartFromInput(params.periodMonth) ?? monthStartFromInput(range.endMonth);
+  const periodView =
+    periodSite && periodMonth ? await getReportingPeriodView(context, periodSite.id, periodMonth) : null;
+  const periodDone = params.periodDone === "CLOSED" || params.periodDone === "OPEN" ? params.periodDone : null;
+
   return (
     <div className="space-y-8">
       <DataHeader range={range} />
@@ -234,6 +255,23 @@ export default async function DataCollectionPage({ searchParams }: { searchParam
               </Button>
             </form>
           </Surface>
+
+          {periodView && periodSite ? (
+            <ReportingPeriodPanel
+              view={periodView}
+              siteLabel={`${periodSite.entityName} — ${periodSite.name}`}
+              scope={scopeState}
+              action={setReportingPeriodStateAction}
+              done={periodDone}
+            />
+          ) : (
+            <Surface title="Reporting period">
+              <p className="bd-muted text-sm">
+                A month is closed or reopened one site at a time. Choose a single site above to see whether its months
+                are open or closed for accounting changes.
+              </p>
+            </Surface>
+          )}
 
           {canManage && (
             <form action={generateCollectionPlanAction} className="flex flex-wrap items-center gap-3">
@@ -467,7 +505,7 @@ function Matrix({
                         {...(cell.id === selectedId ? { "aria-current": "page" as const } : {})}
                       >
                         <Badge tone={STATUS_TONE[cell.status]}>{STATUS_LABEL[cell.status]}</Badge>
-                        {cell.periodOpen && <span className="text-[10px] text-[var(--bd-muted)]">period still open</span>}
+                        {cell.periodOpen && <span className="text-[10px] text-[var(--bd-muted)]">month still running</span>}
                       </BoardLink>
                     </td>
                   );
@@ -507,7 +545,10 @@ function DetailPanel({
     ["Status", STATUS_LABEL[row.status]],
     ["Frequency", FREQUENCY_LABEL[row.periodKind]],
     ["Expected unit", source?.unitOptions[0] ?? "Not specified in the catalogue"],
-    ["Period", row.periodOpen ? "Still open — data is not late yet" : "Closed"],
+    // "Calendar period", not the accounting reporting period above — this row
+    // only says whether the month itself has finished, never whether the
+    // period is locked for accounting changes.
+    ["Calendar period", row.periodOpen ? "Still running — data is not late yet" : "Ended"],
     ["Submissions", row.entryIds.length > 0 ? row.entryIds.join(", ") : "None recorded for this period"],
   ];
   if (row.excludedReason) facts.push(["Excluded because", row.excludedReason]);

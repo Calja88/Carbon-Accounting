@@ -8,6 +8,7 @@ import { resolvePeriod } from "@/lib/period";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { assertSiteAccess, requirePermission } from "@/lib/rbac/authorize";
 import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { isReportingPeriodClosedError, REPORTING_PERIOD_CLOSED_MESSAGE } from "@/lib/carbon/reporting-period-guard";
 
 const schema = z.object({
   siteId: z.string().min(1),
@@ -93,7 +94,14 @@ export async function submitEntryAction(
     };
   } catch (err) {
     return {
-      error: err instanceof Error ? err.message : "Something went wrong.",
+      // A closed month is a deliberate accounting refusal, not a fault — it
+      // gets the barrier's own sentence whether it came from the service
+      // guard or straight from the database trigger.
+      error: isReportingPeriodClosedError(err)
+        ? REPORTING_PERIOD_CLOSED_MESSAGE
+        : err instanceof Error
+          ? err.message
+          : "Something went wrong.",
       success: false,
       flagged: false,
       flagReason: null,
