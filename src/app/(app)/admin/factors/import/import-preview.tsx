@@ -8,12 +8,15 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Surface } from "@/components/ui/primitives";
 import {
-  emptyPreviewState,
   previewFactorImportAction,
   type FactorImportPreviewState,
   type PreviewGroup,
   type PreviewRow,
 } from "./actions";
+
+/** Seeds useActionState. Kept here because "./actions" is a "use server"
+ * module, which may only export async functions. */
+const emptyPreviewState: FactorImportPreviewState = { error: null, preview: null };
 
 type GroupKey = "accepted" | "warning" | "rejected" | "duplicate";
 

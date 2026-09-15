@@ -43,7 +43,9 @@ vi.mock("@/lib/entries-service", () => ({
   recalculatePendingEntries: () => { throw new Error("Recalculation is forbidden"); },
 }));
 
-const { previewFactorImportAction, emptyPreviewState } = await import("@/app/(app)/admin/factors/import/actions");
+const actionsModule = await import("@/app/(app)/admin/factors/import/actions");
+const { previewFactorImportAction } = actionsModule;
+const emptyPreviewState = { error: null, preview: null } as const;
 
 const context = makeOrganisationContext("org-a", { permissions: new Set(["carbon.factor.manage"]) });
 
@@ -188,5 +190,21 @@ describe("factor import preview action", () => {
     const state = await previewFactorImportAction(emptyPreviewState, form(new File(["a"], "s.csv")));
     expect(JSON.stringify(state)).not.toContain("SECRET-CELL");
     expect(JSON.stringify(state)).not.toContain("SECRET-FIELD");
+  });
+});
+
+/**
+ * Next.js rejects a "use server" module at evaluation if it exports anything
+ * that is not an async function — taking the whole route down with a generic
+ * error boundary rather than surfacing a message in the UI. Type-only exports
+ * are erased and so are invisible here; a stray `export const` is not.
+ * This shipped once (an exported initial-state object); it must not again.
+ */
+describe('"use server" module contract', () => {
+  it("exports only async functions", () => {
+    const offenders = Object.entries(actionsModule).filter(
+      ([, value]) => typeof value !== "function" || value.constructor.name !== "AsyncFunction",
+    );
+    expect(offenders.map(([name]) => name)).toEqual([]);
   });
 });

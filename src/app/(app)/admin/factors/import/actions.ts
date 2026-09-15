@@ -53,8 +53,10 @@ export interface FactorImportPreviewState {
   } | null;
 }
 
-export const emptyPreviewState: FactorImportPreviewState = { error: null, preview: null };
-
+// A "use server" module may only export async functions. The initial state is
+// a plain object, so it lives with the component that seeds useActionState —
+// exporting it from here made Next.js reject the whole module at evaluation,
+// taking the route down with it rather than surfacing anything in the UI.
 const fail = (error: string): FactorImportPreviewState => ({ error, preview: null });
 
 function toPreviewRow(row: FactorCandidate): PreviewRow {
