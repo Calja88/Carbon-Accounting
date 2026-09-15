@@ -8,6 +8,8 @@ import { buildReportPayload } from "@/lib/report-service";
 import { prepareReportingData } from "@/lib/entries-service";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
+import { auditActorFor, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { recordAuditEvent } from "@/lib/repositories/audit-repository";
 
 const schema = z.object({
   periodStartMonth: z.string().min(1),
@@ -98,17 +100,47 @@ export async function generateReportAction(
   // report never derives new calculations as a side effect.
   const payload = await buildReportPayload(context, periodStart, periodEnd);
 
-  const snapshot = await prisma.reportSnapshot.create({
-    data: {
-      organisationId: context.organisationId,
-      periodStart,
-      periodEnd,
-      generatedByUserId: context.userId,
-      payload: JSON.parse(JSON.stringify(payload)),
-      calculationLinks: {
-        create: payload.calculationIds.map((calculationId) => ({ calculationId })),
+  // Phase 4-i: the snapshot and its audit event commit together, so an
+  // issued report can never exist without the event recording who issued
+  // it and over what. The payload itself is not copied into the audit row
+  // — the ReportSnapshot is already immutable and durable.
+  const ctx = toTenantRepositoryContext(context);
+  const snapshot = await prisma.$transaction(async (tx) => {
+    const created = await tx.reportSnapshot.create({
+      data: {
+        organisationId: context.organisationId,
+        periodStart,
+        periodEnd,
+        generatedByUserId: context.userId,
+        payload: JSON.parse(JSON.stringify(payload)),
+        calculationLinks: {
+          create: payload.calculationIds.map((calculationId) => ({ calculationId })),
+        },
       },
-    },
+    });
+
+    await recordAuditEvent(tx, ctx, {
+      eventType: "report_snapshot.issued",
+      resourceType: "report_snapshot",
+      resourceId: created.id,
+      summary: `Issued report snapshot v${created.version} for ${periodStart.toISOString().slice(0, 10)} to ${periodEnd.toISOString().slice(0, 10)}`,
+      ...auditActorFor(ctx),
+      correlationId: ctx.correlationId,
+      after: {
+        version: created.version,
+        periodStart: periodStart.toISOString(),
+        periodEnd: periodEnd.toISOString(),
+        calculationCount: payload.calculationIds.length,
+        scope1TotalKgCo2e: payload.scope1.totalKgCo2e,
+        scope2LocationTotalKgCo2e: payload.scope2.locationBasedTotalKgCo2e,
+        scope2MarketTotalKgCo2e: payload.scope2.marketBasedTotalKgCo2e,
+        scope3TotalKgCo2e: payload.scope3.totalKgCo2e,
+        excludedFlaggedCount: payload.excludedFlaggedEntries.length,
+        awaitingFactorCount: payload.awaitingFactorEntries.length,
+      },
+    });
+
+    return created;
   });
 
   redirect(`/reports/${snapshot.id}`);

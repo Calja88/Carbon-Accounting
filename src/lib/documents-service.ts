@@ -24,11 +24,13 @@ import { resolvePeriod } from "@/lib/period";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import {
   accessibleSiteFilter,
+  auditActorFor,
   findTenantDocumentExtraction,
   findTenantSourceDocument,
   requireSiteInScope,
   toTenantRepositoryContext,
 } from "@/lib/repositories/carbon-repository";
+import { recordAuditEvent } from "@/lib/repositories/audit-repository";
 import { tenantWhere } from "@/lib/repositories/tenant-scope";
 
 /** Formats the upload accepts. Kept narrow on purpose — see SECURITY notes in the README. */
@@ -251,14 +253,38 @@ export async function acceptExtractionAsEntry(context: OrganisationContext, inpu
   });
 
   // Provenance is recorded after creation so the existing entry pipeline
-  // keeps its single, well-tested signature.
-  await prisma.activityEntry.update({
-    where: { id: created.entry.id, organisationId: ctx.organisationId },
-    data: {
-      dataOrigin: DataOrigin.AI_EXTRACTED,
-      sourceDocumentId: extraction.documentId,
-      acceptedFromExtractionId: extraction.id,
-    },
+  // keeps its single, well-tested signature. Phase 4-i: the only update
+  // path an ActivityEntry has — it changes provenance, never a quantity —
+  // and it commits with its own audit event.
+  await prisma.$transaction(async (tx) => {
+    await tx.activityEntry.update({
+      where: { id: created.entry.id, organisationId: ctx.organisationId },
+      data: {
+        dataOrigin: DataOrigin.AI_EXTRACTED,
+        sourceDocumentId: extraction.documentId,
+        acceptedFromExtractionId: extraction.id,
+      },
+    });
+
+    await recordAuditEvent(tx, ctx, {
+      eventType: "activity_entry.updated",
+      resourceType: "activity_entry",
+      resourceId: created.entry.id,
+      summary: `Entry provenance set to AI_EXTRACTED — a human accepted extraction ${extraction.id}`,
+      ...auditActorFor(ctx),
+      correlationId: ctx.correlationId,
+      before: {
+        dataOrigin: created.entry.dataOrigin,
+        sourceDocumentId: created.entry.sourceDocumentId,
+        acceptedFromExtractionId: created.entry.acceptedFromExtractionId,
+      },
+      after: {
+        dataOrigin: DataOrigin.AI_EXTRACTED,
+        sourceDocumentId: extraction.documentId,
+        acceptedFromExtractionId: extraction.id,
+        acceptedByUserId: input.acceptedByUserId,
+      },
+    });
   });
 
   await prisma.documentExtraction.update({

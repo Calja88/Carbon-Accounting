@@ -289,6 +289,18 @@ export const AUDIT_EVENT_TYPES = [
   "carbon_collection_requirement.reviewed",
   "carbon_collection_requirement.excluded",
   "carbon_collection_requirement.reopened",
+  // Carbon Phase 4-i — the corporate carbon numeric path
+  // (Docs/CARBON_PHASE4_I_NUMERIC_AUDIT.md). Observational only: these
+  // events record what the existing calculation and reporting pipeline
+  // did, and never alter a figure.
+  "activity_entry.created",
+  "activity_entry.updated",
+  "activity_entry.status_changed",
+  "calculation.created",
+  "calculation.awaiting_factor",
+  "calculation.backfilled",
+  "report_data.prepared",
+  "report_snapshot.issued",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -379,7 +391,10 @@ export type AuditResourceType =
   | "organisation_export"
   | "carbon_source_period_obligation"
   | "carbon_source_config"
-  | "carbon_collection_requirement";
+  | "carbon_collection_requirement"
+  | "activity_entry"
+  | "calculation"
+  | "report_snapshot";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

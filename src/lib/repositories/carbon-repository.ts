@@ -56,9 +56,30 @@ export function systemTenantRepositoryContext(organisationId: string, reason: st
   systemCorrelationCounter += 1;
   return createTenantRepositoryContext({
     organisationId,
-    userId: "system",
+    userId: SYSTEM_ACTOR_MARKER,
     correlationId: `system-${reason}-${systemCorrelationCounter}`,
   });
+}
+
+/** The fixed `userId` a system context carries. Never a real User row id. */
+const SYSTEM_ACTOR_MARKER = "system";
+
+/**
+ * Audit actor fields for a repository context (Carbon Phase 4-i). A system
+ * context carries `SYSTEM_ACTOR_MARKER` in `userId`, which is not a real
+ * User row — so a system-triggered event records `actorUserId: null` plus
+ * `actorType: "SYSTEM"` rather than pretending a person acted, exactly as
+ * `RecordAuditEventInput.actorUserId` requires. Reading the marker here,
+ * next to the only place that writes it, keeps its meaning in one file.
+ */
+export function auditActorFor(ctx: TenantRepositoryContext): {
+  actorUserId: string | null;
+  actorType: "USER" | "SYSTEM";
+  source: string;
+} {
+  return ctx.userId === SYSTEM_ACTOR_MARKER
+    ? { actorUserId: null, actorType: "SYSTEM", source: "system" }
+    : { actorUserId: ctx.userId, actorType: "USER", source: "web-app" };
 }
 
 /** Loads an Entity the caller's Organisation owns and is scoped to, or throws TenantOwnershipError. */
