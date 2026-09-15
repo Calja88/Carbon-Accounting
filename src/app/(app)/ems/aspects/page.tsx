@@ -11,10 +11,12 @@ import { listAspectAssessments, listSignificanceMethods } from "@/lib/ems/aspect
 import { listOperationalControls } from "@/lib/ems/controls/control-service";
 import { AspectRegister } from "./aspect-forms";
 import { SignificanceWorkspace } from "./significance-forms";
+import { getAspectChainRecord } from "@/lib/board/live-records";
+import { RecordWorkspace } from "@/components/board/records";
 
 export const dynamic = "force-dynamic";
 
-export default async function EmsAspectsPage() {
+export default async function EmsAspectsPage({ searchParams }: { searchParams: Promise<{ record?: string }> }) {
   let context;
   try {
     context = await requireOrganisationContext();
@@ -23,6 +25,13 @@ export default async function EmsAspectsPage() {
     if (error instanceof OrganisationAccessError || error instanceof PermissionDeniedError) redirect("/");
     throw error;
   }
+
+  // BD06: a query-string id is never authority — getAspectChainRecord
+  // re-resolves it through the same tenant-scoped, permission-checked
+  // listEnvironmentalAspects() this page already calls below, and returns
+  // null (never a foreign/other-tenant row) for an unknown or inaccessible id.
+  const { record: selectedRecordId } = await searchParams;
+  const selectedRecord = selectedRecordId ? await getAspectChainRecord(context, selectedRecordId) : null;
 
   const [processRows, aspectRows, impactRows, programmeRows, methodRows, assessmentRows, controlRows] = await Promise.all([
     listActivityProcesses(context),
@@ -81,6 +90,9 @@ export default async function EmsAspectsPage() {
           This register stores no carbon or product-LCA totals.
         </p>
       </div>
+      {selectedRecordId && (selectedRecord ? <RecordWorkspace model={selectedRecord} /> : (
+        <p className="text-sm text-slate-500">That aspect record is not available in your current scope.</p>
+      ))}
       <SignificanceWorkspace
         programmes={programmeRows.map((programme) => ({ id: programme.id, name: programme.name }))}
         aspects={aspectRows.map((aspect) => ({ id: aspect.id, name: aspect.name, programmeId: aspect.process.programmeId }))}

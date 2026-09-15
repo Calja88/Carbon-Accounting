@@ -121,6 +121,11 @@ vi.mock("@/lib/prisma", () => {
       return find(tables.audits, key as Row);
     }),
     findMany: vi.fn(async ({ where }: FindArgs) => tables.audits.filter((row) => matchesSimple(row, where ?? {}))),
+    findUniqueOrThrow: vi.fn(async ({ where }: FindArgs) => {
+      const row = find(tables.audits, where ?? {});
+      if (!row) throw new Error("not found");
+      return { ...row, scopes: tables.auditScopes.filter((s) => s.auditId === row.id) };
+    }),
     create: vi.fn(async ({ data }: { data: Row & { scopes?: { create: Row[] } } }) => {
       const { scopes: scopesEnvelope, ...auditData } = data;
       const id = `audit-${tables.nextId++}`;
@@ -140,6 +145,11 @@ vi.mock("@/lib/prisma", () => {
   };
 
   const emsAuditScope = {
+    createMany: vi.fn(async ({ data }: { data: Row[] }) => {
+      const rows = data.map((s) => ({ id: `ascope-${tables.nextId++}`, ...s }));
+      tables.auditScopes.push(...rows);
+      return { count: rows.length };
+    }),
     findMany: vi.fn(async ({ where }: FindArgs) => {
       const w = (where ?? {}) as Row & { audit?: { programmeId?: string } };
       return tables.auditScopes.filter((row) => {

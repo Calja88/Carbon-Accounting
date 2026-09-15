@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Database, ArrowRight, Download, Upload } from "lucide-react";
+import { Database, ArrowRight, Download, Upload, FileSearch } from "lucide-react";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
 import { listFactorSets } from "@/lib/factor-sets-service";
@@ -43,6 +43,12 @@ export default async function AdminFactorsPage() {
               CSV template
             </Button>
           </a>
+          <Link href="/admin/factors/import">
+            <Button variant="secondary">
+              <FileSearch className="h-4 w-4" />
+              UK factor import preview
+            </Button>
+          </Link>
           <Link href="/admin/factors/upload">
             <Button>
               <Upload className="h-4 w-4" />

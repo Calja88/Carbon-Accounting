@@ -1,5 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// CI runs against the sandbox's pre-fetched browser; everywhere else
+// (developer machines) falls back to Playwright's own managed install.
+const ciExecutablePath = process.env.CI ? "/opt/pw-browsers/chromium-1194/chrome-linux/chrome" : undefined;
+
 /**
  * UI14 — final EMS browser smoke/accessibility/readiness gate. Not a
  * general end-to-end suite: scope is deliberately limited to the critical
@@ -26,7 +30,7 @@ export default defineConfig({
       testMatch: /auth\.setup\.ts/,
       use: {
         launchOptions: {
-          executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+          executablePath: ciExecutablePath,
         },
       },
     },
@@ -37,7 +41,7 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         launchOptions: {
-          executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+          executablePath: ciExecutablePath,
         },
       },
     },

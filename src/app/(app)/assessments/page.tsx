@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { Package } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { listAssessments } from "@/lib/lca/assessment-service";
 import { canEditLcaData, getLcaContext } from "@/lib/lca/permissions";
 import { formatKgPrecise } from "@/components/charts/palette";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DataTable, EmptyState, PageHeading, StatusBadge, Td } from "@/components/lca/ui";
 import { BOUNDARY_LABELS } from "@/lib/lca/labels";
@@ -46,16 +48,26 @@ export default async function AssessmentsPage() {
         title="Assessments"
         description="Every product life cycle assessment, with its current status and latest calculated footprint. Scenarios are held against their baseline assessment rather than listed here."
         actions={
-          canEdit ? (
-            <NewAssessmentForm
-              productVersions={productVersions.map((v) => ({
-                id: v.id,
-                label: `${v.product.name} — ${v.versionLabel} (${v.product.entity.name})`,
-                entityId: v.product.entityId,
-              }))}
-              methodologies={methodologies.map((m) => ({ id: m.id, label: `${m.name} ${m.version}`, isDefault: m.isDefault }))}
-            />
-          ) : null
+          <>
+            {/* An assessment always belongs to a product version, so the
+                products register is one click away in both directions. */}
+            <Link href="/products">
+              <Button size="sm" variant="secondary">
+                <Package className="h-4 w-4" />
+                Products
+              </Button>
+            </Link>
+            {canEdit ? (
+              <NewAssessmentForm
+                productVersions={productVersions.map((v) => ({
+                  id: v.id,
+                  label: `${v.product.name} — ${v.versionLabel} (${v.product.entity.name})`,
+                  entityId: v.product.entityId,
+                }))}
+                methodologies={methodologies.map((m) => ({ id: m.id, label: `${m.name} ${m.version}`, isDefault: m.isDefault }))}
+              />
+            ) : null}
+          </>
         }
       />
 

@@ -102,6 +102,10 @@ describe("contributions", () => {
 
     expect(bySupplier.map((s) => s.label)).toContain("No supplier recorded");
     expect(bySupplier.reduce((sum, s) => sum + s.kgCo2e, 0)).toBe(100);
+    // Named suppliers and the unattributed group are shares of the same
+    // footprint, so they add up to 100% rather than to more than it.
+    expect(bySupplier.find((s) => s.label === "Supplier A")?.percent).toBeCloseTo(70, 6);
+    expect(bySupplier.reduce((sum, s) => sum + s.percent, 0)).toBeCloseTo(100, 6);
   });
 
   it("produces every breakdown in one pass", () => {

@@ -19,42 +19,51 @@ describe("resolveBoardNav", () => {
     expect(resolveBoardNav(null)).toEqual([]);
   });
 
-  it("never includes overview or attention — BD05 hasn't built those routes yet", () => {
-    const nav = resolveBoardNav(contextWith(["carbon.view", "lca.view", "ems.view"]));
-    expect(nav.map((item) => item.id)).not.toContain("overview");
-    expect(nav.map((item) => item.id)).not.toContain("attention");
+  it("includes the carbon-first items once carbon.view is granted", () => {
+    const nav = resolveBoardNav(contextWith(["carbon.view", "carbon.factor.view", "lca.view", "ems.view"]));
+    const ids = nav.map((item) => item.id);
+    expect(ids).toEqual(["overview", "data", "activity", "entry", "sources", "factors", "evidence", "reports", "advanced"]);
+  });
+
+  it("gates overview/entry/evidence/reports on carbon.view", () => {
+    const noCarbon = resolveBoardNav(contextWith(["ems.view"]));
+    const ids = noCarbon.map((item) => item.id);
+    expect(ids).not.toContain("overview");
+    expect(ids).not.toContain("entry");
+    expect(ids).not.toContain("sources");
+    expect(ids).not.toContain("data");
+    expect(ids).not.toContain("evidence");
+    expect(ids).not.toContain("reports");
+  });
+
+  it("gates factors on carbon.factor.view independently of carbon.view", () => {
+    expect(resolveBoardNav(contextWith(["carbon.view"])).map((i) => i.id)).not.toContain("factors");
+    expect(resolveBoardNav(contextWith(["carbon.factor.view"])).map((i) => i.id)).toContain("factors");
+  });
+
+  it("gates advanced on any of ems.view / lca.view / ai.settings.manage, never on carbon.view alone", () => {
+    expect(resolveBoardNav(contextWith(["carbon.view"])).map((i) => i.id)).not.toContain("advanced");
+    expect(resolveBoardNav(contextWith(["ems.view"])).map((i) => i.id)).toContain("advanced");
+    expect(resolveBoardNav(contextWith(["lca.view"])).map((i) => i.id)).toContain("advanced");
+    expect(resolveBoardNav(contextWith(["ai.settings.manage"])).map((i) => i.id)).toContain("advanced");
   });
 
   it("filters each item by its own permission, not a blanket grant", () => {
     const carbonOnly = resolveBoardNav(contextWith(["carbon.view"]));
-    expect(carbonOnly.map((item) => item.id)).toEqual(["carbon"]);
+    expect(carbonOnly.map((item) => item.id).sort()).toEqual(["activity", "data", "entry", "evidence", "overview", "reports", "sources"]);
   });
 
-  it("gates every ems.* nav item on ems.view, matching the previous top nav's EMS gate", () => {
-    const nav = resolveBoardNav(contextWith(["ems.view"]));
-    const ids = nav.map((item) => item.id);
-    for (const id of ["aspects", "compliance", "objectives", "audits", "nonconformities", "evidence", "packs"]) {
-      expect(ids).toContain(id);
-    }
-    expect(ids).not.toContain("carbon");
-    expect(ids).not.toContain("products");
-  });
-
-  it("gates admin on the same platform-admin permissions as the previous top nav", () => {
-    expect(resolveBoardNav(contextWith(["carbon.factor.view"])).map((i) => i.id)).toContain("admin");
-    expect(resolveBoardNav(contextWith(["ai.settings.manage"])).map((i) => i.id)).toContain("admin");
-    expect(resolveBoardNav(contextWith(["ems.view"])).map((i) => i.id)).not.toContain("admin");
-  });
-
-  it("redirects the not-yet-built evidence/packs hrefs to routes that exist on this branch", () => {
-    const nav = resolveBoardNav(contextWith(["ems.view"]));
-    expect(nav.find((i) => i.id === "evidence")?.href).toBe("/ems/evidence");
-    expect(nav.find((i) => i.id === "packs")?.href).toBe("/ems/management-reviews");
-  });
-
-  it("leaves every other candidate href untouched", () => {
-    const nav = resolveBoardNav(contextWith(["carbon.view", "lca.view"]));
-    expect(nav.find((i) => i.id === "carbon")?.href).toBe("/carbon");
-    expect(nav.find((i) => i.id === "products")?.href).toBe("/assessments");
+  it("leaves every candidate href untouched — no not-yet-built route overrides remain", () => {
+    const nav = resolveBoardNav(
+      contextWith(["carbon.view", "carbon.factor.view", "lca.view", "ems.view", "ai.settings.manage"]),
+    );
+    expect(nav.find((i) => i.id === "overview")?.href).toBe("/");
+    expect(nav.find((i) => i.id === "entry")?.href).toBe("/entry");
+    expect(nav.find((i) => i.id === "sources")?.href).toBe("/sources");
+    expect(nav.find((i) => i.id === "data")?.href).toBe("/data");
+    expect(nav.find((i) => i.id === "factors")?.href).toBe("/admin/factors");
+    expect(nav.find((i) => i.id === "evidence")?.href).toBe("/documents");
+    expect(nav.find((i) => i.id === "reports")?.href).toBe("/reports");
+    expect(nav.find((i) => i.id === "advanced")?.href).toBe("/advanced");
   });
 });

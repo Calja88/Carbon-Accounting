@@ -71,6 +71,11 @@ vi.mock("@/lib/prisma", () => {
       return { ...row, successorAssessment: successorAssessment ? { id: successorAssessment.id } : null };
     }),
     findMany: vi.fn(async ({ where }: FindArgs) => tables.assessments.filter((row) => matches(row, where ?? {}))),
+    findUniqueOrThrow: vi.fn(async ({ where }: FindArgs) => {
+      const row = find(tables.assessments, where ?? {});
+      if (!row) throw new Error("not found");
+      return { ...row, scopes: tables.scopes.filter((s) => s.assessmentId === row.id) };
+    }),
     create: vi.fn(async ({ data }: { data: Row & { scopes?: { create: Row[] } } }) => {
       const { scopes: scopesEnvelope, ...assessmentData } = data;
       const id = `assessment-${tables.nextId++}`;
@@ -107,6 +112,11 @@ vi.mock("@/lib/prisma", () => {
     }),
   };
   const applicabilityAssessmentScope = {
+    createMany: vi.fn(async ({ data }: { data: Row[] }) => {
+      const rows = data.map((scope) => ({ id: `scope-${tables.nextId++}`, ...scope }));
+      tables.scopes.push(...rows);
+      return { count: rows.length };
+    }),
     count: vi.fn(async ({ where }: FindArgs) => tables.scopes.filter((row) => matches(row, where ?? {})).length),
     deleteMany: vi.fn(async ({ where }: FindArgs) => {
       const remaining = tables.scopes.filter((row) => !matches(row, where ?? {}));

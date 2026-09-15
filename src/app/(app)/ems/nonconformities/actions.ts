@@ -71,6 +71,13 @@ function friendlyError(error: unknown): string {
 function revalidateNonconformities(nonconformityId?: string) {
   revalidatePath("/ems/nonconformities");
   if (nonconformityId) revalidatePath(`/ems/nonconformities/${nonconformityId}`);
+  // BD06: every NC/CAPA/effectiveness transition here is a genuine source-state
+  // change BD05's Overview and Attention queue project — revalidate both so a
+  // completed action, a review outcome or a closure is reflected on refresh
+  // without a manual full reload assumption. Never remove an Attention card
+  // client-side while the source record itself is still open.
+  revalidatePath("/");
+  revalidatePath("/attention");
 }
 
 export async function createNonconformityFromSourceAction(_previous: NonconformityActionState, formData: FormData): Promise<NonconformityActionState> {

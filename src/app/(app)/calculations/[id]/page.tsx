@@ -11,6 +11,7 @@ import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organ
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { OriginBadge } from "@/components/ai/ai-disclosure";
+import { CO2E, KG_CO2E } from "@/lib/format";
 import { ExplainPanel } from "./explain-panel";
 
 function Row({ label, value, mono }: { label: string; value: string | null; mono?: boolean }) {
@@ -98,8 +99,12 @@ export default async function CalculationDetailPage({ params }: { params: Promis
           <CardTitle>The result</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-3xl font-semibold tabular-nums text-slate-900">{e.result.kgCo2e} kgCO2e</div>
-          <div className="text-sm text-slate-500">{e.result.tonnesCo2e} tonnes CO2e</div>
+          <div className="text-3xl font-semibold tabular-nums text-slate-900">
+            {e.result.kgCo2e} {KG_CO2E}
+          </div>
+          <div className="text-sm text-[var(--bd-muted)]">
+            {e.result.tonnesCo2e} tonnes {CO2E}
+          </div>
           <p className="mt-3 rounded-lg bg-slate-50 p-3 font-mono text-sm text-slate-800">{e.result.equation}</p>
         </CardContent>
       </Card>
@@ -131,7 +136,7 @@ export default async function CalculationDetailPage({ params }: { params: Promis
         </CardHeader>
         <CardContent>
           <dl>
-            <Row label="Factor value" value={`${e.factor.value} kgCO2e per ${e.factor.unit}`} mono />
+            <Row label="Factor value" value={`${e.factor.value} ${KG_CO2E} per ${e.factor.unit}`} mono />
             <Row label="Factor name" value={`${e.factor.category}${e.factor.subtypeKey ? ` / ${e.factor.subtypeKey}` : ""}`} />
             <Row label="Source organisation" value={e.factor.publisher} />
             <Row label="Dataset" value={e.factor.source} />

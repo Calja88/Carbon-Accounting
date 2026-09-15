@@ -203,7 +203,10 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
           />
         </SectionCard>
 
-        <SectionCard title="By material" description="Material and packaging lines, grouped by the material they are made of.">
+        <SectionCard
+          title="By material"
+          description="Material and packaging lines, grouped by the material they are made of. Shares are of the whole footprint, so they add up to less than 100% — energy, freight and waste are not materials."
+        >
           <ContributionBarChart
             bars={contributions.byMaterial.map((c) => ({
               key: c.key,
@@ -219,7 +222,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
 
         <SectionCard
           title="By supplier"
-          description="Where a supplier is recorded. Lines with no supplier are grouped together rather than hidden."
+          description="Where a supplier is recorded. Lines with no supplier are grouped together rather than hidden, so these shares cover the whole footprint."
         >
           <ContributionBarChart
             bars={contributions.bySupplier.map((c) => ({

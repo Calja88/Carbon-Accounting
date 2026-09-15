@@ -42,14 +42,13 @@ vi.mock("@/lib/prisma", () => {
     }),
     findMany: vi.fn(async ({ where }: { where: Row }) => tables.controls.filter((row) => scalarMatches(row, where))),
     create: vi.fn(async ({ data }: { data: Row }) => {
-      const row = {
-        id: `control-${tables.nextId++}`,
-        status: "ACTIVE",
-        ...data,
-        aspectLinks: data.aspectLinks.create.map((link: Row) => ({ ...link })),
-        applicabilities: data.applicabilities.create.map((item: Row) => ({ ...item })),
-      };
+      const row = { id: `control-${tables.nextId++}`, status: "ACTIVE", ...data, aspectLinks: [], applicabilities: [] };
       tables.controls.push(row);
+      return row;
+    }),
+    findUniqueOrThrow: vi.fn(async ({ where }: { where: Row }) => {
+      const row = tables.controls.find((item) => item.id === where.id);
+      if (!row) throw new Error("not found");
       return row;
     }),
     update: vi.fn(async ({ where, data }: { where: Row; data: Row }) => {
@@ -58,6 +57,18 @@ vi.mock("@/lib/prisma", () => {
       if (!row) throw new Error("not found");
       Object.assign(row, data);
       return row;
+    }),
+  };
+  const operationalControlAspect = {
+    createMany: vi.fn(async ({ data }: { data: Row[] }) => {
+      for (const item of data) tables.controls.find((c) => c.id === item.controlId)?.aspectLinks.push({ ...item });
+      return { count: data.length };
+    }),
+  };
+  const controlApplicability = {
+    createMany: vi.fn(async ({ data }: { data: Row[] }) => {
+      for (const item of data) tables.controls.find((c) => c.id === item.controlId)?.applicabilities.push({ ...item });
+      return { count: data.length };
     }),
   };
   const organisationMembership = {
@@ -86,6 +97,8 @@ vi.mock("@/lib/prisma", () => {
   const client: Row = {
     environmentalAspect,
     operationalControl,
+    operationalControlAspect,
+    controlApplicability,
     organisationMembership,
     controlledDocumentRevision,
     controlCheck,
@@ -153,7 +166,7 @@ describe("T33 operational-control workflow", () => {
     });
     expect(first).toMatchObject({ version: 1, status: "SUPERSEDED" });
     expect(second).toMatchObject({ version: 2, status: "ACTIVE", supersedesControlId: first.id });
-    expect(first.aspectLinks).toEqual([{ organisationId: ORG_A, aspectId: "aspect-a" }]);
+    expect(first.aspectLinks).toEqual([{ organisationId: ORG_A, controlId: first.id, aspectId: "aspect-a" }]);
   });
 
   it("shows a significant aspect as a gap until an active control is linked", async () => {

@@ -8,10 +8,12 @@ import { toTenantRepositoryContext } from "@/lib/repositories/ems-repository";
 import { listOperationalControls, listSignificantAspectControlGaps } from "@/lib/ems/controls/control-service";
 import { OperationalControlsWorkspace } from "./control-forms";
 import type { Prisma } from "@prisma/client";
+import { getControlChainRecord } from "@/lib/board/live-records";
+import { RecordWorkspace } from "@/components/board/records";
 
 export const dynamic = "force-dynamic";
 
-export default async function EmsControlsPage() {
+export default async function EmsControlsPage({ searchParams }: { searchParams: Promise<{ record?: string }> }) {
   let context;
   try {
     context = await requireOrganisationContext();
@@ -20,6 +22,9 @@ export default async function EmsControlsPage() {
     if (error instanceof OrganisationAccessError || error instanceof PermissionDeniedError) redirect("/");
     throw error;
   }
+
+  const { record: selectedRecordId } = await searchParams;
+  const selectedRecord = selectedRecordId ? await getControlChainRecord(context, selectedRecordId) : null;
 
   const ctx = toTenantRepositoryContext(context);
   const scopeWhere = context.access.mode === "ORGANISATION_WIDE" ? {} : {
@@ -73,6 +78,9 @@ export default async function EmsControlsPage() {
           Reviews create successor versions, preserving the historic control and its checks.
         </p>
       </div>
+      {selectedRecordId && (selectedRecord ? <RecordWorkspace model={selectedRecord} /> : (
+        <p className="text-sm text-slate-500">That control record is not available in your current scope.</p>
+      ))}
       <OperationalControlsWorkspace
         controls={controls.map((control) => ({
           id: control.id,

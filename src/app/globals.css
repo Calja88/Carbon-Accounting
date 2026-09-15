@@ -1,8 +1,28 @@
 @import "tailwindcss";
 
+/* Carbon Ledger design tokens — the single source for both the Tailwind-
+   styled carbon pages and the .bd-* board stylesheet, which used to declare
+   its own parallel :root block. Dark navy shell, teal accent, warm-grey
+   canvas: the identity stays, it is just no longer defined twice. */
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  --bd-ink: #142b3a;
+  --bd-muted: #536774;
+  --bd-teal: #0f766e;
+  --bd-teal-strong: #0b625b;
+  --bd-teal-soft: #e6f3f0;
+  --bd-canvas: #f5f7f8;
+  --bd-surface: #ffffff;
+  --bd-line: #dce5e8;
+  --bd-line-soft: #e9eef0;
+  --bd-navy: #122e3d;
+  --bd-radius: 12px;
+  --bd-radius-sm: 7px;
+  --bd-shadow: 0 3px 14px #142b3a06;
+  --bd-shadow-raised: 0 6px 20px #142b3a12;
+  --bd-focus: #0e8b81;
+
+  --background: var(--bd-canvas);
+  --foreground: var(--bd-ink);
 }
 
 @theme inline {
@@ -23,8 +43,26 @@ body {
 }
 
 ::selection {
-  background: #c7d9fb;
-  color: #0f172a;
+  background: var(--bd-teal-soft);
+  color: var(--bd-ink);
+}
+
+/* Route-level loading skeletons. Shares the board surface language so a
+   loading dashboard has the shape of the dashboard that replaces it. */
+.cl-skeleton-block {
+  background: linear-gradient(90deg, #eaf0f1 25%, #f2f6f7 50%, #eaf0f1 75%);
+  background-size: 400% 100%;
+  border-radius: 6px;
+  animation: cl-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes cl-skeleton-pulse {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cl-skeleton-block { animation: none; }
 }
 
 @media print {

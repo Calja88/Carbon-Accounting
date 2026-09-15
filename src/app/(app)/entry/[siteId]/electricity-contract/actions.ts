@@ -6,6 +6,7 @@ import { upsertSiteEnergyContract } from "@/lib/entries-service";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { assertSiteAccess, requirePermission } from "@/lib/rbac/authorize";
 import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { isReportingPeriodClosedError, REPORTING_PERIOD_CLOSED_MESSAGE } from "@/lib/carbon/reporting-period-guard";
 
 const schema = z.object({
   siteId: z.string().min(1),
@@ -55,6 +56,7 @@ export async function submitContractAction(
     revalidatePath(`/entry/${data.siteId}`);
     return { error: null, success: true };
   } catch (err) {
+    if (isReportingPeriodClosedError(err)) return { error: REPORTING_PERIOD_CLOSED_MESSAGE, success: false };
     return { error: err instanceof Error ? err.message : "Something went wrong.", success: false };
   }
 }

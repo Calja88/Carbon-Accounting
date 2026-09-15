@@ -148,6 +148,11 @@ vi.mock("@/lib/prisma", () => {
   };
 
   const complianceObligationVersionScope = {
+    createMany: vi.fn(async ({ data }: { data: Row[] }) => {
+      const rows = data.map((scope) => ({ id: `vscope-${tables.nextId++}`, ...scope }));
+      tables.versionScopes.push(...rows);
+      return { count: rows.length };
+    }),
     deleteMany: vi.fn(async ({ where }: FindArgs) => {
       const remaining = tables.versionScopes.filter((row) => !matches(row, where ?? {}));
       const removed = tables.versionScopes.length - remaining.length;
@@ -157,6 +162,11 @@ vi.mock("@/lib/prisma", () => {
     }),
   };
   const complianceObligationVersionControl = {
+    createMany: vi.fn(async ({ data }: { data: Row[] }) => {
+      const rows = data.map((link) => ({ id: `vcontrol-${tables.nextId++}`, ...link }));
+      tables.versionControls.push(...rows);
+      return { count: rows.length };
+    }),
     deleteMany: vi.fn(async ({ where }: FindArgs) => {
       const remaining = tables.versionControls.filter((row) => !matches(row, where ?? {}));
       const removed = tables.versionControls.length - remaining.length;

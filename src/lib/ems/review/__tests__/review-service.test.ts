@@ -115,6 +115,7 @@ vi.mock("@/lib/prisma", () => {
   const actionItem = simpleModel(tables.actionItems, "action");
 
   const prismaClient = {
+    $queryRaw: vi.fn(async () => []),
     organisationMembership,
     personProfile,
     managementReviewAgendaTemplateVersion,

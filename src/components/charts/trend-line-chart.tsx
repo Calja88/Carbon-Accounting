@@ -1,4 +1,5 @@
 import { CHART_INK, SCOPE_COLORS, formatTonnes, niceAxisMax } from "./palette";
+import { TONNES_CO2E } from "@/lib/format";
 import { ChartEmptyState } from "./chart-parts";
 
 export interface TrendPoint {
@@ -101,7 +102,7 @@ export function TrendLineChart({
         {coords.map((c, i) => (
           <g key={c.point.label}>
             <circle cx={c.x} cy={c.y} r={4} fill={SCOPE_COLORS.scope1} stroke={CHART_INK.surface} strokeWidth={2}>
-              <title>{`${c.point.label}: ${formatTonnes(c.point.value)} t CO2e`}</title>
+              <title>{`${c.point.label}: ${formatTonnes(c.point.value)} ${TONNES_CO2E}`}</title>
             </circle>
             {labelled.has(i) && (
               <text
@@ -125,7 +126,7 @@ export function TrendLineChart({
 
         {/* Right-aligned into the tick column so it reads as that axis's unit. */}
         <text x={AXIS_WIDTH - 8} y={12} fontSize={10} textAnchor="end" fill={CHART_INK.muted}>
-          tCO2e
+          {TONNES_CO2E}
         </text>
       </svg>
     </div>

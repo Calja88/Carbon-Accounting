@@ -329,7 +329,7 @@ export async function createApplicabilityAssessment(context: OrganisationContext
   }
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
-    const assessment = await tx.applicabilityAssessment.create({
+    const created = await tx.applicabilityAssessment.create({
       data: {
         organisationId: txCtx.organisationId,
         instrumentId: source.instrumentId,
@@ -339,18 +339,28 @@ export async function createApplicabilityAssessment(context: OrganisationContext
         proposedDecision: input.decision,
         assessedByMembershipId: context.membershipId,
         supersedesAssessmentId: predecessor?.id ?? null,
-        scopes: {
-          create: scopes.map((scope) => ({
-            organisationId: txCtx.organisationId,
-            entityId: scope.entityId,
-            siteId: scope.siteId,
-            processId: scope.processId,
-            aspectId: scope.aspectId,
-          })),
-        },
       },
-      include: { scopes: true },
     });
+    // A separate createMany, not a nested write under `scopes` — this
+    // model's `assessment` relation is itself keyed on
+    // [organisationId, assessmentId], and Prisma's nested-create input for
+    // a to-many relation under a compound-keyed parent relation excludes
+    // organisationId even though the sibling `organisation` relation still
+    // needs it (confirmed via real-Postgres CI: "Unknown argument
+    // `organisationId`" on the nested write).
+    if (scopes.length > 0) {
+      await tx.applicabilityAssessmentScope.createMany({
+        data: scopes.map((scope) => ({
+          organisationId: txCtx.organisationId,
+          assessmentId: created.id,
+          entityId: scope.entityId,
+          siteId: scope.siteId,
+          processId: scope.processId,
+          aspectId: scope.aspectId,
+        })),
+      });
+    }
+    const assessment = await tx.applicabilityAssessment.findUniqueOrThrow({ where: { id: created.id }, include: { scopes: true } });
     await recordAuditEvent(tx, txCtx, {
       eventType: "applicability_assessment.created",
       resourceType: "applicability_assessment",

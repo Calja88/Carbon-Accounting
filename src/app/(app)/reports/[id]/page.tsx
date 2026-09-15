@@ -17,6 +17,7 @@ import { GroupedColumnChart } from "@/components/charts/grouped-column-chart";
 import { TrendLineChart } from "@/components/charts/trend-line-chart";
 import { DeltaBadge } from "@/components/charts/chart-parts";
 import { PERIOD_COLORS, SCOPE_COLORS, SCOPE_SERIES, formatTonnes } from "@/components/charts/palette";
+import { CO2E, TONNES_CO2E } from "@/lib/format";
 
 const TIER_LABELS: Record<string, string> = {
   TIER_1: "Tier 1 — Primary / measured",
@@ -143,7 +144,7 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
           <CardContent>
             <div className="text-sm font-medium text-slate-600">Total</div>
             <div className="mt-1 text-4xl font-semibold leading-none text-slate-900">{formatTonnes(grandTotal)}</div>
-            <div className="mt-1 text-xs text-slate-500">tonnes CO2e</div>
+            <div className="mt-1 text-xs text-[var(--bd-muted)]">tonnes {CO2E}</div>
             {comparison && comparison.previous.total > 0 && (
               <div className="mt-2">
                 <DeltaBadge delta={buildDelta(grandTotal, comparison.previous.total)} />
@@ -160,7 +161,7 @@ export default async function ReportDetailPage({ params }: { params: Promise<{ i
                   <span className="text-xs font-medium text-slate-600">{s.label}</span>
                 </div>
                 <div className="mt-2 text-2xl font-semibold text-slate-900">{formatTonnes(s.value)}</div>
-                <div className="text-xs text-slate-400">tCO2e</div>
+                <div className="text-xs text-[var(--bd-muted)]">{TONNES_CO2E}</div>
                 {s.previous !== undefined && s.previous > 0 && (
                   <div className="mt-2">
                     <DeltaBadge delta={buildDelta(s.value, s.previous)} />

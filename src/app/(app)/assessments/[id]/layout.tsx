@@ -114,9 +114,25 @@ export default async function AssessmentLayout({
                   {formatKgPrecise(totals.headlinePerFunctionalUnitKgCo2e)}
                   <span className="ml-1 text-sm font-normal text-slate-500">kgCO2e</span>
                 </div>
+                {/* A footprint without its denominator is not a footprint, so
+                    the unit travels with the figure on every page. */}
+                <div className="mt-0.5 max-w-xs text-xs text-slate-500">
+                  {assessment.functionalUnitDescription ? (
+                    <>per {assessment.functionalUnitDescription}</>
+                  ) : (
+                    <span className="text-amber-700">Functional unit not yet described</span>
+                  )}
+                </div>
               </div>
             ) : (
-              <div className="text-right text-sm text-slate-500">Not yet calculated</div>
+              <div className="max-w-xs text-right text-sm text-slate-500">
+                Not yet calculated
+                {assessment.functionalUnitDescription && (
+                  <span className="mt-0.5 block text-xs">
+                    Functional unit: {assessment.functionalUnitDescription}
+                  </span>
+                )}
+              </div>
             )}
             <RunCalculationButton assessmentId={id} stale={staleness.stale} />
           </div>

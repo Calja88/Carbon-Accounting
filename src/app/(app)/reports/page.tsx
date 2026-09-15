@@ -2,9 +2,10 @@ import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { requireFrozenReportAccess } from "@/lib/rbac/carbon-access";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { FileText, ArrowRight } from "lucide-react";
+import { FileText, ArrowRight, BarChart3 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader, SetupState } from "@/components/ui/primitives";
 import { GenerateReportForm } from "./generate-report-form";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
@@ -34,13 +35,36 @@ export default async function ReportsPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Reports</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Every report is a permanent, versioned snapshot — generating a new one never overwrites an old one, so past
-          reports stay reproducible even if data or factors change later.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Disclosure"
+        title="Reports"
+        description="Every report is a permanent, versioned snapshot — generating a new one never overwrites an old one, so past reports stay reproducible even if data or factors change later."
+      />
+
+      {/* Phase 5A: the live management view sits beside the frozen snapshots
+          rather than replacing them — one answers "what is the position now",
+          the other "what did we state for that period". */}
+      <Link href="/reports/management">
+        <Card className="border-slate-300 bg-slate-50/60 transition-all hover:-translate-y-0.5 hover:shadow-md">
+          <CardContent className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white">
+                <BarChart3 className="h-4 w-4" />
+              </span>
+              <div>
+                <div className="font-medium text-slate-900">Carbon management report</div>
+                <div className="text-sm text-slate-500">
+                  Live position for a period you choose — scopes, sites, hotspots, trend, completeness and what still needs attention.
+                </div>
+              </div>
+            </div>
+            <span className="flex shrink-0 items-center gap-1 text-sm font-medium text-blue-700">
+              Open
+              <ArrowRight className="h-3.5 w-3.5" />
+            </span>
+          </CardContent>
+        </Card>
+      </Link>
 
       <Card>
         <CardHeader>
@@ -52,9 +76,12 @@ export default async function ReportsPage() {
       </Card>
 
       <div className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Past reports</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--bd-muted)]">Past reports</h2>
         {reports.length === 0 && (
-          <p className="text-sm text-slate-500">No reports generated yet.</p>
+          <SetupState
+            title="No reports generated yet"
+            detail="Generate your first snapshot above. It freezes the figures, factors and evidence for a period so the numbers stay reproducible later."
+          />
         )}
         <div className="space-y-2">
           {reports.map((r) => (

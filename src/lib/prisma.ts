@@ -21,7 +21,12 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 const databaseUrl = assertValidDatabaseUrl(process.env.DATABASE_URL);
 
 export const prisma =
-  globalForPrisma.prisma ?? new PrismaClient(databaseUrl ? { datasources: { db: { url: databaseUrl } } } : undefined);
+  globalForPrisma.prisma ?? new PrismaClient({
+    ...(databaseUrl ? { datasources: { db: { url: databaseUrl } } } : {}),
+    // Multi-step audited domain writes must tolerate a remote database's
+    // round trips. Keep a finite bound; never retry a partially committed operation.
+    transactionOptions: { maxWait: 10000, timeout: 30000 },
+  });
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;

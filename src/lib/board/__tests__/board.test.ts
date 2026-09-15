@@ -31,7 +31,7 @@ describe("date and route boundaries", () => {
   it("rejects impossible dates", () => expect(() => dateOnly("2026-02-30")).toThrow());
   it.each(["//evil.test", "/\\evil.test", "javascript:alert(1)", "/\n/evil.test"])("rejects unsafe URL %s", href => expect(() => localHref(href)).toThrow());
   it("avoids partial route prefix collisions", () => expect(activeNavId(BOARD_NAV, "/entry-other")).toBeNull());
-  it("uses the correct carbon destination", () => expect(activeNavId(BOARD_NAV, "/calculations/abc")).toBe("carbon"));
+  it("uses the correct carbon destination", () => expect(activeNavId(BOARD_NAV, "/calculations/abc")).toBe("advanced"));
   it("preserves exact source filters", () => expect(carbonHref("/entry?status=missing", { from: "2026-01", to: "2026-08", siteId: "a b" })).toBe("/entry?status=missing&from=2026-01&to=2026-08&siteId=a+b"));
   it("validates period order", () => expect(boardPeriodSchema.safeParse({ from: "2026-08", to: "2026-01" }).success).toBe(false));
   it("rejects actor/policy injection", () => expect(boardTransitionSchema.safeParse({ recordId: "x", expectedRevision: "1", decision: "effective", rationale: "Review evidence meets the stated criteria", evidenceIds: [], effectiveDate: "2026-09-08", fourEyesEnabled: false }).success).toBe(false));
@@ -47,11 +47,21 @@ describe("canonical action attention", () => {
 describe("read-model composition", () => {
   function ports(): OverviewPorts<string> { return {
     authorizeScope: vi.fn(async () => {}), header: async () => ({ organisationName: "Synthetic", periodLabel: "Jan–Aug 2026", previousPeriodLabel: "Jan–Aug 2025", synthetic: true, managementPack: null }),
-    carbon: async () => ({ state: "unavailable", message: "Not available" }), attention: async () => ({ state: "ready", data: { items: [], total: 0, openActions: 0, awaitingVerification: 0 }, asOf: "2026-09-08" }), priorities: async () => ({ state: "ready", data: [], asOf: "2026-09-08" }), sectionFailure: vi.fn(),
+    carbon: async () => ({ state: "unavailable", message: "Not available" }), attention: async () => ({ state: "ready", data: { items: [], total: 0, openActions: 0, awaitingVerification: 0, emsAvailable: true, emsUnavailableReason: null }, asOf: "2026-09-08" }), priorities: async () => ({ state: "ready", data: [], asOf: "2026-09-08" }), sectionFailure: vi.fn(),
   }; }
   const scope = { organisationId: "demo", siteIds: ["s1"], from: "2026-01", to: "2026-08", asOfDate: "2026-09-08" };
   it("authorizes before reading anything", async () => { const p = ports(); p.authorizeScope = async () => { throw Error("Denied"); }; p.carbon = vi.fn(); await expect(loadOverview(p, "ctx", scope)).rejects.toThrow("Denied"); expect(p.carbon).not.toHaveBeenCalled(); });
-  it("does not turn a provider error into zero", async () => { const p = ports(); p.carbon = async () => { throw Error("Provider failed"); }; const result = await loadOverview(p, "ctx", scope); expect(result.carbon.state).toBe("unavailable"); expect(result.attention.state).toBe("ready"); expect(p.sectionFailure).toHaveBeenCalledWith("carbon"); });
+  it("does not turn a provider error into zero", async () => { const p = ports(); const boom = Error("Provider failed"); p.carbon = async () => { throw boom; }; const result = await loadOverview(p, "ctx", scope); expect(result.carbon.state).toBe("unavailable"); expect(result.attention.state).toBe("ready"); expect(p.sectionFailure).toHaveBeenCalledWith("carbon", boom); });
+  // The exception itself must reach the adapter (it is what makes a failure fixable), and never the rendered message.
+  it("hands the real exception to the adapter and shows a section-specific recovery message", async () => {
+    const p = ports(); p.priorities = async () => { throw Error("Conflicting canonical action projection"); };
+    const result = await loadOverview(p, "ctx", scope);
+    expect(result.priorities.state).toBe("unavailable");
+    const message = result.priorities.state === "unavailable" ? result.priorities.message : "";
+    expect(message).toContain("Management focus");
+    expect(message).not.toContain("Conflicting canonical action projection");
+    expect(vi.mocked(p.sectionFailure).mock.calls[0][1]).toBeInstanceOf(Error);
+  });
 });
 describe("calculation orchestration contract", () => {
   const request = { organisationId: "o", entryId: "e", inputRevision: "r1", idempotencyKey: "k", inputDigest: "d" };

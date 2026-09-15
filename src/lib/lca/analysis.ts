@@ -65,8 +65,15 @@ function contributionsBy(
   keyFn: (row: AnalysisRow) => string | null,
   labelFn: (row: AnalysisRow) => string,
   sublabelFn?: (row: AnalysisRow) => string | undefined,
+  /**
+   * Rows the percentages are shares *of*. Supply the unfiltered set whenever
+   * `rows` has been narrowed, or a share of a subset ends up presented beside
+   * a share of the whole footprint and the two cannot be read together — the
+   * supplier breakdown used to add up to well over 100% that way.
+   */
+  denominatorRows: AnalysisRow[] = rows,
 ): Contribution[] {
-  const denominator = grossPositiveTotal(rows);
+  const denominator = grossPositiveTotal(denominatorRows);
   const groups = new Map<string, { label: string; sublabel?: string; kg: Decimal; perFu: Decimal }>();
 
   for (const row of rows) {
@@ -135,6 +142,12 @@ export function contributionsByMaterial(rows: AnalysisRow[]): Contribution[] {
     rows.filter((r) => r.materialName || r.itemType === LcaItemType.MATERIAL || r.itemType === LcaItemType.PACKAGING),
     (r) => r.materialName ?? r.itemName,
     (r) => r.materialName ?? r.itemName,
+    undefined,
+    // Share of the whole footprint, the same denominator the stage, process
+    // and hotspot breakdowns use, so one page never carries two meanings of
+    // "%". Material lines summing to less than 100% is the honest reading:
+    // energy, freight and waste are not materials.
+    rows,
   );
 }
 
@@ -143,6 +156,8 @@ export function contributionsBySupplier(rows: AnalysisRow[]): Contribution[] {
     rows.filter((r) => r.supplierName),
     (r) => r.supplierName,
     (r) => r.supplierName as string,
+    undefined,
+    rows,
   );
   const unattributed = rows.filter((r) => !r.supplierName);
   if (unattributed.length === 0) return withSupplier;
@@ -166,6 +181,26 @@ export function contributionsByItem(rows: AnalysisRow[]): Contribution[] {
   return contributionsBy(
     rows,
     (r) => r.inventoryItemId ?? r.itemName,
+    (r) => r.itemName,
+    (r) => `${STAGE_LABELS[r.stage]} · ${r.processName}`,
+  );
+}
+
+/**
+ * The same breakdown, keyed by where a line sits rather than by its row id.
+ *
+ * A scenario is an independent copy, so none of its inventory item ids match
+ * the baseline's. Keying the comparison on the id therefore showed every
+ * single line as removed from the baseline and separately added to the
+ * scenario, even when nothing about it had changed. A clone copies stage,
+ * process name and line name verbatim, so those identify the same line on
+ * both sides. Only the scenario comparison uses this — `contributionsByItem`
+ * stays keyed on the id, which is the right identity inside one run.
+ */
+function contributionsByComparableLine(rows: AnalysisRow[]): Contribution[] {
+  return contributionsBy(
+    rows,
+    (r) => `${r.stage}::${r.processName}::${r.itemName}`,
     (r) => r.itemName,
     (r) => `${STAGE_LABELS[r.stage]} · ${r.processName}`,
   );
@@ -479,7 +514,11 @@ export function compareScenario(
       ? toNumber(perFuDelta.negated().div(baselinePerFu.abs()).times(D(100)))
       : null,
     driversByStage: buildDrivers(contributionsByStage(baselineRows), contributionsByStage(scenarioRows), delta),
-    driversByItem: buildDrivers(contributionsByItem(baselineRows), contributionsByItem(scenarioRows), delta),
+    driversByItem: buildDrivers(
+      contributionsByComparableLine(baselineRows),
+      contributionsByComparableLine(scenarioRows),
+      delta,
+    ),
   };
 }
 

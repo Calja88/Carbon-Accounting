@@ -1,3 +1,5 @@
+import { formatKgCO2e, formatPercentMagnitude, formatTonnesCO2e } from "@/lib/format";
+
 /**
  * Chart palette and shared formatting helpers.
  *
@@ -48,23 +50,18 @@ export const SCOPE_SERIES = [
   { key: "scope3" as const, label: "Scope 3 — value chain", color: SCOPE_COLORS.scope3 },
 ];
 
-/** kg -> tonnes with sensible precision. Emissions figures span orders of magnitude. */
+/** Chart axes and labels: precision follows the magnitude. See lib/format. */
 export function formatTonnes(kg: number): string {
-  const t = kg / 1000;
-  if (t === 0) return "0";
-  if (Math.abs(t) < 0.01) return "<0.01";
-  if (Math.abs(t) < 10) return t.toLocaleString("en-GB", { maximumFractionDigits: 2 });
-  return t.toLocaleString("en-GB", { maximumFractionDigits: 1 });
+  return formatTonnesCO2e(kg);
 }
 
 export function formatKg(kg: number): string {
-  return kg.toLocaleString("en-GB", { maximumFractionDigits: 0 });
+  return formatKgCO2e(kg, { digits: 0 });
 }
 
+/** Unsigned — captions alongside it already state the direction in words. */
 export function formatPercent(p: number | null): string {
-  if (p === null) return "—";
-  const abs = Math.abs(p);
-  return `${abs.toLocaleString("en-GB", { maximumFractionDigits: abs < 10 ? 1 : 0 })}%`;
+  return formatPercentMagnitude(p);
 }
 
 /** Round a max value up to a clean axis bound (1/2/2.5/5 x 10^n). */
@@ -126,12 +123,7 @@ export const DATA_TYPE_COLORS: Record<string, string> = {
   MISSING_QUALITY: "#cbd5e1",
 };
 
-/** kgCO2e with precision that suits the magnitude — product figures are small. */
+/** kgCO₂e with precision that suits the magnitude — product figures are small. */
 export function formatKgPrecise(kg: number): string {
-  const abs = Math.abs(kg);
-  if (abs === 0) return "0";
-  if (abs < 0.001) return kg.toExponential(2);
-  if (abs < 1) return kg.toLocaleString("en-GB", { maximumFractionDigits: 4 });
-  if (abs < 1000) return kg.toLocaleString("en-GB", { maximumFractionDigits: 2 });
-  return kg.toLocaleString("en-GB", { maximumFractionDigits: 0 });
+  return formatKgCO2e(kg);
 }
