@@ -142,8 +142,56 @@ A Preview deployment was built from the empty trigger commit `b87c359`
 `node scripts/factors/check-preview-routes.mjs <url>` reports no 5xx on
 `/admin/factors/import`, `/admin/factors`, `/data` and `/sources`. Those routes
 redirect to Vercel deployment protection, so that check proves only that nothing
-errors at the edge — **signed-in visual verification of the rendered page, a real
-upload round-trip and the row tables remains outstanding.**
+errors at the edge.
+
+## Signed-in visual verification — passed 2026-09-15
+
+Verified against a **real-Paragon staging Preview**, not the BOARD demo: Neon
+child branch `br-orange-firefly-ay6etl17`, created copy-on-write from production
+`br-blue-field-ayetcsyq` at HEAD, with only the 2B-i migration
+`20260914160000_add_carbon_collection_requirement` applied to the child.
+Production was never migrated and never written to.
+
+Uploading `scripts/factors/synthetic-preview-sample.csv` produced exactly the
+documented mix:
+
+| | |
+| --- | --- |
+| Rows scanned | 8 |
+| Accepted | 3 |
+| Warning | 1 |
+| Rejected | 2 |
+| Duplicate | 1 |
+
+Import/commit remained disabled, and **no factors were persisted** — consistent
+with the engine's `commitAllowed: false` and an action that has no commit branch.
+
+**One defect was found and fixed during verification**, commit `0971c92`. Every
+preview attempt returned the global error boundary, digest `1604617815@E352`:
+
+> Error: A "use server" file can only export async functions, found object.
+
+`actions.ts` exported the `useActionState` seed object. Next.js rejects such a
+module at evaluation, so the route died before the action ran and every
+safe-error path in this phase was *unreachable rather than broken*. The object
+now lives with the component; the action module exports only its async function.
+A test asserts every runtime export of that module is an async function, proven
+non-vacuous by temporarily reintroducing a bad export. Note `next build` does not
+catch this — it is a runtime module-evaluation error, which is why it reached a
+Preview rather than CI.
+
+Two environment hazards surfaced during the same exercise and are recorded, with
+guards and process, in `Docs/deployment/PREVIEW_AND_DATABASE_SAFEGUARDS.md`: an
+ambient production `DATABASE_URL`/`DIRECT_URL` that caused a Prisma command to
+resolve to production, and a branch alias that does not track new Preview
+deployments.
+
+**One caveat for Phase 3-iii.** `carbon.factor.manage` is granted by no role
+template in `src/lib/rbac/role-templates.ts`, so in production no user can reach
+this page's upload form or the pre-existing `/admin/factors/upload` importer.
+Verification was only possible because the grant was added to two roles **on the
+staging child only**. The mapping decision is still open and production is
+untouched.
 
 ## Phase 3-iii handoff
 
