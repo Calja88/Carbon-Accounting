@@ -13,6 +13,7 @@ import {
   requestComplianceEvaluationFindingLink,
   completeComplianceEvaluation,
   issueComplianceEvaluation,
+  closeComplianceEvaluationProgramme,
   type ComplianceEvaluationScopeInput,
 } from "@/lib/ems/legal/evaluation-service";
 import {
@@ -183,6 +184,22 @@ export async function completeComplianceEvaluationAction(
     await completeComplianceEvaluation(context, evaluationId, context.userId);
     revalidateEvaluations();
     return { ...emptyState, message: "Evaluation completed." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function closeComplianceEvaluationProgrammeAction(
+  _previous: EvaluationActionState,
+  formData: FormData,
+): Promise<EvaluationActionState> {
+  try {
+    const context = await requireOrganisationContext();
+    const programmeId = String(formData.get("programmeId") ?? "");
+    if (!programmeId) return { ...emptyState, error: "Choose a programme." };
+    await closeComplianceEvaluationProgramme(context, programmeId, context.userId);
+    revalidateEvaluations();
+    return { ...emptyState, message: "Evaluation programme closed." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }

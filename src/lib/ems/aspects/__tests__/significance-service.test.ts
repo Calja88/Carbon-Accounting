@@ -49,6 +49,12 @@ vi.mock("@/lib/prisma", () => {
       Object.assign(row, data);
       return row;
     }),
+    delete: vi.fn(async ({ where }: { where: Row & { organisationId_id?: Row } }) => {
+      const key = where.organisationId_id ?? where;
+      const index = tables.methods.findIndex((row) => matches(row, key));
+      if (index < 0) throw new Error("not found");
+      return tables.methods.splice(index, 1)[0];
+    }),
   };
   const aspectAssessment = {
     findFirst: vi.fn(async ({ where, orderBy }: FindArgs) => {
@@ -83,11 +89,13 @@ vi.mock("@/lib/prisma", () => {
 vi.mock("@/lib/repositories/audit-repository", () => ({ recordAuditEvent: vi.fn(async () => ({ id: "audit-synthetic" })) }));
 
 const {
+  SignificanceWorkflowError,
   approveAspectAssessment,
   approveSignificanceMethod,
   createAspectAssessment,
   createSignificanceMethod,
   createSuccessorSignificanceMethod,
+  discardSignificanceMethod,
 } = await import("@/lib/ems/aspects/significance-service");
 const { TenantOwnershipError } = await import("@/lib/repositories/tenant-scope");
 
@@ -203,5 +211,26 @@ describe("versioned significance workflow", () => {
       aspectId: "aspect-b", methodId: "method-b", inputs: {},
     })).rejects.toThrow(TenantOwnershipError);
     expect(tables.assessments).toHaveLength(0);
+  });
+});
+
+describe("discarding a draft significance method", () => {
+  it("removes a draft method outright", async () => {
+    const method = await createSignificanceMethod(context, definition);
+    await discardSignificanceMethod(context, method.id, "synthetic-user-a");
+    expect(tables.methods).toHaveLength(0);
+  });
+
+  it("refuses to discard an approved or superseded method", async () => {
+    const method = await createSignificanceMethod(context, definition);
+    await approveSignificanceMethod(context, method.id);
+    await expect(discardSignificanceMethod(context, method.id, "synthetic-user-a")).rejects.toThrow(SignificanceWorkflowError);
+    expect(tables.methods).toHaveLength(1);
+  });
+
+  it("denies discarding a method from a foreign organisation", async () => {
+    tables.methods.push({ id: "method-b", organisationId: ORG_B, status: "DRAFT", criteria: [] });
+    await expect(discardSignificanceMethod(context, "method-b", "synthetic-user-a")).rejects.toThrow(TenantOwnershipError);
+    expect(tables.methods).toHaveLength(1);
   });
 });

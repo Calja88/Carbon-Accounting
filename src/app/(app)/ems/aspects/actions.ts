@@ -13,6 +13,7 @@ import {
   createAspectAssessment,
   createSignificanceMethod,
   createSuccessorSignificanceMethod,
+  discardSignificanceMethod,
 } from "@/lib/ems/aspects/significance-service";
 import {
   AspectRegisterError,
@@ -244,6 +245,17 @@ export async function createSignificanceMethodAction(_previous: AspectActionStat
     }
     revalidateAspects();
     return { ...emptyState, message: supersedesMethodId ? "Successor method created." : "Significance method created." };
+  } catch (error) {
+    return { ...emptyState, error: friendlyError(error) };
+  }
+}
+
+export async function discardSignificanceMethodAction(_previous: AspectActionState, formData: FormData): Promise<AspectActionState> {
+  try {
+    const context = await requireContext();
+    await discardSignificanceMethod(context, String(formData.get("methodId") ?? ""), context.userId);
+    revalidateAspects();
+    return { ...emptyState, message: "Draft method discarded." };
   } catch (error) {
     return { ...emptyState, error: friendlyError(error) };
   }

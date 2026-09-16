@@ -50,13 +50,40 @@ test.describe("responsive layout — critical flows", () => {
     });
   }
 
-  test("/ems nav 'More' menu opens and its items are reachable at mobile width", async ({ page }) => {
+  test("nav 'Carbon & Lifecycle' dropdown opens and its items stay inside the viewport at mobile width", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/ems");
-    const moreButton = page.getByRole("button", { name: /more/i });
-    if (await moreButton.count()) {
-      await moreButton.click();
-      await expect(page.getByRole("link").first()).toBeVisible();
+    const groupButton = page.getByRole("button", { name: /carbon & lifecycle/i });
+    await expect(groupButton).toBeVisible();
+    await groupButton.click();
+    const menu = page.getByRole("menu", { name: /carbon & lifecycle/i });
+    await expect(menu).toBeVisible();
+    const box = await menu.boundingBox();
+    expect(box, "dropdown panel should have a bounding box").not.toBeNull();
+    if (box) {
+      expect(box.x, "dropdown panel should not start left of the viewport").toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, "dropdown panel should not extend past the right edge of the viewport").toBeLessThanOrEqual(375);
+    }
+    await expect(page.getByRole("menuitem").first()).toBeVisible();
+
+    // Escape closes the menu and returns focus to the trigger.
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await expect(groupButton).toBeFocused();
+  });
+
+  test("nav 'Carbon & Lifecycle' dropdown stays inside the viewport at a normal laptop width", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/ems");
+    const groupButton = page.getByRole("button", { name: /carbon & lifecycle/i });
+    await groupButton.click();
+    const menu = page.getByRole("menu", { name: /carbon & lifecycle/i });
+    await expect(menu).toBeVisible();
+    const box = await menu.boundingBox();
+    expect(box).not.toBeNull();
+    if (box) {
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(1280);
     }
   });
 });
