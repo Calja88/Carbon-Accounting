@@ -5,7 +5,8 @@
  * period-enumeration logic without a live connection.
  *
  * Synthetic demonstration configuration over the synthetic BOARD-1 fixture.
- * Not Paragon environmental data.
+ * The site names are the real operating sites; the data against them is not
+ * Paragon environmental data.
  */
 
 import type { CarbonSourceFrequency } from "@prisma/client";
@@ -29,21 +30,21 @@ export const EFFECTIVE_FROM = new Date(Date.UTC(2025, 0, 1));
 
 /**
  * Deliberately not every site x source combination the schema would allow: a
- * real collection plan is shaped by what a site does. Central Digital is an
- * office, so it reports electricity and travel and no combustion; the two
- * operational sites report their own fuel and power.
+ * real collection plan is shaped by what a site does. RFID Discovery — Milton Keynes is an
+ * office-only SaaS operation, so it reports electricity and travel and no
+ * combustion; the two manufacturing sites report their own fuel and power.
  */
 export const COLLECTION_PLAN: readonly PlannedSource[] = [
-  { site: "North Works", sourceCode: "BOARD1-stationary_combustion_natural_gas", frequency: "MONTHLY" },
-  { site: "North Works", sourceCode: "BOARD1-grid_electricity", frequency: "MONTHLY" },
-  { site: "North Works", sourceCode: "BOARD1-mobile_combustion_fuel", frequency: "MONTHLY" },
-  { site: "North Works", sourceCode: "BOARD1-board1_purchased_goods", frequency: "MONTHLY" },
-  { site: "East Cards", sourceCode: "BOARD1-stationary_combustion_natural_gas", frequency: "MONTHLY" },
-  { site: "East Cards", sourceCode: "BOARD1-grid_electricity", frequency: "MONTHLY" },
-  { site: "Central Digital", sourceCode: "BOARD1-grid_electricity", frequency: "MONTHLY" },
+  { site: "Paragon ID — Hull", sourceCode: "BOARD1-stationary_combustion_natural_gas", frequency: "MONTHLY" },
+  { site: "Paragon ID — Hull", sourceCode: "BOARD1-grid_electricity", frequency: "MONTHLY" },
+  { site: "Paragon ID — Hull", sourceCode: "BOARD1-mobile_combustion_fuel", frequency: "MONTHLY" },
+  { site: "Paragon ID — Hull", sourceCode: "BOARD1-board1_purchased_goods", frequency: "MONTHLY" },
+  { site: "Thames Technology — Rayleigh", sourceCode: "BOARD1-stationary_combustion_natural_gas", frequency: "MONTHLY" },
+  { site: "Thames Technology — Rayleigh", sourceCode: "BOARD1-grid_electricity", frequency: "MONTHLY" },
+  { site: "RFID Discovery — Milton Keynes", sourceCode: "BOARD1-grid_electricity", frequency: "MONTHLY" },
   // Travel is collected from an expense system once a quarter rather than
   // monthly — and it exercises the generator's non-monthly cadence.
-  { site: "Central Digital", sourceCode: "BOARD1-board1_business_travel", frequency: "QUARTERLY" },
+  { site: "RFID Discovery — Milton Keynes", sourceCode: "BOARD1-board1_business_travel", frequency: "QUARTERLY" },
 ];
 
 /** Year-to-date: the window `/reports/management` opens on by default. */

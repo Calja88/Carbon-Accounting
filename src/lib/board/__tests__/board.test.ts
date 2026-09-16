@@ -10,7 +10,7 @@ import type { OverviewPorts } from "../overview-service";
 import { executeCalculation } from "../calculation-orchestration";
 const coverage: Coverage = { expected: 192, received: 192, reviewed: 192, excluded: 0, awaitingFactor: 0, flagged: 0 };
 function metric(kgCO2e: number | null, patch: Partial<CarbonMetric> = {}): CarbonMetric { return { kgCO2e, state: "complete", comparisonKey: "same-covered-boundary", coverage: { ...coverage }, source: { label: "Inventory", href: "/carbon" }, ...patch }; }
-function action(patch: Partial<AuthorizedAction> = {}): AuthorizedAction { return { id: "a1", canonicalActionId: "canonical-1", title: "Containment check", state: "OPEN", requiresVerification: true, dueDate: "2026-09-07", owner: "Demo Owner", site: "North Works", source: { id: "a1", kind: "action", revision: "1", label: "Containment check", href: "/ems/actions/a1" }, blocker: null, ...patch }; }
+function action(patch: Partial<AuthorizedAction> = {}): AuthorizedAction { return { id: "a1", canonicalActionId: "canonical-1", title: "Containment check", state: "OPEN", requiresVerification: true, dueDate: "2026-09-07", owner: "Demo Owner", site: "Paragon ID — Hull", source: { id: "a1", kind: "action", revision: "1", label: "Containment check", href: "/ems/actions/a1" }, blocker: null, ...patch }; }
 
 describe("honest carbon metrics", () => {
   it("reconciles BOARD-1 without kg/tonne inflation", () => { expect(compareCarbon(metric(1248000), metric(1560000)).percent).toBe(-20); expect(formatTonnes(1248000)).toBe("1,248"); });

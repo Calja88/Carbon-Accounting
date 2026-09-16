@@ -158,7 +158,7 @@ describe("Checkpoint B corrective handoff §6 — additional-source link and obs
     expect(before.attention.state).toBe("ready");
 
     const completed = await completeCorrectiveAction(owner, action.id, {
-      completionEvidenceNote: "Named owner and inspection schedule extended to East Cards.",
+      completionEvidenceNote: "Named owner and inspection schedule extended to Thames Technology — Rayleigh.",
       actorUserId: owner.userId,
     });
     expect(completed.status).toBe("COMPLETED");
@@ -174,10 +174,10 @@ describe("Checkpoint B corrective handoff §6 — additional-source link and obs
 
     await performEffectivenessReview(reviewer, nc.id, {
       reviewCycle: reviewable.reviewCycle,
-      criteria: "Named ownership and inspection schedule are now recorded for East Cards.",
+      criteria: "Named ownership and inspection schedule are now recorded for Thames Technology — Rayleigh.",
       reviewDate: new Date(),
       result: "EFFECTIVE",
-      decision: "Independent review confirms the East Cards containment gap is closed.",
+      decision: "Independent review confirms the Thames Technology — Rayleigh containment gap is closed.",
       actorUserId: reviewer.userId,
     });
 

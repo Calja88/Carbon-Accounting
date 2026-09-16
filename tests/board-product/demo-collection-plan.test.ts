@@ -10,11 +10,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { CarbonCollectionDecision } from "@prisma/client";
+import { BOARD1 } from "../../scripts/board-demo/board1";
 import { COLLECTION_PLAN, EFFECTIVE_FROM, reportingWindow } from "../../scripts/board-demo/collection-plan-fixture";
 import { deriveCollectionStatus, enumeratePeriods } from "../../src/lib/carbon/collection-plan-service";
 
 /** The BOARD-1 fixture: three sites, eight catalogue sources, monthly entries. */
-const FIXTURE_SITES = ["North Works", "East Cards", "Central Digital"];
+const FIXTURE_SITES = BOARD1.sites.map((site) => site.name);
 const FIXTURE_SOURCE_CODES = [
   "BOARD1-stationary_combustion_natural_gas",
   "BOARD1-grid_electricity",

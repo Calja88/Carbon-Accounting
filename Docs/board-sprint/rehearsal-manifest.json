@@ -2,8 +2,8 @@
   "fixture": "BOARD-1",
   "environmentId": "board-demo-local-2026-09-11",
   "databaseId": "cool-cake-20837205",
-  "applicationCommit": "a7e12e1f502a0d11d4a8c02eb2a40e0a1b158654",
-  "generatedAt": "2026-09-11T16:43:53.991Z",
+  "applicationCommit": "9baab94614fbf1ab0303a55134be9ca671db0751",
+  "generatedAt": "2026-09-16T10:57:46.593Z",
   "status": "READY",
   "digest": "1d10d10deef89d6e76b52caf1e8268480465c1a088a5ee44cdb3cbf9df910932",
   "ids": {
@@ -178,8 +178,8 @@
       "id": "cmtx6965s00amhnq47ssc1dxx",
       "filename": "BOARD-1-invoice.txt",
       "mimeType": "text/plain",
-      "byteSize": 241,
-      "sha256": "18c597495abc47d3555c7fe38dd5ce31cc5b85f25834e4e3dda0748d43237cce",
+      "byteSize": 249,
+      "sha256": "f25be5551b5c2531ff581d237c90779c1028f37c13180c29526302d676620a35",
       "activityEntries": [
         {
           "id": "cmtx68g4g002uhnq4tudcv58w",
@@ -201,8 +201,8 @@
       "id": "cmtx696y700aohnq4pogkljqk",
       "filename": "BOARD-1-meter-reading.txt",
       "mimeType": "text/plain",
-      "byteSize": 253,
-      "sha256": "749a7c600c1de81e842fbc1114aa231e52017ecd066ccd4ac34954abf4206b81",
+      "byteSize": 273,
+      "sha256": "63e2022c5f1b757149802cb7bd5e3c1a4eb8675ab4aec3286b03c9a68b425ccf",
       "activityEntries": [
         {
           "id": "cmtx68j4f003ohnq4yxncjbx1",
@@ -254,7 +254,7 @@
       },
       {
         "id": "cmtx6nt1702l0hnq4mynj5d3l",
-        "description": "BOARD1-CA-EXT: extend the containment inspection procedure and named ownership to East Cards.",
+        "description": "BOARD1-CA-EXT: extend the containment inspection procedure and named ownership to Thames Technology — Rayleigh.",
         "status": "OPEN"
       }
     ]

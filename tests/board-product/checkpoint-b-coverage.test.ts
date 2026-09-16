@@ -55,7 +55,7 @@ describe("Checkpoint B fix 2 — coverage is bound to real, genuinely reviewed o
   it("a single selected site's coverage still reconciles and narrows the denominator", async () => {
     const owner = await boardOwnerContext();
     const org = await prisma.organisation.findUniqueOrThrow({ where: { slug: "board-1-northstar-demonstration" } });
-    const site = await prisma.site.findFirstOrThrow({ where: { organisationId: org.id, name: "North Works" } });
+    const site = await prisma.site.findFirstOrThrow({ where: { organisationId: org.id, name: "Paragon ID — Hull" } });
     const model = await loadOverviewForContext(owner, { from: "2026-01", to: "2026-08", siteId: site.id });
     expect(model.carbon.state).toBe("ready");
     if (model.carbon.state !== "ready") throw new Error("unreachable");

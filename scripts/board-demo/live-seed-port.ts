@@ -87,7 +87,7 @@ import { createEmsAudit, assignAuditTeamMember, startAuditPreparation, startAudi
 import { ensureDraftChecklistVersion, addChecklistItem, recordQuestionResponse } from "@/lib/ems/audits/checklist-service";
 import { createAuditFinding, confirmAuditFinding } from "@/lib/ems/audits/finding-service";
 import { createAuditReportDraft, recordReportReview, issueAuditReport } from "@/lib/ems/audits/report-service";
-import { BOARD1, buildSubmissionObligations, IMPROVEMENT_CHAIN, type CarbonTarget } from "./board1";
+import { BOARD1, buildSubmissionObligations, sourceDocumentBody, IMPROVEMENT_CHAIN, type CarbonTarget } from "./board1";
 import { buildSyntheticEvidence } from "./evidence";
 import type { DemoDatabaseIdentity } from "./guard";
 import type { DemoSeedPort } from "./seed-orchestrator";
@@ -153,6 +153,7 @@ function loadPersonaCredentials(): Map<string, string> | null {
 }
 
 const FIXTURE_KEY = BOARD1.fixtureVersion;
+/** Persisted identity, deliberately NOT re-derived from `BOARD1.organisation`: every lookup, test and the demo-organisation guard key off this exact slug, and it is never shown to a demo audience. Renaming the organisation does not rename this. */
 const ORG_SLUG = "board-1-northstar-demonstration";
 
 /** Every organisation this seed itself creates must carry this slug prefix — the only rule `readConnectedIdentity`'s ordinary-organisation count uses to tell "this fixture" apart from "an ordinary tenant that must never exist in a demo database". */
@@ -1144,10 +1145,7 @@ export class LiveSeedPort implements DemoSeedPort {
         activityDataPoint: { factorCategory: "grid_electricity" },
       },
     });
-    const invoiceBytes = Buffer.from(
-      `${BOARD1.disclosure}\nFixture: ${BOARD1.fixtureVersion}\nSynthetic energy invoice\n\nSite: North Works. Period: January 2026. Metered electricity: ${invoiceEntry.canonicalValue.toString()} ${invoiceEntry.canonicalUnit}.\nNo real person, signature, certificate or company result is represented.\n`,
-      "utf8",
-    );
+    const invoiceBytes = Buffer.from(sourceDocumentBody("invoice", invoiceEntry.canonicalValue.toString(), invoiceEntry.canonicalUnit), "utf8");
     const invoiceDoc = await uploadDocument(owner, {
       filename: "BOARD-1-invoice.txt",
       mimeType: "text/plain",
@@ -1168,10 +1166,7 @@ export class LiveSeedPort implements DemoSeedPort {
         activityDataPoint: { factorCategory: "grid_electricity" },
       },
     });
-    const meterBytes = Buffer.from(
-      `${BOARD1.disclosure}\nFixture: ${BOARD1.fixtureVersion}\nSynthetic meter reading\n\nSite: East Cards. Period: February 2026. Observed electricity consumption: ${meterEntry.canonicalValue.toString()} ${meterEntry.canonicalUnit}.\nNo real person, signature, certificate or company result is represented.\n`,
-      "utf8",
-    );
+    const meterBytes = Buffer.from(sourceDocumentBody("meter", meterEntry.canonicalValue.toString(), meterEntry.canonicalUnit), "utf8");
     const meterDoc = await uploadDocument(owner, {
       filename: "BOARD-1-meter-reading.txt",
       mimeType: "text/plain",
@@ -1223,7 +1218,7 @@ export class LiveSeedPort implements DemoSeedPort {
       data: { organisationId: owner.organisationId, name: "BOARD-1 demonstration programme", standardsProfile: "ISO14001", standardsProfileVersion: "2015", ownerMembershipId: owner.membershipId },
     });
     const process = await prisma.activityProcess.create({
-      data: { organisationId: owner.organisationId, programmeId: programme.id, name: "North Works materials handling", siteId: northWorks.id },
+      data: { organisationId: owner.organisationId, programmeId: programme.id, name: "Paragon ID — Hull materials handling", siteId: northWorks.id },
     });
 
     const aspect = await createEnvironmentalAspect(owner, {
@@ -1240,7 +1235,7 @@ export class LiveSeedPort implements DemoSeedPort {
     const otherSource = await createOtherRequirementSource(owner, {
       type: "VOLUNTARY_COMMITMENT",
       title: "Monthly containment inspection — internal requirement",
-      issuingParty: "Northstar internal policy (fictional, not a statutory obligation)",
+      issuingParty: "Paragon ID UK internal policy (fictional, not a statutory obligation)",
       ownerMembershipId: owner.membershipId,
       actorUserId: owner.userId,
     });
@@ -1301,7 +1296,7 @@ export class LiveSeedPort implements DemoSeedPort {
     const applicability = await createApplicabilityAssessment(owner, {
       otherRequirementSourceId: otherSource.id,
       decision: "APPLICABLE",
-      rationale: "This internal policy applies to every site handling solvent storage and transfer; North Works is in scope.",
+      rationale: "This internal policy applies to every site handling solvent storage and transfer; Paragon ID — Hull is in scope.",
       scopes: [{ aspectId: aspect.id }],
       actorUserId: owner.userId,
     });
@@ -1450,7 +1445,7 @@ export class LiveSeedPort implements DemoSeedPort {
       actorUserId: owner.userId,
     });
 
-    const containment = await recordContainment(owner, nc.id, { actionTaken: "Interim manual sign-off sheet introduced at North Works.", actionTakenAt: new Date("2026-08-05"), ownerMembershipId: owner.membershipId, actorUserId: owner.userId });
+    const containment = await recordContainment(owner, nc.id, { actionTaken: "Interim manual sign-off sheet introduced at Paragon ID — Hull.", actionTakenAt: new Date("2026-08-05"), ownerMembershipId: owner.membershipId, actorUserId: owner.userId });
     await reviewContainmentAdequacy(owner, containment.id, { adequate: true, notes: "Interim sign-off sheet is adequate pending the named-owner corrective action.", actorUserId: owner.userId });
     const rootCause = await recordRootCauseAnalysis(owner, nc.id, { method: "FIVE_WHYS", analysisPayload: { note: "No single named owner for the monthly check." }, conclusion: "Inspection ownership was never assigned to a named role.", actorUserId: owner.userId });
     await approveRootCauseAnalysis(owner, rootCause.id, { actorUserId: owner.userId });
@@ -1489,16 +1484,16 @@ export class LiveSeedPort implements DemoSeedPort {
     // and independently review live, after the pack has already been
     // issued, proving the frozen pack's own content/hash never moves while
     // the live domain state genuinely does.
-    await reopenNonconformity(owner, nc.id, "A second, distinct containment gap (East Cards) surfaced after closure.", owner.userId);
+    await reopenNonconformity(owner, nc.id, "A second, distinct containment gap (Thames Technology — Rayleigh) surfaced after closure.", owner.userId);
     const secondRootCause = await recordRootCauseAnalysis(owner, nc.id, {
       method: "FIVE_WHYS",
-      analysisPayload: { note: "Named ownership was never extended to East Cards." },
-      conclusion: "The corrective action only covered North Works; East Cards needs the same named ownership.",
+      analysisPayload: { note: "Named ownership was never extended to Thames Technology — Rayleigh." },
+      conclusion: "The corrective action only covered Paragon ID — Hull; Thames Technology — Rayleigh needs the same named ownership.",
       actorUserId: owner.userId,
     });
     await approveRootCauseAnalysis(owner, secondRootCause.id, { actorUserId: owner.userId });
     await createCorrectiveAction(owner, nc.id, {
-      description: "BOARD1-CA-EXT: extend the containment inspection procedure and named ownership to East Cards.",
+      description: "BOARD1-CA-EXT: extend the containment inspection procedure and named ownership to Thames Technology — Rayleigh.",
       ownerMembershipId: owner.membershipId,
       dueDate: new Date("2026-10-01"),
       actorUserId: owner.userId,
@@ -1829,10 +1824,7 @@ export class LiveSeedPort implements DemoSeedPort {
     if (!this.invoiceSourceDocumentId) throw new Error("Reconciliation failed: the electricity invoice source document was never created.");
     const invoiceDoc = await prisma.sourceDocument.findUniqueOrThrow({ where: { id: this.invoiceSourceDocumentId } });
     const invoiceLinkedEntry = await prisma.activityEntry.findFirstOrThrow({ where: { organisationId, sourceDocumentId: invoiceDoc.id } });
-    const expectedInvoiceBytes = Buffer.from(
-      `${BOARD1.disclosure}\nFixture: ${BOARD1.fixtureVersion}\nSynthetic energy invoice\n\nSite: North Works. Period: January 2026. Metered electricity: ${invoiceLinkedEntry.canonicalValue.toString()} ${invoiceLinkedEntry.canonicalUnit}.\nNo real person, signature, certificate or company result is represented.\n`,
-      "utf8",
-    );
+    const expectedInvoiceBytes = Buffer.from(sourceDocumentBody("invoice", invoiceLinkedEntry.canonicalValue.toString(), invoiceLinkedEntry.canonicalUnit), "utf8");
     if (invoiceDoc.sha256 !== createHash("sha256").update(expectedInvoiceBytes).digest("hex") || invoiceDoc.byteSize !== expectedInvoiceBytes.length) {
       throw new Error("Reconciliation failed: the electricity invoice's stored bytes no longer match its linked activity entry.");
     }
@@ -1844,10 +1836,7 @@ export class LiveSeedPort implements DemoSeedPort {
     if (!this.meterReadingSourceDocumentId) throw new Error("Reconciliation failed: the meter-reading source document was never created.");
     const meterDoc = await prisma.sourceDocument.findUniqueOrThrow({ where: { id: this.meterReadingSourceDocumentId } });
     const meterLinkedEntry = await prisma.activityEntry.findFirstOrThrow({ where: { organisationId, sourceDocumentId: meterDoc.id } });
-    const expectedMeterBytes = Buffer.from(
-      `${BOARD1.disclosure}\nFixture: ${BOARD1.fixtureVersion}\nSynthetic meter reading\n\nSite: East Cards. Period: February 2026. Observed electricity consumption: ${meterLinkedEntry.canonicalValue.toString()} ${meterLinkedEntry.canonicalUnit}.\nNo real person, signature, certificate or company result is represented.\n`,
-      "utf8",
-    );
+    const expectedMeterBytes = Buffer.from(sourceDocumentBody("meter", meterLinkedEntry.canonicalValue.toString(), meterLinkedEntry.canonicalUnit), "utf8");
     if (meterDoc.sha256 !== createHash("sha256").update(expectedMeterBytes).digest("hex") || meterDoc.byteSize !== expectedMeterBytes.length) {
       throw new Error("Reconciliation failed: the meter reading's stored bytes no longer match its linked activity entry.");
     }

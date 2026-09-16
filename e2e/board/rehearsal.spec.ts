@@ -132,7 +132,7 @@ test("live completion and independent review change Attention but never the issu
   const before = Number(await owner.locator(".bd-action-summary strong").first().textContent());
   await owner.goto(routes.nonconformity);
   const action = owner.locator("li").filter({ has: owner.locator('input[name="completionEvidenceNote"]') }).filter({ hasText: "BOARD1-CA-EXT" }).last();
-  await action.getByPlaceholder("Completion evidence", { exact: true }).fill("Synthetic rehearsal: named owner and inspection schedule extended to East Cards.");
+  await action.getByPlaceholder("Completion evidence", { exact: true }).fill("Synthetic rehearsal: named owner and inspection schedule extended to Thames Technology — Rayleigh.");
   await action.getByRole("button", { name: "Complete", exact: true }).click();
   await expect(action.getByRole("button", { name: "Complete", exact: true })).toHaveCount(0);
   await owner.getByRole("button", { name: "Request effectiveness review", exact: true }).click();
@@ -141,7 +141,7 @@ test("live completion and independent review change Attention but never the issu
   const reviewer = await reviewerContext.newPage();
   await login(reviewer, "independent-reviewer");
   await reviewer.goto(routes.nonconformity);
-  await reviewer.getByLabel("Review criteria", { exact: true }).fill("Synthetic rehearsal: named ownership and inspection schedule verified for East Cards.");
+  await reviewer.getByLabel("Review criteria", { exact: true }).fill("Synthetic rehearsal: named ownership and inspection schedule verified for Thames Technology — Rayleigh.");
   await reviewer.getByLabel("Review date", { exact: true }).fill(new Date().toISOString().slice(0, 10));
   await reviewer.getByLabel("Result", { exact: true }).selectOption("EFFECTIVE");
   await reviewer.getByLabel("Decision", { exact: true }).fill("Independent synthetic review confirms the containment gap is closed.");

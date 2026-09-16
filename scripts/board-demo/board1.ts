@@ -1,6 +1,6 @@
 /** Seed inputs/expectations ONLY. Never import scripts/board-demo from src/. */
 export const BOARD1 = {
-  fixtureVersion: "BOARD-1", organisation: "Northstar Identification — DEMONSTRATION",
+  fixtureVersion: "BOARD-1", organisation: "Paragon ID UK — DEMONSTRATION",
   asOfDate: "2026-09-08", operationalTimezone: "Europe/London",
   from: "2026-01", to: "2026-08", previousFrom: "2025-01", previousTo: "2025-08",
   disclosure: "Synthetic demonstration — not company performance",
@@ -8,9 +8,14 @@ export const BOARD1 = {
   monthlyCurrentKg: [168000,162000,156000,154000,150000,148000,152000,158000],
   monthlyPreviousKg: [210000,204000,198000,196000,194000,188000,186000,184000],
   sites: [
-    { key: "north-works", name: "North Works", activity: "Manufacturing", scope1Share: 5/6, scope2Share: 25/36, scope3Share: .8 },
-    { key: "east-cards", name: "East Cards", activity: "Metal-card and bureau operations", scope1Share: 1/6, scope2Share: 10/36, scope3Share: .18 },
-    { key: "central-digital", name: "Central Digital", activity: "Office and software", scope1Share: 0, scope2Share: 1/36, scope3Share: .02 },
+    // Real operating-site identities. The names are real; every quantity recorded against
+    // them stays synthetic — see `disclosure`, and the runtime banner, which is driven by the
+    // demo manifest/lease and never by these names.
+    // `key` is the fixture's persisted identity (external keys, identity map, source config)
+    // and never changes with a name, so a rename keeps every historical reference intact.
+    { key: "north-works", name: "Paragon ID — Hull", activity: "Manufacturing — e-ID, mass-transit tickets, smart bureau and software development", scope1Share: 5/6, scope2Share: 25/36, scope3Share: .8 },
+    { key: "east-cards", name: "Thames Technology — Rayleigh", activity: "Manufacturing — mainly metal-card production and smart bureau", scope1Share: 1/6, scope2Share: 10/36, scope3Share: .18 },
+    { key: "central-digital", name: "RFID Discovery — Milton Keynes", activity: "Office-only SaaS operation", scope1Share: 0, scope2Share: 1/36, scope3Share: .02 },
   ],
   sourceKeys: {
     "north-works": ["gas","fleet","electricity","substrate","services","consumables","travel","commuting"],
@@ -75,3 +80,28 @@ export const IMPROVEMENT_CHAIN = [
   { key: "DEM-FND-006", kind: "finding", title: "Inspection ownership not consistently recorded", detail: "Synthetic audit finding linked to source evidence and requirement revision." },
   { key: "DEM-NC-002", kind: "nonconformity", title: "Containment inspection gap", detail: "One synthetic corrective-action chain with independent effectiveness review." },
 ] as const;
+
+/**
+ * The two synthetic SourceDocuments (an energy invoice and a meter reading),
+ * each named for the site it documents.
+ *
+ * Their bytes are content-addressed: `SourceDocument.sha256`/`byteSize` are
+ * re-derived and compared byte-for-byte by `verifyAllInvariants`. Defined once
+ * here so the seed that writes them, the invariant that re-derives them and
+ * `align-site-identity.ts` (which converges an already-built demo onto them)
+ * can never drift apart — a site rename that reached only two of the three
+ * would fail the fixture's own reconciliation.
+ */
+export const SOURCE_DOCUMENTS = {
+  invoice: { siteKey: "north-works", title: "Synthetic energy invoice", period: "January 2026", measure: "Metered electricity" },
+  meter: { siteKey: "east-cards", title: "Synthetic meter reading", period: "February 2026", measure: "Observed electricity consumption" },
+} as const;
+
+export type SourceDocumentKey = keyof typeof SOURCE_DOCUMENTS;
+
+/** The site name is always the fixture's own, so this stays an expectation rather than an echo of whatever the database happens to hold. */
+export function sourceDocumentBody(key: SourceDocumentKey, canonicalValue: string, canonicalUnit: string): string {
+  const doc = SOURCE_DOCUMENTS[key];
+  const siteName = BOARD1.sites.find((site) => site.key === doc.siteKey)!.name;
+  return `${BOARD1.disclosure}\nFixture: ${BOARD1.fixtureVersion}\n${doc.title}\n\nSite: ${siteName}. Period: ${doc.period}. ${doc.measure}: ${canonicalValue} ${canonicalUnit}.\nNo real person, signature, certificate or company result is represented.\n`;
+}

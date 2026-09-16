@@ -19,6 +19,7 @@
     "db:seed:board-demo-collection-plan": "tsx scripts/board-demo/with-demo-env.ts tsx scripts/board-demo/seed-collection-plan.ts",
     "db:board-demo:verify-collection-plan": "tsx scripts/board-demo/with-demo-env.ts tsx scripts/board-demo/verify-collection-plan.ts",
     "db:board-demo:align-catalogue": "tsx scripts/board-demo/with-demo-env.ts tsx scripts/board-demo/align-demo-catalogue.ts",
+    "db:board-demo:align-site-identity": "tsx scripts/board-demo/with-demo-env.ts tsx scripts/board-demo/align-site-identity.ts",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "node scripts/resolve-failed-migration.mjs && prisma migrate deploy",
     "backfill:organisation": "tsx scripts/backfill-organisation.ts",
