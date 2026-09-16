@@ -662,6 +662,10 @@ export class LiveSeedPort implements DemoSeedPort {
       "carbon.entry.review",
       "carbon.report.generate",
       "carbon.report.export",
+      // Matches CARBON_REPORT_FULL in the product's own SUSTAINABILITY_LEAD role
+      // template: a lead who owns the report has to be able to open the factor
+      // library it cites. Without it /admin/factors bounces to the dashboard.
+      "carbon.factor.view",
       "ems.view",
       "ems.aspect.edit",
       "ems.control.manage",
@@ -859,6 +863,16 @@ export class LiveSeedPort implements DemoSeedPort {
       ],
     });
 
+    // The unit each source is actually recorded in, which must be the unit of
+    // its factor row above: grid electricity and natural gas are metered in
+    // kWh, everything else in this fixture is a mass. `unitOptions` is what the
+    // entry form offers, so a wrong value here has the form ask for kilograms
+    // of electricity against a per-kWh factor.
+    const inputUnitByCategory: Record<string, string> = {
+      grid_electricity: "kWh",
+      stationary_combustion_natural_gas: "kWh",
+    };
+
     const dataPointIdByCategory = new Map<string, string>();
     for (const [sourceKey, def] of Object.entries(factorCategoryFor)) {
       if (dataPointIdByCategory.has(def.factorCategory)) continue;
@@ -873,8 +887,10 @@ export class LiveSeedPort implements DemoSeedPort {
           // a single, meaningless bucket (Checkpoint B fix 2).
           category: def.factorCategory.replace(/_/g, " "),
           dataPointName: `BOARD-1 ${sourceKey}`,
-          promptTemplate: "Synthetic BOARD-1 fixture input.",
-          unitOptions: ["kg"],
+          // Shown as the heading of the entry form and on /sources, so it has
+          // to read as an instruction rather than as fixture scaffolding.
+          promptTemplate: `Enter the ${def.factorCategory.replace(/^board1_/, "").replace(/_/g, " ")} recorded for this site and period.`,
+          unitOptions: [inputUnitByCategory[def.factorCategory] ?? "kg"],
           frequency: "Monthly",
           defaultTier: "TIER_3",
           formType: "QUANTITY",
