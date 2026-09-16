@@ -6,7 +6,7 @@ import { hasPermission, PermissionDeniedError } from "@/lib/rbac/authorize";
 import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
 import { logEvent } from "@/lib/observability/logger";
 import { loadManagementReport, type ManagementReportSearchParams } from "@/lib/carbon/live-management-report";
-import { SCOPE3_STATE_LABEL, type ManagementReport, type PeriodStateKind } from "@/lib/carbon/management-report";
+import { DATA_QUALITY_TIER_LABEL, SCOPE3_STATE_LABEL, type ManagementReport, type PeriodStateKind } from "@/lib/carbon/management-report";
 import { TONNES_CO2E, formatTonnesCO2e } from "@/lib/format";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,12 +25,6 @@ const PERIOD_TONE: Record<PeriodStateKind, "neutral" | "success" | "warning" | "
   CLOSED: "success",
   MIXED: "warning",
   NONE: "neutral",
-};
-
-const TIER_LABELS: Record<string, string> = {
-  TIER_1: "Tier 1 — primary, measured",
-  TIER_2: "Tier 2 — primary, calculated",
-  TIER_3: "Tier 3 — secondary, estimated",
 };
 
 /** tCO₂e everywhere on this page; an absent figure reads as "Not available", never 0. */
@@ -315,7 +309,7 @@ export default async function ManagementReportPage({ searchParams }: { searchPar
                             <td className="py-2 text-right text-slate-700">{t(s.scope3)}</td>
                             <td className="py-2 text-right font-semibold text-slate-900">{t(s.total)}</td>
                             <td className="py-2 text-right text-slate-700" data-share={s.sharePercent ?? undefined}>{pct(s.sharePercent)}</td>
-                            <td className="py-2 text-right"><DeltaBadge delta={s.delta} /></td>
+                            <td className="py-2 text-right">{s.delta ? <DeltaBadge delta={s.delta} /> : <span className="text-xs text-slate-500">Not comparable</span>}</td>
                             <td className="py-2 text-right text-xs text-slate-500">{s.periodState.kind === "NONE" ? "—" : s.periodState.label}</td>
                           </tr>
                         ))}
@@ -594,7 +588,7 @@ export default async function ManagementReportPage({ searchParams }: { searchPar
                 <tbody className="tabular-nums">
                   {report.dataQuality.map((tier) => (
                     <tr key={tier.tier} className="border-b border-slate-100 last:border-0">
-                      <th scope="row" className="py-1.5 text-left font-normal text-slate-700">{TIER_LABELS[tier.tier] ?? tier.tier}</th>
+                      <th scope="row" className="py-1.5 text-left font-normal text-slate-700">{DATA_QUALITY_TIER_LABEL[tier.tier] ?? tier.tier}</th>
                       <td className="py-1.5 text-right text-slate-900">{t(tier.kgCo2e)}</td>
                       <td className="py-1.5 text-right text-slate-900">{tier.percent.toFixed(1)}%</td>
                     </tr>

@@ -418,6 +418,27 @@ describe("factor availability", () => {
     expect(availability.get("grid_electricity")).toBeUndefined();
   });
 
+  // The BOARD demo set is tagged OFFICIAL_DEFRA_DESNZ because the calculation
+  // engine resolves factors by that tag. It is plumbing, not provenance, and
+  // badging the set "Official factor" contradicts every other surface — the
+  // management report calls the same set a placeholder dataset.
+  it("does not present a placeholder set as an official factor", async () => {
+    store.factorSets.push({
+      id: "set-placeholder",
+      sourceType: FactorSourceType.OFFICIAL_DEFRA_DESNZ,
+      visibility: "PLATFORM",
+      ownerOrganisationId: null,
+      isPlaceholder: true,
+      effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+      effectiveTo: null,
+    });
+    store.factors.push({ factorSetId: "set-placeholder", category: "natural_gas" });
+
+    expect(await getFactorAvailability(context(ORG_A), asOf, ["natural_gas"], db)).toEqual(
+      new Map([["natural_gas", { available: true, kinds: ["PLACEHOLDER"] }]]),
+    );
+  });
+
   it("ignores a factor set that is not in effect for the selected period", async () => {
     store.factorSets.push({
       id: "set-future",

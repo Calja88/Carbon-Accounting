@@ -17,7 +17,7 @@
  *     column, and market-based is the one that says No.
  */
 import ExcelJS from "exceljs";
-import { HEADLINE_BASIS, SCOPE3_STATE_LABEL, type ManagementReport } from "@/lib/carbon/management-report";
+import { DATA_QUALITY_TIER_LABEL, HEADLINE_BASIS, SCOPE3_STATE_LABEL, type ManagementReport } from "@/lib/carbon/management-report";
 import { TONNES_CO2E } from "@/lib/format";
 
 /** What a null figure reads as. Never a zero, never an empty cell. */
@@ -220,8 +220,8 @@ function sitesSheet(workbook: ExcelJS.Workbook, report: ManagementReport): void 
       tonnes(site.scope3),
       tonnes(site.total),
       percent(site.sharePercent),
-      tonnes(site.delta.deltaKg),
-      percent(site.delta.deltaPercent),
+      tonnes(site.delta?.deltaKg),
+      percent(site.delta?.deltaPercent),
       site.periodState.label,
     ]);
     format(row, [3, 4, 5, 6], TONNES_FORMAT);
@@ -328,7 +328,7 @@ function methodologySheet(workbook: ExcelJS.Workbook, report: ManagementReport):
   sectionTitle(ws, "Data quality");
   headerRow(ws, ["Tier", TONNES_CO2E, "Share of total"]);
   for (const tier of report.dataQuality) {
-    const row = ws.addRow([tier.tier, tonnes(tier.kgCo2e), percent(tier.percent)]);
+    const row = ws.addRow([DATA_QUALITY_TIER_LABEL[tier.tier] ?? tier.tier, tonnes(tier.kgCo2e), percent(tier.percent)]);
     format(row, [2], TONNES_FORMAT);
     format(row, [3], PERCENT_FORMAT);
   }

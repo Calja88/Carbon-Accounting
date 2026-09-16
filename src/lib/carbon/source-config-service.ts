@@ -339,7 +339,7 @@ export async function updateSourceFrequency(
  * restate — and risk contradicting — the resolution order that
  * `entries-service` owns.
  */
-export type FactorKind = "OFFICIAL" | "SUPPLIER_SPECIFIC" | "SPEND_BASED";
+export type FactorKind = "OFFICIAL" | "SUPPLIER_SPECIFIC" | "SPEND_BASED" | "PLACEHOLDER";
 
 export interface FactorAvailability {
   available: boolean;
@@ -354,7 +354,7 @@ const KIND_BY_SOURCE_TYPE: Partial<Record<FactorSourceType, FactorKind>> = {
   // factor, so it never counts as availability on this screen.
 };
 
-const KIND_ORDER: FactorKind[] = ["OFFICIAL", "SUPPLIER_SPECIFIC", "SPEND_BASED"];
+const KIND_ORDER: FactorKind[] = ["OFFICIAL", "SUPPLIER_SPECIFIC", "SPEND_BASED", "PLACEHOLDER"];
 
 /**
  * Availability per `ActivityDataPoint.factorCategory`, as at `asOf` (the end
@@ -382,13 +382,17 @@ export async function getFactorAvailability(
       effectiveFrom: { lte: asOf },
       AND: [{ OR: [{ effectiveTo: null }, { effectiveTo: { gte: asOf } }] }, visibleFactorSetFilter(context)],
     },
-    select: { id: true, sourceType: true },
+    select: { id: true, sourceType: true, isPlaceholder: true },
   });
   if (sets.length === 0) return result;
 
   const kindBySetId = new Map<string, FactorKind>();
   for (const set of sets) {
-    const kind = KIND_BY_SOURCE_TYPE[set.sourceType];
+    // A placeholder set still carries a real `sourceType` because the
+    // calculation engine resolves factors by that tag — engine plumbing, not a
+    // claim that the numbers came from the publisher. Badging it "Official
+    // factor" contradicts every other surface, which calls it a placeholder.
+    const kind = set.isPlaceholder ? "PLACEHOLDER" : KIND_BY_SOURCE_TYPE[set.sourceType];
     if (kind) kindBySetId.set(set.id, kind);
   }
 
@@ -416,6 +420,7 @@ export const FACTOR_KIND_LABEL: Record<FactorKind, string> = {
   OFFICIAL: "Official factor",
   SUPPLIER_SPECIFIC: "Supplier-specific factor",
   SPEND_BASED: "Spend-based estimate",
+  PLACEHOLDER: "Placeholder factor — not verified",
 };
 
 export const FREQUENCY_LABEL: Record<CarbonSourceFrequency, string> = {

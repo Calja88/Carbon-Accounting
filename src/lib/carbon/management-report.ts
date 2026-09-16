@@ -55,6 +55,17 @@ export const SCOPE3_STATE_LABEL: Record<Scope3CategoryState, string> = {
   no_data: "No data this period",
 };
 
+/**
+ * Shared for the same reason as SCOPE3_STATE_LABEL: the workbook and the page
+ * describe one report, so a reader cannot be shown "Tier 3 — secondary,
+ * estimated" on screen and the raw `TIER_3` in the file.
+ */
+export const DATA_QUALITY_TIER_LABEL: Record<string, string> = {
+  TIER_1: "Tier 1 — primary, measured",
+  TIER_2: "Tier 2 — primary, calculated",
+  TIER_3: "Tier 3 — secondary, estimated",
+};
+
 export interface ManagementKpi {
   key: "total" | "scope1" | "scope2Location" | "scope2Market" | "scope3";
   label: string;
@@ -85,7 +96,8 @@ export interface ManagementSiteRow {
   scope3: number;
   /** Null when the group total is absent or zero — a share of nothing is not 0%. */
   sharePercent: number | null;
-  delta: Delta;
+  /** Null when the two windows are not comparable — see `comparable`. */
+  delta: Delta | null;
   periodState: PeriodStateSummary;
   href: LocalHref;
 }
@@ -374,6 +386,12 @@ export function buildManagementReport(input: ManagementReportInput): ManagementR
   const reportedMonths = new Set(input.monthsWithData);
   const anyCurrentData = reportedMonths.size > 0;
   const anyPreviousData = input.previousMonthsWithData.length > 0;
+  // "The same calendar window one year earlier" only means anything while the
+  // window is at most a year long. Beyond that the prior window contains part
+  // of this one, and "x% against last year" is a comparison with itself — the
+  // demo window Jan 2025 - Sept 2026 reported +80% while the true year-on-year
+  // movement was -20%.
+  const previousWindowOverlaps = input.previousMonthsInRange > 12;
   const scope = { from: input.from, to: input.to, siteId: input.selectedSiteId };
 
   // A period nobody submitted anything for has no total — showing 0 tCO₂e
@@ -399,14 +417,16 @@ export function buildManagementReport(input: ManagementReportInput): ManagementR
   // Comparability is decided once, here, and every row honours it. The
   // failure this prevents is the worst one a carbon report can make:
   // announcing a 100% reduction that is really an empty current period.
-  const comparable = anyCurrentData && anyPreviousData;
-  const comparisonNote = !anyPreviousData
-    ? `No activity data was recorded for ${input.previousPeriodLabel}, so no change is stated.`
-    : !anyCurrentData
-      ? `No activity data has been recorded for ${input.periodLabel} yet. The difference against ${input.previousPeriodLabel} would reflect missing data, not a reduction, so no change is stated.`
-      : input.previousMonthsWithData.length < input.previousMonthsInRange
-        ? `${input.previousPeriodLabel} is only partly reported (${input.previousMonthsWithData.length} of ${input.previousMonthsInRange} months), so the change below compares against an incomplete period.`
-        : null;
+  const comparable = anyCurrentData && anyPreviousData && !previousWindowOverlaps;
+  const comparisonNote = previousWindowOverlaps
+    ? `${input.periodLabel} is longer than twelve months, so ${input.previousPeriodLabel} overlaps it. A year-on-year change would compare this period partly against itself, so none is stated.`
+    : !anyPreviousData
+      ? `No activity data was recorded for ${input.previousPeriodLabel}, so no change is stated.`
+      : !anyCurrentData
+        ? `No activity data has been recorded for ${input.periodLabel} yet. The difference against ${input.previousPeriodLabel} would reflect missing data, not a reduction, so no change is stated.`
+        : input.previousMonthsWithData.length < input.previousMonthsInRange
+          ? `${input.previousPeriodLabel} is only partly reported (${input.previousMonthsWithData.length} of ${input.previousMonthsInRange} months), so the change below compares against an incomplete period.`
+          : null;
 
   const comparisonRows: { key: ComparisonRow["key"]; label: string; current: number; previous: number; companion?: boolean }[] = [
     { key: "scope1", label: "Scope 1 — direct", current: input.group.scope1, previous: input.previousGroup.scope1 },
@@ -419,7 +439,7 @@ export function buildManagementReport(input: ManagementReportInput): ManagementR
   const comparison: ComparisonRow[] = comparisonRows.map((row) => {
     const companionUnavailable = row.companion && !input.marketBasedAvailable;
     const currentKg = anyCurrentData && !companionUnavailable ? row.current : null;
-    const previousKg = anyPreviousData && !companionUnavailable ? row.previous : null;
+    const previousKg = comparable && !companionUnavailable ? row.previous : null;
     if (currentKg === null || previousKg === null) {
       return {
         key: row.key,
@@ -427,7 +447,10 @@ export function buildManagementReport(input: ManagementReportInput): ManagementR
         currentKg,
         previousKg,
         delta: null,
-        note: companionUnavailable ? "No market-based figure recorded" : comparisonNote,
+        // `comparisonNote` is stated once above the table and once as a footer in
+        // the workbook; repeating it on all five rows only pushes the figures
+        // off the screen. The row note is for what is true of this row alone.
+        note: companionUnavailable ? "No market-based figure recorded" : null,
       };
     }
     // buildDelta already returns a null percentage against a zero prior
@@ -461,7 +484,7 @@ export function buildManagementReport(input: ManagementReportInput): ManagementR
       scope3: site.totals.scope3,
       total: site.totals.total,
       sharePercent: share(site.totals.total, totalKg),
-      delta: buildDelta(site.totals.total, input.previousSitesById[site.siteId]?.total ?? 0),
+      delta: comparable ? buildDelta(site.totals.total, input.previousSitesById[site.siteId]?.total ?? 0) : null,
       periodState: summarisePeriodStates(periodsBySite.get(site.siteId) ?? []),
       href: activityDrilldownHref({ from: input.from, to: input.to, siteId: site.siteId }),
     }))

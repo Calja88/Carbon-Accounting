@@ -93,6 +93,26 @@ describe("prior-period comparison", () => {
     expect(report.comparisonNote).toMatch(/only partly reported \(1 of 2 months\)/);
     expect(comparison(report, "total").delta).not.toBeNull();
   });
+
+  // A window longer than a year makes "the same window one year earlier"
+  // overlap it, so the change is partly this period against itself. The live
+  // demo reported +80% on Jan 2025 - Sept 2026 while the true year-on-year
+  // movement across that data was -20%.
+  it("states no year-on-year change when the prior window overlaps this one", () => {
+    const report = buildManagementReport(input({ previousMonthsInRange: 13 }));
+    expect(report.comparable).toBe(false);
+    expect(report.comparisonNote).toMatch(/longer than twelve months/);
+    expect(comparison(report, "total").currentKg).toBe(8000);
+    expect(comparison(report, "total").previousKg).toBeNull();
+    expect(report.comparison.every((row) => row.delta === null)).toBe(true);
+    expect(report.sites.every((site) => site.delta === null)).toBe(true);
+  });
+
+  it("still compares a window of exactly twelve months", () => {
+    const report = buildManagementReport(input({ previousMonthsInRange: 12, previousMonthsWithData: ["2025-01"] }));
+    expect(report.comparable).toBe(true);
+    expect(comparison(report, "total").delta).not.toBeNull();
+  });
 });
 
 describe("site breakdown", () => {

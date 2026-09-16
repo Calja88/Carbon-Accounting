@@ -182,7 +182,10 @@ export default async function ActivityRecordPage({
                   <Badge tone="info">{calc.basis.replace(/_/g, " ").toLowerCase()}</Badge>
                 </div>
                 <dl className="mt-2">
-                  <Row label="Factor applied" value={`${calc.factorValue} ${calc.factorUnit}`} />
+                  {/* factorUnit is the unit the factor is expressed *per*, so it is
+                      only meaningful as a rate — "1 kWh" reads as a quantity and
+                      contradicts the calculation page one click away. */}
+                  <Row label="Factor applied" value={`${calc.factorValue} kgCO₂e/${calc.factorUnit}`} />
                   <Row label="Factor source" value={calc.factorSource} />
                   <Row label="Factor vintage" value={calc.factorVintage} />
                   <Row label="Calculated" value={dateTimeLabel(calc.calculatedAt)} />

@@ -185,10 +185,13 @@ function TransitionControl({
         {closing ? "Close period" : "Reopen period"}
       </Button>
 
+      {/* `m-auto` is load-bearing: Tailwind preflight resets margin on every
+          element, which overrides the UA stylesheet's `dialog:modal { margin: auto }`
+          and leaves a showModal() dialog pinned to the top-left corner. */}
       <dialog
         ref={dialog}
         aria-labelledby="reporting-period-dialog-title"
-        className="w-[min(32rem,calc(100vw-2rem))] rounded-lg border border-slate-200 p-0 text-slate-900 shadow-xl backdrop:bg-slate-900/40"
+        className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-lg border border-slate-200 p-0 text-slate-900 shadow-xl backdrop:bg-slate-900/40"
         onClick={(event) => {
           if (event.target === event.currentTarget) close();
         }}

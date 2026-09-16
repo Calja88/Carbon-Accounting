@@ -505,7 +505,9 @@ function Matrix({
                         {...(cell.id === selectedId ? { "aria-current": "page" as const } : {})}
                       >
                         <Badge tone={STATUS_TONE[cell.status]}>{STATUS_LABEL[cell.status]}</Badge>
-                        {cell.periodOpen && <span className="text-[10px] text-[var(--bd-muted)]">month still running</span>}
+                        {/* Quarterly and annual requirements land in this column too, so the
+                            caption names the requirement period rather than a month. */}
+                        {cell.periodOpen && <span className="text-[10px] text-[var(--bd-muted)]">period still running</span>}
                       </BoardLink>
                     </td>
                   );

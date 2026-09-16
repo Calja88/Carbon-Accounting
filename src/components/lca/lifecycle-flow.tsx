@@ -75,7 +75,7 @@ export function LifecycleFlow({ stages }: { stages: FlowStage[] }) {
                   </div>
                   <div className="mt-3">
                     <div className="text-sm font-semibold tabular-nums text-slate-900">
-                      {entry.modelled ? `${formatKgPrecise(entry.kgCo2e)} kg` : "—"}
+                      {entry.modelled ? `${formatKgPrecise(entry.kgCo2e)} kgCO2e` : "—"}
                     </div>
                     <div className="text-[11px] tabular-nums text-slate-500">
                       {entry.modelled ? `${entry.percent.toFixed(1)}% of gross` : ""}

@@ -97,6 +97,12 @@ describe("reporting period panel", () => {
     expect(html).toContain('name="reason"');
     expect(html).toContain("Cancel");
   });
+  // Tailwind preflight zeroes `margin` on every element, which beats the UA
+  // stylesheet's `dialog:modal { margin: auto }` — without `m-auto` the modal
+  // renders clipped into the top-left corner of the viewport.
+  it("keeps the class that centres the modal over the page", () => {
+    expect(render()).toContain("m-auto");
+  });
 
   it("warns what reopening does and asks for its own reason", () => {
     const html = render({ view: CLOSED });

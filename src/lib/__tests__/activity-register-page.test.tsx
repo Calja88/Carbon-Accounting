@@ -266,7 +266,9 @@ describe("/activity/[id] record", () => {
             scope: "SCOPE_1",
             resultKgCo2e: 219.6,
             factorValue: 0.183,
-            factorUnit: "kgCO2e/kWh",
+            // factorUnitSnapshot stores the unit the factor is expressed *per*
+            // (EmissionFactor.unit), so the page has to turn it into a rate.
+            factorUnit: "kWh",
             factorSource: "DEFRA/DESNZ 2024",
             factorVintage: "2024",
             calculatedAt: SEPTEMBER,
@@ -277,6 +279,9 @@ describe("/activity/[id] record", () => {
     );
     const html = await renderRecord();
     expect(html).toContain("DEFRA/DESNZ 2024");
+    // A bare "0.183 kWh" reads as a quantity and contradicts the calculation
+    // page, which states the same factor as 0.183 kgCO₂e per kWh.
+    expect(html).toContain("0.183 kgCO₂e/kWh");
     expect(html).toContain('href="/calculations/calc-1"');
   });
 

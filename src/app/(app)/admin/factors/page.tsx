@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Database, ArrowRight, Download, Upload, FileSearch } from "lucide-react";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
-import { requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
+import { hasPermission, requirePermission, PermissionDeniedError } from "@/lib/rbac/authorize";
 import { listFactorSets } from "@/lib/factor-sets-service";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +25,10 @@ export default async function AdminFactorsPage() {
   }
 
   const sets = await listFactorSets(context);
+  // /admin/factors/upload redirects to the dashboard without this grant, so
+  // offering the button to a reader who cannot use it is a dead control. The
+  // redirect stays: this hides the link, it does not replace the check.
+  const canImport = hasPermission(context, "carbon.factor.manage");
 
   return (
     <div className="space-y-8">
@@ -49,12 +53,14 @@ export default async function AdminFactorsPage() {
               UK factor import preview
             </Button>
           </Link>
-          <Link href="/admin/factors/upload">
-            <Button>
-              <Upload className="h-4 w-4" />
-              Import factors
-            </Button>
-          </Link>
+          {canImport && (
+            <Link href="/admin/factors/upload">
+              <Button>
+                <Upload className="h-4 w-4" />
+                Import factors
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
 

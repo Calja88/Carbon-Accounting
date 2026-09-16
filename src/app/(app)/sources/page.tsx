@@ -30,6 +30,10 @@ const SCOPE_LABEL: Record<CatalogueSource["scope"], string> = {
   SCOPE_3: "Scope 3 — value chain",
 };
 
+function sourceCountLabel(count: number): string {
+  return `${count} source${count === 1 ? "" : "s"} in the catalogue`;
+}
+
 const ERROR_MESSAGE: Record<SourceConfigErrorCode, string> = {
   denied: "You do not have permission to change what a site reports. Ask an administrator for the site configuration grant.",
   scope: "That site is not one you can configure. Nothing was changed.",
@@ -207,7 +211,7 @@ export default async function SourcesPage({ searchParams }: { searchParams: Prom
             />
           ) : (
             groups.map(({ scope, categories }) => (
-              <Surface key={scope} title={SCOPE_LABEL[scope]} subtitle={`${categories.reduce((n, c) => n + c.sources.length, 0)} sources in the catalogue`}>
+              <Surface key={scope} title={SCOPE_LABEL[scope]} subtitle={sourceCountLabel(categories.reduce((n, c) => n + c.sources.length, 0))}>
                 <div className="space-y-6">
                   {categories.map(({ category, sources }) => (
                     <div key={category}>

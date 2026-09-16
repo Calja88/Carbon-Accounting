@@ -204,9 +204,11 @@ describe("/data", () => {
 
   it("renders a period that has not closed yet as still open rather than late", async () => {
     getCollectionMatrix.mockResolvedValue([cell({ periodOpen: true })]);
-    // "Month still running" is deliberately not the accounting wording — a
-    // calendar month that has not ended is not a closed reporting period.
-    expect(await render()).toContain("month still running");
+    // "Period still running" is deliberately not the accounting wording — a
+    // calendar period that has not ended is not a closed reporting period. It
+    // says "period" rather than "month" because quarterly and annual
+    // requirements share this column.
+    expect(await render()).toContain("period still running");
   });
 
   it("asks for a single site before offering to close or reopen a month", async () => {

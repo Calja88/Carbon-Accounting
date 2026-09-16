@@ -318,6 +318,12 @@ describe("provenance and placeholder factors", () => {
     expect(row[3]).toBe("Imported dataset");
   });
 
+  it("names the data-quality tier the way the screen does, not as a raw enum", () => {
+    const wb = book(report());
+    expect(rowStartingWith(wb, "Data quality & methodology", "Tier 1 — primary, measured")[1]).toBe(8);
+    expect(textOf(wb, "Data quality & methodology")).not.toContain("TIER_1");
+  });
+
   it("records the calculation engine and reporting boundary", () => {
     const wb = book(report());
     expect(rowStartingWith(wb, "Data quality & methodology", "Calculation engine")[1]).toBe("calc-engine-v1");
