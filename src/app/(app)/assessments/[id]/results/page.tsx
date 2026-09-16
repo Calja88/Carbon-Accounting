@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DataTable, EmptyState, Notice, PageHeading, PlaceholderFactorWarning, SectionCard, Stat, Td } from "@/components/lca/ui";
 import { LifecycleFlow, type FlowStage } from "@/components/lca/lifecycle-flow";
+import { formatFactorSource } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -362,7 +363,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
               </Td>
               <Td className="text-xs">
                 {result.factorValue.toString()} kgCO2e/{result.factorUnit}
-                <span className="block text-slate-500">{result.factorSource}</span>
+                <span className="block text-slate-500">{formatFactorSource(result.factorSource)}</span>
               </Td>
               <Td align="right">{formatKgPrecise(Number(result.allocatedKgCo2e))}</Td>
               <Td align="right">{formatKgPrecise(Number(result.perFunctionalUnitKgCo2e))}</Td>

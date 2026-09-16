@@ -17,6 +17,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { formatFactorSource } from "@/lib/format";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import { requireCarbonView } from "@/lib/rbac/carbon-access";
 import { accessibleActivityEntryFilter, requireSiteInScope, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
@@ -152,7 +153,7 @@ export async function loadManagementReport(
     const factorKey = `${calc.factorSourceSnapshot}|${calc.factorVintageSnapshot}|${calc.scope}`;
     if (!factorSourceMap.has(factorKey)) {
       factorSourceMap.set(factorKey, {
-        source: calc.factorSourceSnapshot,
+        source: formatFactorSource(calc.factorSourceSnapshot),
         vintage: calc.factorVintageSnapshot,
         scope: calc.scope,
         placeholder: calc.emissionFactor?.factorSet?.isPlaceholder ?? false,

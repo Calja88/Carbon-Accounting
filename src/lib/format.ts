@@ -107,3 +107,45 @@ export function formatShare(part: number | null | undefined, total: number | nul
   if (isMissing(part) || isMissing(total) || (total as number) <= 0) return EM_DASH;
   return `${(((part as number) / (total as number)) * 100).toFixed(1)}%`;
 }
+
+/**
+ * The two synthetic-demo factor-set names as they were recorded into
+ * calculation snapshots before commit 3e94741 renamed them, and what a reader
+ * sees instead.
+ *
+ * The stored values are NOT rewritten: `Calculation.factorSourceSnapshot`,
+ * `LcaCalculationResult.factorSource` and the LCA run snapshots are the record
+ * of what each calculation actually used, and the align script leaves them
+ * exactly as they are. This is the display side of that decision, so a reader
+ * is not shown a retired label next to the current one.
+ *
+ * Deliberately narrow: an exact prefix match on these two strings only. Every
+ * other BOARD-1 mention — the fixture key, the source codes, the persona
+ * names, and the BOARD-1 wording inside sealed audit and pack payloads — is
+ * left alone, because those are identity and history rather than a stale
+ * label.
+ */
+const LEGACY_FACTOR_SOURCES: readonly (readonly [string, string])[] = [
+  ["BOARD-1 demo factors — not for reporting", "Demo factors — not for reporting"],
+  ["BOARD-1 demonstration — not for reporting", "Demo — not for reporting"],
+];
+
+/**
+ * A stored factor-source snapshot as it should read on screen or in an export.
+ *
+ * Prefix-only, so whatever the calculation appended survives:
+ *   "BOARD-1 demo factors — not for reporting (PLACEHOLDER — not verified)"
+ *   -> "Demo factors — not for reporting (PLACEHOLDER — not verified)"
+ *
+ * Anything else, including a value already carrying the current wording, is
+ * returned unchanged.
+ */
+export function formatFactorSource(stored: string): string;
+export function formatFactorSource(stored: string | null | undefined): string | null | undefined;
+export function formatFactorSource(stored: string | null | undefined): string | null | undefined {
+  if (typeof stored !== "string") return stored;
+  for (const [legacy, current] of LEGACY_FACTOR_SOURCES) {
+    if (stored.startsWith(legacy)) return current + stored.slice(legacy.length);
+  }
+  return stored;
+}

@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { EntryStatus, ReportingPeriodState, Scope } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { formatFactorSource } from "@/lib/format";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import { hasPermission } from "@/lib/rbac/authorize";
 import { recordAuditEvent } from "@/lib/repositories/audit-repository";
@@ -435,7 +436,7 @@ export async function getActivityRecord(
       resultKgCo2e: Number(calc.resultKgCo2e),
       factorValue: Number(calc.factorValueSnapshot),
       factorUnit: calc.factorUnitSnapshot,
-      factorSource: calc.factorSourceSnapshot,
+      factorSource: formatFactorSource(calc.factorSourceSnapshot),
       factorVintage: calc.factorVintageSnapshot,
       calculatedAt: calc.calculatedAt,
     })),

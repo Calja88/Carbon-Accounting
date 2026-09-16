@@ -15,6 +15,7 @@ import { LcaAssessmentStatus, LcaDataType, type LcaBoundary } from "@prisma/clie
 import { prisma } from "@/lib/prisma";
 import { D, toDisplayString, toExactString, toNumber } from "./decimal";
 import { csvRow, toCsv } from "@/lib/csv";
+import { formatFactorSource } from "@/lib/format";
 import {
   analyseContributions,
   sensitivityAnalysis,
@@ -211,7 +212,7 @@ export async function buildAssessmentReport(assessmentId: string): Promise<Asses
     if (existing) existing.count += 1;
     else
       factorSourceMap.set(key, {
-        source: result.factorSource,
+        source: formatFactorSource(result.factorSource),
         version: result.factorVersion,
         count: 1,
         isPlaceholder: result.isPlaceholderFactor,
@@ -517,7 +518,7 @@ export async function buildCalculationRegisterCsv(assessmentId: string): Promise
     r.emissionFactorId ?? r.factorSelectionMode,
     toExactString(r.factorValue),
     r.factorUnit,
-    r.factorSource,
+    formatFactorSource(r.factorSource),
     r.factorVersion,
     r.factorBoundary,
     r.factorGeography ?? "",
