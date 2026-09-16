@@ -3,6 +3,14 @@ $ErrorActionPreference = 'Stop'
 Set-Location (Resolve-Path (Join-Path $PSScriptRoot '../..'))
 if (-not (Test-Path '.env.board-demo') -or -not (Test-Path '.next/BUILD_ID')) { throw 'Configure the guarded demo and run pnpm build first.' }
 $node = (Get-Command node -ErrorAction Stop).Source
+# `--env-file` does NOT override a variable that is already set, so an ambient
+# production DATABASE_URL in the launching shell would win over
+# .env.board-demo for every child below. Clear them here — the children
+# inherit this process's environment, so the demo file then supplies the only
+# values they see. See scripts/board-demo/db-target-guard.ts.
+foreach ($v in 'DATABASE_URL','DIRECT_URL','DATABASE_URL_UNPOOLED','DIRECT_DATABASE_URL') {
+  if (Test-Path "env:$v") { Remove-Item "env:$v" }
+}
 # Keep a board session from losing database connections to Windows idle sleep.
 # This request lasts only for this launcher process; it does not change power settings.
 Add-Type @'
@@ -12,8 +20,9 @@ public static class BoardDemoPower {
 }
 '@
 [BoardDemoPower]::SetThreadExecutionState([uint32]2147483651) | Out-Null
-# Verifies identity, READY state, source bytes and replay before exposing a port.
-& $node --env-file=.env.board-demo --import tsx scripts/board-demo/run.ts --check
+# Verifies the configured target, then identity, READY state, source bytes and
+# replay before exposing a port.
+& $node --import tsx scripts/board-demo/with-demo-env.ts $node --env-file=.env.board-demo --import tsx scripts/board-demo/run.ts --check
 if ($LASTEXITCODE -ne 0) { throw 'Demo verification failed; no server or tunnel started.' }
 $logDir = Join-Path (Get-Location) 'artifacts/board-runtime'
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
