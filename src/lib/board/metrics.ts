@@ -1,3 +1,4 @@
+import { formatPercentChange, formatTonnesCO2e } from "../format";
 import type { CarbonMetric, Comparison, Coverage } from "./contracts";
 
 export function assertCoverage(c: Coverage): void {
@@ -20,12 +21,12 @@ export function compareCarbon(current: CarbonMetric, previous: CarbonMetric): Co
   const differenceKg = current.kgCO2e! - previous.kgCO2e;
   return { percent: differenceKg / previous.kgCO2e * 100, differenceKg, reason: null };
 }
+/** Board figures are fixed-precision so a column of sites stays readable. */
 export function formatTonnes(kg: number | null, digits = 0): string {
-  if (kg === null || !Number.isFinite(kg)) return "Not available";
-  return new Intl.NumberFormat("en-GB", { maximumFractionDigits: digits, minimumFractionDigits: digits }).format(kg / 1000);
+  return formatTonnesCO2e(kg, { digits });
 }
 export function formatPercent(value: number | null): string {
-  return value === null || !Number.isFinite(value) ? "Not comparable" : `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
+  return formatPercentChange(value);
 }
 export function coverageLabel(c: Coverage): string {
   assertCoverage(c);

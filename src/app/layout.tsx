@@ -10,7 +10,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Paragon ID UK — Carbon Reporting",
+  title: "Carbon Ledger — Environmental intelligence",
   description: "Scope 1, Scope 2 and Scope 3 GHG data entry, calculation and reporting for Paragon ID UK.",
 };
 

@@ -431,3 +431,118 @@ describe("reviewed exact-match credential allowlist (tests/checkpoint-a/postgres
     expect(JSON.stringify(finding)).not.toContain(secretValue);
   });
 });
+
+// Checkpoint B remediation: four later real-Postgres test files reuse the
+// identical "not-a-login-hash" fixed literal reviewed above, in their own
+// synthetic membership fixtures.
+describe.each([
+  "tests/board-product/checkpoint-b-lca-scenarios.test.ts",
+  "tests/board-product/checkpoint-b-management-pack.test.ts",
+  "tests/board-product/checkpoint-b-overview.test.ts",
+])("reviewed exact-match credential allowlist (%s)", (relPath) => {
+  const passwordHashMatch = join("passwordHash", ': "not-a-login-hash"');
+
+  it("allows the reviewed synthetic test-user fixture in its file", () => {
+    expect(scanContentForSecrets(passwordHashMatch, relPath)).toBeNull();
+  });
+
+  it("still fails a different/new credential-like value added to the same file", () => {
+    const fixture = `passwordHash: "${join("a-real-look", "ing-secret-value")}"`;
+    expect(scanContentForSecrets(fixture, relPath)).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    const finding = scanContentForSecrets(passwordHashMatch, "tests/board-product/other.test.ts");
+    expect(finding).not.toBeNull();
+  });
+});
+
+// Checkpoint B remediation: bd08-board1-seed.test.ts sets
+// BOARD_DEMO_PROVISIONING_TOKEN to its own randomUUID()-derived local
+// variable — the matched text is the variable reference, never a literal.
+describe("reviewed exact-match credential allowlist (tests/board-product/bd08-board1-seed.test.ts)", () => {
+  const seedTestPath = join("tests/board-product/", "bd08-board1-seed.test.ts");
+  const tokenVarMatch = join("BOARD_DEMO_PROVISIONING_TOKEN", " = provisioningToken");
+
+  it("allows the reviewed variable-reference assignment in its file", () => {
+    expect(scanContentForSecrets(tokenVarMatch, seedTestPath)).toBeNull();
+  });
+
+  it("still fails a literal token value assigned in the same file", () => {
+    const fixture = join("BOARD_DEMO_PROVISIONING_TOKEN", ' = "', "a-real-look", 'ing-secret-value"');
+    expect(scanContentForSecrets(fixture, seedTestPath)).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    const finding = scanContentForSecrets(tokenVarMatch, "tests/board-product/other.test.ts");
+    expect(finding).not.toBeNull();
+  });
+
+  it("never echoes the matched text for a case it still flags", () => {
+    const secretValue = join("a-real-look", "ing-secret-value");
+    const finding = scanContentForSecrets(`BOARD_DEMO_PROVISIONING_TOKEN = "${secretValue}"`, seedTestPath);
+    expect(JSON.stringify(finding)).not.toContain(secretValue);
+  });
+});
+
+// Checkpoint B remediation: checkpoint-b-seed-guard.test.ts's negative-case
+// fixture for Fix 4 — a deliberately-wrong token value, self-documenting as
+// a mismatch fixture, never a real credential.
+describe("reviewed exact-match credential allowlist (tests/board-product/checkpoint-b-seed-guard.test.ts)", () => {
+  const seedGuardTestPath = join("tests/board-product/", "checkpoint-b-seed-guard.test.ts");
+  const mismatchTokenMatch = join("BOARD_DEMO_PROVISIONING_TOKEN", ' = "a-completely-different-token"');
+
+  it("allows the reviewed mismatch-fixture token in its file", () => {
+    expect(scanContentForSecrets(mismatchTokenMatch, seedGuardTestPath)).toBeNull();
+  });
+
+  it("still fails a different/new credential-like value added to the same file", () => {
+    const fixture = join("BOARD_DEMO_PROVISIONING_TOKEN", ' = "', "a-real-look", 'ing-secret-value"');
+    expect(scanContentForSecrets(fixture, seedGuardTestPath)).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    const finding = scanContentForSecrets(mismatchTokenMatch, "tests/board-product/other.test.ts");
+    expect(finding).not.toBeNull();
+  });
+});
+
+// Second Checkpoint B corrective handoff: checkpoint-b-obligation-review.test.ts
+// reuses the same already-reviewed "not-a-login-hash" fixture literal.
+describe("reviewed exact-match credential allowlist (tests/board-product/checkpoint-b-obligation-review.test.ts)", () => {
+  const obligationReviewTestPath = join("tests/board-product/", "checkpoint-b-obligation-review.test.ts");
+  const passwordHashMatch = join("passwordHash", ': "not-a-login-hash"');
+
+  it("allows the reviewed passwordHash fixture in its file", () => {
+    expect(scanContentForSecrets(passwordHashMatch, obligationReviewTestPath)).toBeNull();
+  });
+
+  it("still fails a different/new credential-like value added to the same file", () => {
+    const fixture = join("passwordHash", ': "', "a-real-look", 'ing-secret-value"');
+    expect(scanContentForSecrets(fixture, obligationReviewTestPath)).not.toBeNull();
+  });
+});
+
+// Second Checkpoint B corrective handoff §4: live-seed-port.ts's persona
+// password variables — never a hardcoded value, always read from an
+// operator-supplied file or generated fresh in memory.
+describe("reviewed exact-match credential allowlist (scripts/board-demo/live-seed-port.ts)", () => {
+  const liveSeedPortPath = join("scripts/board-demo/", "live-seed-port.ts");
+  const suppliedPasswordMatch = join("suppliedPassword ", "= personaCredentials");
+  const plaintextPasswordMatch = join("plaintextPassword ", "= suppliedPassword");
+
+  it("allows the reviewed suppliedPassword/plaintextPassword variable assignments in this file", () => {
+    expect(scanContentForSecrets(suppliedPasswordMatch, liveSeedPortPath)).toBeNull();
+    expect(scanContentForSecrets(plaintextPasswordMatch, liveSeedPortPath)).toBeNull();
+  });
+
+  it("still fails a different/new credential-like value added to the same file", () => {
+    const fixture = join("plaintextPassword", ' = "', "a-real-look", 'ing-secret-value"');
+    expect(scanContentForSecrets(fixture, liveSeedPortPath)).not.toBeNull();
+  });
+
+  it("does not allow the same matched text in a different, non-reviewed file", () => {
+    const finding = scanContentForSecrets(suppliedPasswordMatch, "scripts/board-demo/other.ts");
+    expect(finding).not.toBeNull();
+  });
+});

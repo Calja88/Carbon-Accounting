@@ -1,4 +1,5 @@
 import { CHART_INK, RANKED_BAR_COLOR, formatKgPrecise } from "./palette";
+import { KG_CO2E } from "@/lib/format";
 import { ChartEmptyState } from "./chart-parts";
 
 export interface ContributionBar {
@@ -22,7 +23,7 @@ export function ContributionBarChart({
   bars,
   emptyMessage = "Nothing to show for this breakdown yet.",
   maxBars,
-  unitLabel = "kgCO2e",
+  unitLabel = KG_CO2E,
 }: {
   bars: ContributionBar[];
   emptyMessage?: string;

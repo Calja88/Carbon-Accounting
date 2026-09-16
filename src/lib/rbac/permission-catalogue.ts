@@ -9,22 +9,25 @@
  * competence/incident access are marked sensitive.
  */
 
-export interface PermissionCatalogueEntry {
-  code: string;
+export interface PermissionCatalogueEntry<C extends string = string> {
+  code: C;
   domain: string;
   description: string;
   isSensitive: boolean;
 }
 
-function entry(
-  code: string,
+function entry<C extends string>(
+  code: C,
   description: string,
   isSensitive = false,
-): PermissionCatalogueEntry {
+): PermissionCatalogueEntry<C> {
   return { code, domain: code.split(".")[0], description, isSensitive };
 }
 
-export const PERMISSION_CATALOGUE: PermissionCatalogueEntry[] = [
+// No explicit `PermissionCatalogueEntry[]` annotation here — that would
+// widen every entry's `code` to plain `string` and collapse `PermissionCode`
+// below into `string` instead of a literal union of the real codes.
+export const PERMISSION_CATALOGUE = [
   // --- Organisation administration ---
   entry("organisation.view", "View organisation profile and settings"),
   entry("organisation.settings.manage", "Change organisation settings"),
@@ -119,7 +122,9 @@ export const PERMISSION_CODES = PERMISSION_CATALOGUE.map((p) => p.code);
 /** Stable union of every catalogue code — the type customer-facing permission checks are keyed on. */
 export type PermissionCode = (typeof PERMISSION_CATALOGUE)[number]["code"];
 
-const codeSet = new Set(PERMISSION_CODES);
+// Widened to Set<string> deliberately — this function's whole job is to
+// check whether an arbitrary, not-yet-validated string is a known code.
+const codeSet = new Set<string>(PERMISSION_CODES);
 
 export function isKnownPermissionCode(code: string): boolean {
   return codeSet.has(code);

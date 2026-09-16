@@ -183,7 +183,14 @@ export default async function InventoryPage({
                       ? `${item.supplierPcf.supplier.name} PCF`
                       : item.factorSelectionMode === "MANUAL"
                         ? `${item.manualFactorValue?.toString() ?? "?"} kgCO2e/${item.manualFactorUnit ?? item.unit}`
-                        : null;
+                        // A freight or end-of-life line holds no factor of its
+                        // own: each leg or route is priced separately, so
+                        // "no factor assigned" would be wrong here.
+                        : item._count.transportLegs > 0
+                          ? `Priced per freight leg (${item._count.transportLegs})`
+                          : item._count.endOfLifeRoutes > 0
+                            ? `Priced per end-of-life route (${item._count.endOfLifeRoutes})`
+                            : null;
                   const isPlaceholder = item.emissionFactor?.factorSet.isPlaceholder ?? false;
 
                   return (

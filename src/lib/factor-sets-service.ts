@@ -117,7 +117,7 @@ export async function commitFactorImport(context: OrganisationContext, input: Co
     return set;
   });
 
-  const backfill = await recalculatePendingEntries();
+  const backfill = await recalculatePendingEntries(context.organisationId);
 
   return { factorSet, backfill };
 }

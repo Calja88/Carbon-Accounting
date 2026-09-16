@@ -61,6 +61,13 @@ function toJsonInput(value: Record<string, unknown>): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
+async function lockEditableReview(tx: Prisma.TransactionClient, ctx: ReturnType<typeof toTenantRepositoryContext>, reviewId: string) {
+  await tx.$queryRaw`SELECT "id" FROM "ManagementReview" WHERE "id" = ${reviewId} AND "organisationId" = ${ctx.organisationId} FOR UPDATE`;
+  const review = await tx.managementReview.findFirst({ where: tenantWhere(ctx, { id: reviewId }) });
+  if (!review) throw new TenantOwnershipError();
+  if (review.status !== "PLANNED" && review.status !== "INPUT_COLLECTION") throw new ManagementReviewError("Issued review inputs cannot be changed.");
+}
+
 async function validateActiveMembership(context: OrganisationContext, membershipId: string) {
   const membership = await prisma.organisationMembership.findFirst({
     where: { id: membershipId, organisationId: context.organisationId, status: "ACTIVE" },
@@ -251,6 +258,7 @@ export async function addManagementReviewAttendee(
   if (!person) throw new TenantOwnershipError();
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await lockEditableReview(tx, txCtx, review.id);
     const existing = await tx.managementReviewAttendee.findFirst({
       where: tenantWhere(txCtx, { reviewId: review.id, personId: person.id }),
     });
@@ -288,6 +296,7 @@ export async function removeManagementReviewAttendee(context: OrganisationContex
   if (!attendee) throw new TenantOwnershipError();
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await lockEditableReview(tx, txCtx, attendee.reviewId);
     await tx.managementReviewAttendee.delete({
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: attendee.id } },
     });
@@ -345,6 +354,7 @@ export async function linkManagementReviewInput(
   }
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await lockEditableReview(tx, txCtx, review.id);
     const link = await tx.managementReviewInputLink.upsert({
       where: {
         organisationId_reviewId_inputDefinitionKey_sourceRecordId: {
@@ -396,6 +406,7 @@ export async function removeManagementReviewInputLink(context: OrganisationConte
   if (!link) throw new TenantOwnershipError();
 
   return runInTenantTransaction(ctx, prisma, async (tx, txCtx) => {
+    await lockEditableReview(tx, txCtx, link.reviewId);
     await tx.managementReviewInputLink.delete({
       where: { organisationId_id: { organisationId: txCtx.organisationId, id: link.id } },
     });

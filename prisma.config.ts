@@ -49,7 +49,42 @@ export function deriveDirectUrl(url: string): string {
   }
 }
 
+/**
+ * Migrations must never reach a database nobody meant to name.
+ *
+ * A shell can carry an ambient DATABASE_URL/DIRECT_URL — this repository has
+ * been bitten twice: once by T81/T83 tests writing into a hosted database, and
+ * once by `prisma migrate status` resolving to production because an inline
+ * `DATABASE_URL=` was empty while an ambient DIRECT_URL was not. Both are the
+ * same shape: a *partial* configuration, where the variable the operator
+ * thought they set is not the one the schema engine actually used.
+ *
+ * So refuse the partial cases and let the fully-specified ones through:
+ *   - neither set — fine, `prisma generate` never connects;
+ *   - DATABASE_URL alone — fine, the direct URL is derived from it;
+ *   - a direct override with no DATABASE_URL — refused.
+ *
+ * A direct override naming a different host than DATABASE_URL is deliberately
+ * still allowed: that is this repository's documented escape hatch for a
+ * separate migration endpoint, and narrowing it here would break it.
+ *
+ * Never echo either value; the message names variables, never their contents.
+ */
+export function assertConsistentMigrationTarget(env: Record<string, string | undefined>): void {
+  const pooled = env.DATABASE_URL?.trim() ?? "";
+  const overrideName = (["DIRECT_URL", "DATABASE_URL_UNPOOLED", "DIRECT_DATABASE_URL"] as const)
+    .find((name) => (env[name] ?? "").trim());
+  if (!overrideName) return;
+  if (!pooled) {
+    throw new Error(
+      `${overrideName} is set but DATABASE_URL is empty. Set both explicitly for the database you intend to migrate — ` +
+        "an ambient shell variable must never decide the target.",
+    );
+  }
+}
+
 export function resolveDirectUrl(env: Record<string, string | undefined>): string {
+  assertConsistentMigrationTarget(env);
   return env.DIRECT_URL || env.DATABASE_URL_UNPOOLED || env.DIRECT_DATABASE_URL || deriveDirectUrl(env.DATABASE_URL ?? "");
 }
 

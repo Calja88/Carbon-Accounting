@@ -6,6 +6,7 @@ import { CLASSIFICATION_LABELS, DATA_TYPE_LABELS, FACTOR_BOUNDARY_LABELS, FACTOR
 import { formatKgPrecise } from "@/components/charts/palette";
 import { BackLink, FieldList, Notice, PageHeading, SectionCard } from "@/components/lca/ui";
 import type { ProvenanceStep } from "@/lib/lca/engine/types";
+import { formatFactorSource } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -88,7 +89,7 @@ export default async function ResultProvenancePage({
           <FieldList
             items={[
               { label: "Value", value: `${result.factorValue.toString()} kgCO2e per ${result.factorUnit}` },
-              { label: "Source", value: result.factorSource },
+              { label: "Source", value: formatFactorSource(result.factorSource) },
               { label: "Version", value: result.factorVersion },
               { label: "What it covers", value: FACTOR_BOUNDARY_LABELS[result.factorBoundary] },
               { label: "Geography", value: result.factorGeography },

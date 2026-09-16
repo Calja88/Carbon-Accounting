@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, Factory, Upload, Zap, ShoppingBag } from "lucide-react";
+import { ArrowLeft, Factory, Lock, Upload, Zap, ShoppingBag } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getSiteContractStatus, getSiteQuantityStatus } from "@/lib/entry-status";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,6 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { requireOrganisationContext, OrganisationAccessError } from "@/lib/organisation/session";
 import { requireSiteInScope } from "@/lib/repositories/carbon-repository";
 import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
+import { hasPermission } from "@/lib/rbac/authorize";
+import { getReportingPeriod } from "@/lib/carbon/reporting-period-service";
+import { formatMonthLabel } from "@/lib/carbon/reporting-period-view";
 
 const STATUS_BADGE: Record<string, { label: string; tone: "success" | "warning" | "neutral" | "danger" }> = {
   submitted: { label: "Submitted", tone: "success" },
@@ -52,6 +55,15 @@ export default async function SiteEntryPage({ params }: { params: Promise<{ site
     getSiteContractStatus(context, siteId),
   ]);
 
+  // The month the entry forms default to. Saying up front that it is closed
+  // beats letting somebody fill a form the server is bound to refuse — the
+  // refusal itself still comes from the barrier, not from this check.
+  const now = new Date();
+  const currentMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const period = hasPermission(context, "carbon.view")
+    ? await getReportingPeriod(context, siteId, currentMonth)
+    : null;
+
   const bySection = statuses.reduce<Record<string, typeof statuses>>((acc, s) => {
     (acc[s.dataPoint.scope] ??= []).push(s);
     return acc;
@@ -67,6 +79,25 @@ export default async function SiteEntryPage({ params }: { params: Promise<{ site
         <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{site.name}</h1>
         <p className="text-sm text-slate-500">{entity.name}</p>
       </div>
+
+      {period?.state === "CLOSED" && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4" role="status">
+          <div className="flex items-center gap-2">
+            <Lock className="h-4 w-4 text-amber-800" />
+            <h2 className="text-sm font-semibold text-amber-900">
+              {formatMonthLabel(currentMonth)} is closed — read only
+            </h2>
+          </div>
+          <p className="mt-1 text-sm text-amber-800">
+            Activity data for {formatMonthLabel(currentMonth)} at this site can be viewed but not added, changed or
+            deleted. Other months are unaffected. Reopen the period on{" "}
+            <Link href={`/data?siteId=${siteId}`} className="font-medium underline">
+              Data Collection
+            </Link>{" "}
+            before making accounting changes to this month.
+          </p>
+        </div>
+      )}
 
       {Object.entries(bySection).map(([scope, items]) => {
         const section = SECTIONS[scope] ?? { label: scope, icon: Factory };

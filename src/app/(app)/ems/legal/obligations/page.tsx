@@ -6,10 +6,12 @@ import { tenantWhere } from "@/lib/repositories/tenant-scope";
 import { toTenantRepositoryContext } from "@/lib/repositories/ems-repository";
 import { listComplianceObligations } from "@/lib/ems/legal/obligation-service";
 import { ObligationWorkspace } from "./obligation-forms";
+import { getObligationChainRecord } from "@/lib/board/live-records";
+import { RecordWorkspace } from "@/components/board/records";
 
 export const dynamic = "force-dynamic";
 
-export default async function ComplianceObligationsPage() {
+export default async function ComplianceObligationsPage({ searchParams }: { searchParams: Promise<{ record?: string }> }) {
   let context;
   try {
     context = await requireOrganisationContext();
@@ -18,6 +20,9 @@ export default async function ComplianceObligationsPage() {
     if (error instanceof OrganisationAccessError || error instanceof PermissionDeniedError) redirect("/");
     throw error;
   }
+
+  const { record: selectedVersionId } = await searchParams;
+  const selectedRecord = selectedVersionId ? await getObligationChainRecord(context, selectedVersionId).catch(() => null) : null;
 
   const ctx = toTenantRepositoryContext(context);
 
@@ -59,6 +64,9 @@ export default async function ComplianceObligationsPage() {
           recorded in the audit trail.
         </p>
       </div>
+      {selectedVersionId && (selectedRecord ? <RecordWorkspace model={selectedRecord} /> : (
+        <p className="text-sm text-slate-500">That obligation record is not available in your current scope.</p>
+      ))}
 
       <ObligationWorkspace
         applicableAssessments={applicableAssessments.map((assessment) => ({

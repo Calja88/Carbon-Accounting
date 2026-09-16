@@ -51,6 +51,13 @@ vi.mock("@/lib/prisma", () => {
           }),
         },
         activityEntry: prismaClient.activityEntry,
+        // Carbon Phase 4-i: the calculation path now writes a hash-chained
+        // audit row in the same transaction. Stubbed so this suite keeps
+        // testing idempotency/atomicity only — assertions are unchanged.
+        auditEvent: {
+          findFirst: vi.fn(async () => null),
+          create: vi.fn(async () => ({ id: `audit-${tables.nextId++}` })),
+        },
       };
       return fn(tx);
     }),

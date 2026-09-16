@@ -1,0 +1,8 @@
+publisher,dataset_year,release,category_path,activity,factor_category,unit,factor_value,factor_unit,gas,factor_kind,region,notes
+Synthetic fixture (not official),2026,sample-v1,Fuels / Gaseous,Natural gas,stationary_combustion_natural_gas,kWh,0.18290,kgCO2e/kWh,co2e,direct,UK,Accepted: maps cleanly
+Synthetic fixture (not official),2026,sample-v1,Fuels / Liquid,Gas oil,stationary_combustion_diesel,litres,2.75776,kgCO2e/litres,co2e,direct,UK,Accepted: maps cleanly
+Synthetic fixture (not official),2026,sample-v1,Fuels / Gaseous,Natural gas,stationary_combustion_natural_gas,kWh,0.18290,kgCO2e/kWh,co2e,direct,UK,Duplicate of row 2
+Synthetic fixture (not official),2026,sample-v1,Refrigerants,R-410A,,kg,2255.50000,kgCO2e/kg,co2e,direct,,Warning: needs a reviewed mapping and a region
+Synthetic fixture (not official),2026,sample-v1,Fuels / Gaseous,Natural gas,,therms,5.31000,kgCO2e/therm,co2e,direct,UK,Rejected: unit not recognised
+Synthetic fixture (not official),2026,sample-v1,Fuels / Liquid,Marine gas oil,,litres,,kgCO2e/litres,co2e,direct,UK,Rejected: missing value is never treated as zero
+Synthetic fixture (not official),2026,sample-v1,Upstream fuels,Natural gas WTT,wtt_natural_gas,kWh,0.03400,kgCO2e/kWh,co2e,well-to-tank,UK,Accepted: WTT

@@ -11,10 +11,11 @@
  * the assessment does not cover as plainly as what it does.
  */
 
-import { LcaAssessmentStatus, LcaDataType } from "@prisma/client";
+import { LcaAssessmentStatus, LcaDataType, type LcaBoundary } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { D, toDisplayString, toExactString, toNumber } from "./decimal";
 import { csvRow, toCsv } from "@/lib/csv";
+import { formatFactorSource } from "@/lib/format";
 import {
   analyseContributions,
   sensitivityAnalysis,
@@ -211,7 +212,7 @@ export async function buildAssessmentReport(assessmentId: string): Promise<Asses
     if (existing) existing.count += 1;
     else
       factorSourceMap.set(key, {
-        source: result.factorSource,
+        source: formatFactorSource(result.factorSource),
         version: result.factorVersion,
         count: 1,
         isPlaceholder: result.isPlaceholderFactor,
@@ -277,6 +278,15 @@ export async function buildAssessmentReport(assessmentId: string): Promise<Asses
 // Narrative
 // ---------------------------------------------------------------------------
 
+/**
+ * The boundary as a bare descriptor — "cradle to gate", "custom" — because
+ * BOUNDARY_LABELS.CUSTOM is already "Custom boundary" and the report read
+ * "covers a custom boundary boundary".
+ */
+function boundaryDescriptor(boundary: LcaBoundary): string {
+  return BOUNDARY_LABELS[boundary].toLowerCase().replace(/ boundary$/, "");
+}
+
 function buildExecutiveSummary(args: {
   assessment: LoadedAssessment;
   methodology: MethodologyConfig;
@@ -305,7 +315,7 @@ function buildExecutiveSummary(args: {
   }
 
   parts.push(
-    `The product carbon footprint of ${assessment.productVersion.product.name} (${assessment.productVersion.versionLabel}) is ${toDisplayString(D(totals.headlinePerFunctionalUnitKgCo2e), 4)} kgCO2e per ${unitLabel}, where the ${unitLabel} is ${unitDescription}. The assessment covers a ${BOUNDARY_LABELS[assessment.boundary].toLowerCase()} boundary${assessment.periodStart && assessment.periodEnd ? `, using activity data for the period ${assessment.periodStart.toISOString().slice(0, 10)} to ${assessment.periodEnd.toISOString().slice(0, 10)}` : ""}.`,
+    `The product carbon footprint of ${assessment.productVersion.product.name} (${assessment.productVersion.versionLabel}) is ${toDisplayString(D(totals.headlinePerFunctionalUnitKgCo2e), 4)} kgCO2e per ${unitLabel}, where the ${unitLabel} is ${unitDescription}. The assessment covers a ${boundaryDescriptor(assessment.boundary)} boundary${assessment.periodStart && assessment.periodEnd ? `, using activity data for the period ${assessment.periodStart.toISOString().slice(0, 10)} to ${assessment.periodEnd.toISOString().slice(0, 10)}` : ""}.`,
   );
 
   parts.push(
@@ -313,7 +323,10 @@ function buildExecutiveSummary(args: {
   );
 
   if (contributions && contributions.byStage.length > 0) {
-    const top = contributions.byStage.slice(0, 3);
+    // byStage comes back in lifecycle order so the charts read left to right
+    // along the product's life; "the largest contributions" has to be sorted
+    // by size or the sentence names a 1% stage second.
+    const top = [...contributions.byStage].sort((a, b) => b.percent - a.percent).slice(0, 3);
     parts.push(
       `The largest contributions come from ${top
         .map((s) => `${s.label.toLowerCase()} (${s.percent.toFixed(1)}%)`)
@@ -401,7 +414,7 @@ function buildLimitations(args: {
 
   if (args.assessment.boundary !== "CRADLE_TO_GRAVE" && args.assessment.boundary !== "CRADLE_TO_CRADLE") {
     limitations.push(
-      `The boundary is ${BOUNDARY_LABELS[args.assessment.boundary].toLowerCase()}, so stages outside it are not represented in the result. Comparing this figure with a footprint drawn on a different boundary would be misleading.`,
+      `The boundary is ${boundaryDescriptor(args.assessment.boundary)}, so stages outside it are not represented in the result. Comparing this figure with a footprint drawn on a different boundary would be misleading.`,
     );
   }
   if (args.assessment.isDeclaredUnit) {
@@ -505,7 +518,7 @@ export async function buildCalculationRegisterCsv(assessmentId: string): Promise
     r.emissionFactorId ?? r.factorSelectionMode,
     toExactString(r.factorValue),
     r.factorUnit,
-    r.factorSource,
+    formatFactorSource(r.factorSource),
     r.factorVersion,
     r.factorBoundary,
     r.factorGeography ?? "",

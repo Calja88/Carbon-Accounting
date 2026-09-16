@@ -36,6 +36,7 @@ import {
   deleteInventoryItemAction,
   deleteTransportLegAction,
 } from "../actions";
+import { formatFactorSource } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -460,7 +461,7 @@ export default async function InventoryItemPage({ params }: { params: Promise<{ 
                 </Td>
                 <Td className="text-xs">
                   {result.factorValue.toString()} kgCO2e/{result.factorUnit}
-                  <span className="block text-slate-500">{result.factorSource}</span>
+                  <span className="block text-slate-500">{formatFactorSource(result.factorSource)}</span>
                 </Td>
                 <Td align="right">{formatKgPrecise(Number(result.allocatedKgCo2e))}</Td>
                 <Td align="right">{formatKgPrecise(Number(result.perFunctionalUnitKgCo2e))}</Td>

@@ -15,6 +15,7 @@ import { requireCarbonView } from "@/lib/rbac/carbon-access";
 
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { formatFactorSource } from "@/lib/format";
 import type { OrganisationContext } from "@/lib/organisation/context";
 import { toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
 import { tenantWhere } from "@/lib/repositories/tenant-scope";
@@ -187,7 +188,7 @@ export async function explainCalculation(
       id: calc.emissionFactorId,
       value: dec(calc.factorValueSnapshot),
       unit: calc.factorUnitSnapshot,
-      source: calc.factorSourceSnapshot,
+      source: formatFactorSource(calc.factorSourceSnapshot),
       vintage: calc.factorVintageSnapshot,
       category: calc.emissionFactor.category,
       subtypeKey: calc.emissionFactor.subtypeKey,

@@ -13,8 +13,9 @@
 
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { localDatabaseUrl } from "../../testing/local-database-url";
 
-const DB_URL = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+const DB_URL = localDatabaseUrl(); // hosted databases are skipped, never written to — see local-database-url.ts
 const runIfConfigured = DB_URL ? describe : describe.skip;
 
 runIfConfigured("T81 append-only/immutability triggers", () => {

@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable, FieldList, Notice, Td } from "@/components/lca/ui";
 import { PrintButton } from "../../../reports/print-button";
+import { formatFactorSource } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -650,7 +651,7 @@ export default async function AssessmentReportPage({ params }: { params: Promise
                 <Td className="text-xs">
                   {result.factorValue.toString()} kgCO2e/{result.factorUnit}
                   <span className="block text-slate-500">
-                    {result.factorSource} ({result.factorVersion})
+                    {formatFactorSource(result.factorSource)} ({result.factorVersion})
                   </span>
                 </Td>
                 <Td className="font-mono text-[11px]">{result.formula}</Td>

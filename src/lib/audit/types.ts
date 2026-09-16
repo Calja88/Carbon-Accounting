@@ -277,6 +277,37 @@ export const AUDIT_EVENT_TYPES = [
   "evidence_object.retention_previewed",
   "evidence_object.retention_executed",
   "organisation_export.generated",
+  // Carbon source-period obligation review (Checkpoint B corrective handoff §1).
+  "carbon_source_period_obligation.reviewed",
+  "carbon_source_period_obligation.excluded",
+  // Phase 2A emission source configuration — which sources a site reports.
+  "carbon_source_config.enabled",
+  "carbon_source_config.disabled",
+  "carbon_source_config.frequency_changed",
+  // Phase 2B-i carbon data-collection plan.
+  "carbon_collection_requirement.generated",
+  "carbon_collection_requirement.reviewed",
+  "carbon_collection_requirement.excluded",
+  "carbon_collection_requirement.reopened",
+  // Carbon Phase 4-i — the corporate carbon numeric path
+  // (Docs/CARBON_PHASE4_I_NUMERIC_AUDIT.md). Observational only: these
+  // events record what the existing calculation and reporting pipeline
+  // did, and never alter a figure.
+  "activity_entry.created",
+  "activity_entry.updated",
+  "activity_entry.status_changed",
+  // Phase 4-iii-b Activity Data Register: the only hard delete an activity
+  // record has. Permitted solely for entries carrying no calculation and no
+  // citation, so nothing downstream loses a reference; the event keeps the
+  // "before" state after the row itself is gone.
+  "activity_entry.deleted",
+  "calculation.created",
+  "calculation.awaiting_factor",
+  "calculation.backfilled",
+  "report_data.prepared",
+  "report_snapshot.issued",
+  "reporting_period.closed",
+  "reporting_period.opened",
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
@@ -284,6 +315,7 @@ export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
 export type AuditActorType = "USER" | "SYSTEM";
 
 export type AuditResourceType =
+  | "reporting_period"
   | "organisation"
   | "membership"
   | "role"
@@ -364,7 +396,13 @@ export type AuditResourceType =
   | "management_review_minute_revision"
   | "management_review_action_link"
   | "legal_hold"
-  | "organisation_export";
+  | "organisation_export"
+  | "carbon_source_period_obligation"
+  | "carbon_source_config"
+  | "carbon_collection_requirement"
+  | "activity_entry"
+  | "calculation"
+  | "report_snapshot";
 
 /**
  * Input to `recordAuditEvent`. Deliberately narrow: `before`/`after` accept

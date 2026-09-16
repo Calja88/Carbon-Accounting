@@ -2,9 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 import { prisma } from "@/lib/prisma";
-import { getLatestRun, resultsToAnalysisRows, runTotals } from "@/lib/lca/calculation-service";
-import { compareScenario } from "@/lib/lca/analysis";
-import { D } from "@/lib/lca/decimal";
+import { getLatestRun } from "@/lib/lca/calculation-service";
 import { canEditLcaData, getLcaContext } from "@/lib/lca/permissions";
 import { requireAssessmentInScope } from "@/lib/repositories/lca-repository";
 import { TenantOwnershipError } from "@/lib/repositories/tenant-scope";
@@ -14,6 +12,8 @@ import { ContributionBarChart } from "@/components/charts/contribution-bar-chart
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTable, EmptyState, Notice, PageHeading, SectionCard, Stat, StatusBadge, Td } from "@/components/lca/ui";
+import { LcaScenario } from "@/components/board/lca-scenario";
+import { getScenarioPageModel, listAuthorizedScenarioIds } from "@/lib/board/live-lca";
 import { CreateScenarioForm } from "./scenario-forms";
 import { recalculateScenarioAction } from "../../actions";
 
@@ -30,44 +30,28 @@ export default async function ScenariosPage({ params }: { params: Promise<{ id: 
     throw err;
   }
 
-  const [assessment, baselineRun, scenarios] = await Promise.all([
+  const [assessment, baselineRun, scenarioIds] = await Promise.all([
     prisma.lcaAssessment.findUnique({ where: { id } }),
     getLatestRun(id),
-    prisma.lcaAssessment.findMany({
-      where: { baselineAssessmentId: id },
-      include: { owner: true, _count: { select: { inventoryItems: true } } },
-      orderBy: { createdAt: "asc" },
-    }),
+    // Checkpoint B corrective handoff §3: authorised child-scenario ids
+    // only — never a raw baselineAssessmentId filter with no tenant/Entity
+    // access scoping.
+    listAuthorizedScenarioIds(context, id),
   ]);
   if (!assessment) notFound();
 
   const canEdit = canEditLcaData(context);
-  const baselineRows = baselineRun ? resultsToAnalysisRows(baselineRun.results) : [];
-  const baselineTotals = baselineRun ? runTotals(baselineRun) : null;
 
-  const comparisons = await Promise.all(
-    scenarios.map(async (scenario) => {
-      const run = await getLatestRun(scenario.id);
-      const rows = run ? resultsToAnalysisRows(run.results) : [];
-      const totals = run ? runTotals(run) : null;
-      return {
-        scenario,
-        run,
-        totals,
-        comparison:
-          baselineRun && run && baselineTotals && totals
-            ? compareScenario(
-                baselineRows,
-                rows,
-                D(baselineTotals.headlinePerFunctionalUnitKgCo2e),
-                D(totals.headlinePerFunctionalUnitKgCo2e),
-              )
-            : null,
-      };
-    }),
-  );
+  // Every scenario card's data — title, description, status, inventory
+  // count, comparison detail — comes from ONE authorised resolution
+  // (getScenarioPageModel) per scenario. A scenario the caller cannot
+  // fully resolve (denied, foreign, structurally invalid) yields `null`
+  // and is skipped entirely below — no raw record ever backs a card that
+  // authorization didn't clear.
+  const pageModels = await Promise.all(scenarioIds.map((scenarioId) => getScenarioPageModel(context, scenarioId)));
+  const comparisons = pageModels.filter((m): m is NonNullable<typeof m> => m !== null);
 
-  const suggestedReference = `${assessment.reference}-S${scenarios.length + 1}`;
+  const suggestedReference = `${assessment.reference}-S${scenarioIds.length + 1}`;
 
   return (
     <div className="space-y-6">
@@ -84,28 +68,28 @@ export default async function ScenariosPage({ params }: { params: Promise<{ id: 
         </Notice>
       )}
 
-      {scenarios.length === 0 ? (
+      {comparisons.length === 0 ? (
         <EmptyState
           title="No scenarios yet"
           description="Create one to test a change — a different material, a supplier with a lower footprint, a shorter freight route — without touching the assessment itself."
         />
       ) : (
-        comparisons.map(({ scenario, run, totals, comparison }) => (
+        comparisons.map(({ scenarioId, title, description, status, inventoryItemCount, hasRun, legacyComparison, board }) => (
           <SectionCard
-            key={scenario.id}
-            title={scenario.title}
-            description={scenario.scenarioDescription ?? "No description recorded."}
+            key={scenarioId}
+            title={title}
+            description={description ?? "No description recorded."}
             actions={
               <div className="flex items-center gap-2">
-                <StatusBadge status={scenario.status} />
-                <Link href={`/assessments/${scenario.id}`}>
+                <StatusBadge status={status} />
+                <Link href={`/assessments/${scenarioId}`}>
                   <Button size="sm" variant="secondary">
                     Open scenario
                   </Button>
                 </Link>
                 {canEdit && (
                   <form action={recalculateScenarioAction}>
-                    <input type="hidden" name="scenarioId" value={scenario.id} />
+                    <input type="hidden" name="scenarioId" value={scenarioId} />
                     <input type="hidden" name="baselineId" value={id} />
                     <Button type="submit" size="sm" variant="ghost">
                       <RefreshCw className="h-3.5 w-3.5" />
@@ -116,11 +100,21 @@ export default async function ScenariosPage({ params }: { params: Promise<{ id: 
               </div>
             }
           >
-            {!run ? (
+            <div className="mb-5">
+              <LcaScenario model={board} />
+            </div>
+            {!hasRun ? (
               <Notice tone="warning">This scenario has not been calculated yet.</Notice>
-            ) : !comparison ? (
+            ) : !baselineRun ? (
               <Notice tone="warning">The baseline has no calculated result to compare against.</Notice>
+            ) : !board.comparable ? (
+              <Notice tone="warning">{board.reason ?? "This scenario is not comparable to the baseline right now."}</Notice>
+            ) : !legacyComparison ? (
+              <Notice tone="warning">This scenario cannot be verified as comparable right now — the percentage and contribution breakdown are withheld.</Notice>
             ) : (
+              (() => {
+                const comparison = legacyComparison;
+                return (
               <>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <Stat label="Baseline" value={formatKgPrecise(comparison.baselinePerFunctionalUnit)} unit="kgCO2e / unit" />
@@ -217,11 +211,13 @@ export default async function ScenariosPage({ params }: { params: Promise<{ id: 
                 </div>
 
                 <p className="mt-4 text-xs text-slate-500">
-                  Scenario model total {formatKgPrecise(totals?.headlineModelKgCo2e ?? 0)} kgCO2e across{" "}
-                  {scenario._count.inventoryItems} inventory line(s).{" "}
+                  Scenario model total {formatKgPrecise(comparison.scenarioTotalKgCo2e)} kgCO2e across{" "}
+                  {inventoryItemCount} inventory line(s).{" "}
                   <Badge tone="info">Baseline data untouched</Badge>
                 </p>
               </>
+                );
+              })()
             )}
           </SectionCard>
         ))

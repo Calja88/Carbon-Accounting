@@ -7,8 +7,10 @@ import { AssistantPanel } from "@/components/ai/assistant-panel";
 import { ConnectedShell } from "@/components/board/connected-shell";
 import { ScopeBar } from "@/components/board/scope-bar";
 import { resolveBoardNav } from "@/lib/board/live-nav";
-import { isVerifiedDemoEnvironment } from "@/lib/board/live-environment";
-import { monthInputValue } from "@/lib/report-period";
+import { isVerifiedSyntheticOrganisation } from "@/lib/board/demo-identity";
+import { defaultScopePeriod } from "@/lib/board/live-overview";
+import { accessibleSiteFilter, toTenantRepositoryContext } from "@/lib/repositories/carbon-repository";
+import { tenantWhere } from "@/lib/repositories/tenant-scope";
 import { Providers } from "./providers";
 import { SignOutButton } from "./sign-out-button";
 
@@ -80,31 +82,40 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <SignOutButton />
   );
 
-  // BD04 ships the shell/scope bar before BD03's real carbon-period read
-  // adapter exists, and a shared layout never reliably receives a page's
-  // searchParams (INTEGRATION/LIVE_BINDINGS.md §1) — so the scope bar runs
-  // in its "operational" mode here (organisation identity only, no date/site
-  // form) rather than showing a stale or fabricated carbon period. The
-  // actual carbon period picker keeps living on `/carbon` itself, unchanged.
-  const scopeBar = (
-    <ScopeBar
-      organisationName={organisationName}
-      sites={[]}
-      from={monthInputValue(new Date())}
-      to={monthInputValue(new Date())}
-      action="/carbon"
-      periodMode="operational"
-    />
-  );
+  // Disclosure follows the connected manifest and exact fixture organisation.
+  const synthetic = organisation ? await isVerifiedSyntheticOrganisation(organisation.organisationId) : false;
 
-  // BD02: server-derived only, never a client toggle or a URL/branch-name
-  // guess. `null` here means no disposable demo database's own recorded
-  // identity is available to check against the environment manifest — true
-  // for every environment this branch has run in so far (BD02 could not
-  // provision one this session; see Docs/board-sprint/CONTINUITY.md). The
-  // banner is correctly off until a real guarded environment's identity can
-  // be read here.
-  const synthetic = isVerifiedDemoEnvironment(null);
+  // Phase 1B: the scope bar is the real carbon scope control and drives the
+  // one dashboard at `/`. A layout still never receives a page's
+  // searchParams, so it supplies only the option list and the default period
+  // — the ScopeBar itself reads the live selection from the URL, and
+  // defaultScopePeriod is the same function the dashboard resolves its own
+  // empty-URL default with, so the two cannot disagree.
+  const scopeSites = organisation
+    ? await prisma.site.findMany({
+        where: tenantWhere(toTenantRepositoryContext(organisation), { isActive: true, ...accessibleSiteFilter(organisation) }),
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      })
+    : [];
+  const defaultPeriod = organisation
+    ? await defaultScopePeriod(organisation.organisationId, synthetic)
+    : { from: "", to: "" };
+  const scopeBar = organisation ? (
+    // useSearchParams needs a Suspense boundary in the App Router.
+    <Suspense fallback={<div className="bd-scopebar"><div className="bd-organisation"><strong>{organisationName}</strong></div></div>}>
+      <ScopeBar
+        organisationName={organisationName}
+        sites={scopeSites}
+        from={defaultPeriod.from}
+        to={defaultPeriod.to}
+        action="/"
+        periodMode="carbon"
+      />
+    </Suspense>
+  ) : (
+    <ScopeBar organisationName={organisationName} sites={[]} from="" to="" action="/" periodMode="operational" />
+  );
 
   return (
     <Providers>

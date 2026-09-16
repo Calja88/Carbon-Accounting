@@ -8,6 +8,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { prisma } from "@/lib/prisma";
 import { PermissionDeniedError } from "@/lib/rbac/authorize";
 import { ORG_A, ORG_B, makeOrganisationContext } from "@/lib/__tests__/tenant-fixtures";
 
@@ -66,6 +67,17 @@ function simpleModel(rows: Row[], prefix: string, defaults: Row = {}) {
       Object.assign(row, data);
       return row;
     }),
+    findUniqueOrThrow: vi.fn(async ({ where }: FindArgs) => {
+      const key = (where as Row & { organisationId_id?: Row })?.organisationId_id ?? where ?? {};
+      const row = find(rows, key as Row);
+      if (!row) throw new Error(`${prefix} not found`);
+      return row;
+    }),
+    updateMany: vi.fn(async ({ where, data }: { where: Row; data: Row }) => {
+      const matching = rows.filter((row) => matches(row, where));
+      for (const row of matching) Object.assign(row, data);
+      return { count: matching.length };
+    }),
     upsert: vi.fn(async ({ where, create, update }: { where: Row; create: Row; update: Row }) => {
       const key = Object.values(where)[0] as Row;
       const existing = find(rows, key);
@@ -89,6 +101,7 @@ vi.mock("@/lib/prisma", () => {
   const managementReviewAiNarrative = simpleModel(tables.aiNarratives, "narrative", { status: "PENDING_REVIEW" });
 
   const prismaClient = {
+    $queryRaw: vi.fn(async () => []),
     managementReview,
     managementReviewAttendee,
     managementReviewInputLink,
@@ -120,6 +133,11 @@ const orgContextB = makeOrganisationContext(ORG_B, {
 });
 const orgContextANoManage = makeOrganisationContext(ORG_A, {
   permissions: new Set(["ems.view"]) as unknown as ReturnType<typeof makeOrganisationContext>["permissions"],
+});
+
+it("reports a raw PostgreSQL serialization failure as a pack conflict", async () => {
+  vi.mocked(prisma.$queryRaw).mockRejectedValueOnce(Object.assign(new Error("serialization failure"), { code: "P2010", meta: { code: "40001" } }));
+  await expect(generateManagementReviewPack(orgContextA, "review", "actor")).rejects.toBeInstanceOf(ManagementReviewPackError);
 });
 
 function resetTables() {
@@ -247,6 +265,16 @@ describe("issueManagementReviewPack", () => {
     await generateManagementReviewPack(orgContextA, "review-A1", "user-1");
     await issueManagementReviewPack(orgContextA, "review-A1", "user-1");
     await expect(generateManagementReviewPack(orgContextA, "review-A1", "user-1")).rejects.toThrow(ManagementReviewPackError);
+  });
+
+  it("re-proves DRAFT status inside the transaction (CAS), not just before it — a racer that flips status first wins, the other gets a conflict", async () => {
+    await generateManagementReviewPack(orgContextA, "review-A1", "user-1");
+    // Simulate a concurrent issuer having already committed between this
+    // call's pre-transaction read and its transactional write.
+    tables.packs[0].status = "ISSUED";
+    await expect(issueManagementReviewPack(orgContextA, "review-A1", "user-1")).rejects.toThrow(ManagementReviewPackError);
+    // No duplicate input snapshots were created by the losing racer.
+    expect(tables.inputSnapshots).toHaveLength(0);
   });
 
   it("a later input-link change never rewrites an already-issued pack's frozen snapshot", async () => {

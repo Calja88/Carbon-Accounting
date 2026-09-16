@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DataTable, EmptyState, Notice, PageHeading, PlaceholderFactorWarning, SectionCard, Stat, Td } from "@/components/lca/ui";
 import { LifecycleFlow, type FlowStage } from "@/components/lca/lifecycle-flow";
+import { formatFactorSource } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -203,7 +204,10 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
           />
         </SectionCard>
 
-        <SectionCard title="By material" description="Material and packaging lines, grouped by the material they are made of.">
+        <SectionCard
+          title="By material"
+          description="Material and packaging lines, grouped by the material they are made of. Shares are of the whole footprint, so they add up to less than 100% — energy, freight and waste are not materials."
+        >
           <ContributionBarChart
             bars={contributions.byMaterial.map((c) => ({
               key: c.key,
@@ -219,7 +223,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
 
         <SectionCard
           title="By supplier"
-          description="Where a supplier is recorded. Lines with no supplier are grouped together rather than hidden."
+          description="Where a supplier is recorded. Lines with no supplier are grouped together rather than hidden, so these shares cover the whole footprint."
         >
           <ContributionBarChart
             bars={contributions.bySupplier.map((c) => ({
@@ -359,7 +363,7 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
               </Td>
               <Td className="text-xs">
                 {result.factorValue.toString()} kgCO2e/{result.factorUnit}
-                <span className="block text-slate-500">{result.factorSource}</span>
+                <span className="block text-slate-500">{formatFactorSource(result.factorSource)}</span>
               </Td>
               <Td align="right">{formatKgPrecise(Number(result.allocatedKgCo2e))}</Td>
               <Td align="right">{formatKgPrecise(Number(result.perFunctionalUnitKgCo2e))}</Td>
