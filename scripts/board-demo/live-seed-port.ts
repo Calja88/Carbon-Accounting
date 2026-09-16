@@ -769,7 +769,7 @@ export class LiveSeedPort implements DemoSeedPort {
     // check), so it can never shadow another tenant's real factor set.
     const officialSet = await prisma.emissionFactorSet.create({
       data: {
-        name: "BOARD-1 demo factors — not for reporting",
+        name: "Demo factors — not for reporting",
         publisher: "Synthetic demonstration fixture",
         sourceType: "OFFICIAL_DEFRA_DESNZ",
         vintageYear: 2026,
@@ -886,8 +886,8 @@ export class LiveSeedPort implements DemoSeedPort {
           // generic label across every data point regardless of scope,
           // which would collapse Scope 3 "screened category" coverage into
           // a single, meaningless bucket (Checkpoint B fix 2).
-          category: def.factorCategory.replace(/_/g, " "),
-          dataPointName: `BOARD-1 ${sourceKey}`,
+          category: def.factorCategory.replace(/^board1_/, "").replace(/_/g, " "),
+          dataPointName: `Demo ${sourceKey}`,
           // Shown as the heading of the entry form and on /sources, so it has
           // to read as an instruction rather than as fixture scaffolding.
           promptTemplate: `Enter the ${def.factorCategory.replace(/^board1_/, "").replace(/_/g, " ")} recorded for this site and period.`,
@@ -1215,7 +1215,7 @@ export class LiveSeedPort implements DemoSeedPort {
     const northWorks = this.sites.find((s) => s.key === "north-works")!;
 
     const programme = await prisma.emsProgramme.create({
-      data: { organisationId: owner.organisationId, name: "BOARD-1 demonstration programme", standardsProfile: "ISO14001", standardsProfileVersion: "2015", ownerMembershipId: owner.membershipId },
+      data: { organisationId: owner.organisationId, name: "Demo programme", standardsProfile: "ISO14001", standardsProfileVersion: "2015", ownerMembershipId: owner.membershipId },
     });
     const process = await prisma.activityProcess.create({
       data: { organisationId: owner.organisationId, programmeId: programme.id, name: "Paragon ID — Hull materials handling", siteId: northWorks.id },
@@ -1323,7 +1323,7 @@ export class LiveSeedPort implements DemoSeedPort {
     await approveComplianceObligationVersion(reviewer, obligationVersion.id, { actorUserId: reviewer.userId });
 
     const evaluationProgramme = await createComplianceEvaluationProgramme(owner, {
-      name: "BOARD-1 compliance evaluation programme",
+      name: "Demo compliance evaluation programme",
       periodStart: new Date("2026-01-01"),
       periodEnd: new Date("2026-12-31"),
       leadMembershipId: owner.membershipId,
@@ -1354,7 +1354,7 @@ export class LiveSeedPort implements DemoSeedPort {
     // lifecycle through the domain state machines — never a directly
     // stamped REPORT_ISSUED/CONFIRMED row.
     const auditProgramme = await createAuditProgramme(owner, {
-      name: "BOARD-1 internal audit programme",
+      name: "Demo internal audit programme",
       riskBasis: "Synthetic, risk-based selection covering the containment-inspection control.",
       periodStart: new Date("2026-01-01"),
       periodEnd: new Date("2026-12-31"),
@@ -1367,7 +1367,7 @@ export class LiveSeedPort implements DemoSeedPort {
     const audit = await createEmsAudit(owner, {
       programmeId: auditProgramme.id,
       type: "INTERNAL",
-      title: "BOARD-1 internal audit",
+      title: "Demo internal audit",
       criteriaSummary: "Containment inspection control operating as procedure revision 2 requires.",
       leadMembershipId: reviewer.membershipId,
       scheduledStart: new Date("2026-08-01"),
@@ -1593,7 +1593,7 @@ export class LiveSeedPort implements DemoSeedPort {
         mode: LcaFactorSelectionMode.MANUAL,
         manualFactorValue: "1",
         manualFactorUnit: "kg",
-        manualFactorSource: "BOARD-1 demonstration — not for reporting",
+        manualFactorSource: "Demo — not for reporting",
         manualFactorVersion: "2026",
         actorUserId: context.userId,
       });
@@ -1627,7 +1627,7 @@ export class LiveSeedPort implements DemoSeedPort {
     const owner = this.owner;
 
     const template = await prisma.managementReviewAgendaTemplate.create({
-      data: { organisationId: owner.organisationId, templateKey: "board1-agenda", name: "BOARD-1 demonstration agenda" },
+      data: { organisationId: owner.organisationId, templateKey: "board1-agenda", name: "Demo agenda" },
     });
     const version = await prisma.managementReviewAgendaTemplateVersion.create({
       data: { organisationId: owner.organisationId, templateId: template.id, version: 1, name: "v1", status: "APPROVED", preparedByUserId: owner.userId },
